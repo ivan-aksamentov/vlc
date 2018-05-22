@@ -512,7 +512,12 @@ static void *Thread( void *obj )
 
     p_sys->p_app = &app;
 
-
+    // Apply dark theme
+    QFile f(":css/dark.css");
+    f.open(QFile::ReadOnly | QFile::Text);
+    QString styleSheet = QLatin1String(f.readAll());
+    app.setStyleSheet(styleSheet);
+    
     /* All the settings are in the .conf/.ini style */
 #ifdef _WIN32
     char *cConfigDir = config_GetUserDir( VLC_CONFIG_DIR );
