@@ -64,7 +64,7 @@ typedef struct
 {
     date_t          next_output_pts; /**< output calculated PTS */
     picture_t       *p_previous_pic;
-    int             i_output_frame_interval;
+    mtime_t         i_output_frame_interval;
 } filter_sys_t;
 
 static picture_t *Filter( filter_t *p_filter, picture_t *p_picture)
@@ -86,7 +86,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_picture)
     /* First time we get some valid timestamp, we'll take it as base for output
         later on we retake new timestamp if it has jumped too much */
     if( unlikely( ( date_Get( &p_sys->next_output_pts ) == VLC_TS_INVALID ) ||
-                   ( p_picture->date > ( date_Get( &p_sys->next_output_pts ) + (mtime_t)p_sys->i_output_frame_interval ) )
+                   ( p_picture->date > ( date_Get( &p_sys->next_output_pts ) + p_sys->i_output_frame_interval ) )
                 ) )
     {
         msg_Dbg( p_filter, "Resetting timestamps" );
@@ -100,7 +100,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_picture)
 
     /* Check if we can skip input as better should follow */
     if( p_picture->date <
-        ( date_Get( &p_sys->next_output_pts ) - (mtime_t)p_sys->i_output_frame_interval ) )
+        ( date_Get( &p_sys->next_output_pts ) - p_sys->i_output_frame_interval ) )
     {
         if( p_sys->p_previous_pic )
             picture_Release( p_sys->p_previous_pic );
@@ -169,7 +169,6 @@ static int Open( vlc_object_t *p_this)
     date_Init( &p_sys->next_output_pts,
                p_filter->fmt_out.video.i_frame_rate, p_filter->fmt_out.video.i_frame_rate_base );
 
-    date_Set( &p_sys->next_output_pts, VLC_TS_INVALID );
     p_sys->p_previous_pic = NULL;
 
     p_filter->pf_video_filter = Filter;

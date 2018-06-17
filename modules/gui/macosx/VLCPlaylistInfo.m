@@ -131,7 +131,7 @@
     if ([self.window isKeyWindow])
         [self.window orderOut:sender];
     else {
-        [self.window setLevel: [[[VLCMain sharedInstance] voutController] currentStatusWindowLevel]];
+        [self.window setLevel: [[[VLCMain sharedInstance] voutProvider] currentStatusWindowLevel]];
         [self.window makeKeyAndOrderFront:sender];
     }
 }
@@ -276,14 +276,14 @@ FREENULL( psz_##foo );
                                              @"%6.0f kb/s", (float)(p_item->p_stats->f_demux_bitrate)*8000]];
 
     /* Video */
-    [_videoDecodedTextField setIntValue: p_item->p_stats->i_decoded_video];
-    [_displayedTextField setIntValue: p_item->p_stats->i_displayed_pictures];
-    [_lostFramesTextField setIntValue: p_item->p_stats->i_lost_pictures];
+    [_videoDecodedTextField setIntegerValue: p_item->p_stats->i_decoded_video];
+    [_displayedTextField setIntegerValue: p_item->p_stats->i_displayed_pictures];
+    [_lostFramesTextField setIntegerValue: p_item->p_stats->i_lost_pictures];
 
     /* Audio */
-    [_audioDecodedTextField setIntValue: p_item->p_stats->i_decoded_audio];
-    [_playedAudioBuffersTextField setIntValue: p_item->p_stats->i_played_abuffers];
-    [_lostAudioBuffersTextField setIntValue: p_item->p_stats->i_lost_abuffers];
+    [_audioDecodedTextField setIntegerValue: p_item->p_stats->i_decoded_audio];
+    [_playedAudioBuffersTextField setIntegerValue: p_item->p_stats->i_played_abuffers];
+    [_lostAudioBuffersTextField setIntegerValue: p_item->p_stats->i_lost_abuffers];
 }
 
 - (void)updateStreamsList
@@ -297,6 +297,7 @@ FREENULL( psz_##foo );
 
         for (int i = 0; i < p_item->i_categories; i++) {
             info_category_t *cat = p_item->pp_categories[i];
+            info_t *info;
 
             VLCInfoTreeItem *subItem = [[VLCInfoTreeItem alloc] init];
             subItem.name = toNSStr(cat->psz_name);
@@ -304,10 +305,10 @@ FREENULL( psz_##foo );
             // Build list of codec details
             NSMutableArray *infos = [NSMutableArray array];
 
-            for (int j = 0; j < cat->i_infos; j++) {
+            info_foreach(info, &cat->infos) {
                 VLCInfoTreeItem *infoItem = [[VLCInfoTreeItem alloc] init];
-                infoItem.name = toNSStr(cat->pp_infos[j]->psz_name);
-                infoItem.value = toNSStr(cat->pp_infos[j]->psz_value);
+                infoItem.name = toNSStr(info->psz_name);
+                infoItem.value = toNSStr(info->psz_value);
                 [infos addObject:infoItem];
             }
 
@@ -364,8 +365,8 @@ FREENULL( psz_##foo );
 
 - (IBAction)downloadCoverArt:(id)sender
 {
-    playlist_t *p_playlist = pl_Get(getIntf());
-    if (p_item) libvlc_ArtRequest(getIntf()->obj.libvlc, p_item, META_REQUEST_OPTION_NONE);
+    if (p_item)
+        libvlc_ArtRequest(getIntf()->obj.libvlc, p_item, META_REQUEST_OPTION_NONE);
 }
 
 @end

@@ -486,7 +486,6 @@ var_Create
 var_DelCallback
 var_DelListCallback
 var_Destroy
-var_FreeList
 var_Get
 var_GetAndSet
 var_GetChecked
@@ -611,7 +610,6 @@ vlc_interrupt_unregister
 vlc_killed
 vlc_join
 vlc_list_children
-vlc_list_release
 vlc_meta_AddExtra
 vlc_meta_CopyExtraNames
 vlc_meta_Delete

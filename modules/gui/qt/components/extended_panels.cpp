@@ -651,9 +651,12 @@ void ExtV4l2::Refresh( void )
     }
     if( p_obj )
     {
-        vlc_value_t val, text;
+        vlc_value_t *val;
+        char **text;
+        size_t count;
+
         int i_ret = var_Change( p_obj, "controls", VLC_VAR_GETCHOICES,
-                                &val, &text );
+                                &count, &val, &text );
         if( i_ret < 0 )
         {
             msg_Err( p_intf, "Oops, v4l2 object doesn't have a 'controls' variable." );
@@ -667,18 +670,21 @@ void ExtV4l2::Refresh( void )
         QVBoxLayout *layout = new QVBoxLayout( box );
         box->setLayout( layout );
 
-        for( int i = 0; i < val.p_list->i_count; i++ )
+        for( size_t i = 0; i < count; i++ )
         {
-            vlc_value_t vartext;
-            const char *psz_var = text.p_list->p_values[i].psz_string;
+            char *vartext, *psz_var = text[i];
+            QString name;
 
-            if( var_Change( p_obj, psz_var, VLC_VAR_GETTEXT, &vartext, NULL ) )
-                continue;
+            if( !var_Change( p_obj, psz_var, VLC_VAR_GETTEXT, &vartext ) )
+            {
+                name = qtr(vartext);
+                free(vartext);
+            }
+            else
+                name = qfu(psz_var);
 
-            QString name = qtr( vartext.psz_string );
-            free( vartext.psz_string );
             msg_Dbg( p_intf, "v4l2 control \"%" PRIx64 "\": %s (%s)",
-                     val.p_list->p_values[i].i_int, psz_var, qtu( name ) );
+                     val[i].i_int, psz_var, qtu( name ) );
 
             int i_type = var_Type( p_obj, psz_var );
             switch( i_type & VLC_VAR_TYPE )
@@ -694,18 +700,22 @@ void ExtV4l2::Refresh( void )
                         QComboBox *combobox = new QComboBox( box );
                         combobox->setObjectName( qfu( psz_var ) );
 
-                        vlc_value_t val2, text2;
+                        vlc_value_t *val2;
+                        char **text2;
+                        size_t count2;
+
                         var_Change( p_obj, psz_var, VLC_VAR_GETCHOICES,
-                                    &val2, &text2 );
-                        for( int j = 0; j < val2.p_list->i_count; j++ )
+                                    &count2, &val2, &text2 );
+                        for( size_t j = 0; j < count2; j++ )
                         {
-                            combobox->addItem(
-                                       text2.p_list->p_values[j].psz_string,
-                                       qlonglong( val2.p_list->p_values[j].i_int) );
-                            if( i_val == val2.p_list->p_values[j].i_int )
+                            combobox->addItem( text2[j],
+                                       qlonglong( val2[j].i_int) );
+                            if( i_val == val2[j].i_int )
                                 combobox->setCurrentIndex( j );
+                            free(text2[j]);
                         }
-                        var_FreeList( &val2, &text2 );
+                        free(text2);
+                        free(val2);
 
                         CONNECT( combobox, currentIndexChanged( int ), this,
                                  ValueChange( int ) );
@@ -717,18 +727,16 @@ void ExtV4l2::Refresh( void )
                         slider->setObjectName( qfu( psz_var ) );
                         slider->setOrientation( Qt::Horizontal );
                         vlc_value_t val2;
-                        var_Change( p_obj, psz_var, VLC_VAR_GETMIN,
-                                    &val2, NULL );
+                        var_Change( p_obj, psz_var, VLC_VAR_GETMIN, &val2 );
                         if( val2.i_int < INT_MIN )
                             val2.i_int = INT_MIN; /* FIXME */
                         slider->setMinimum( val2.i_int );
-                        var_Change( p_obj, psz_var, VLC_VAR_GETMAX,
-                                    &val2, NULL );
+                        var_Change( p_obj, psz_var, VLC_VAR_GETMAX, &val2 );
                         if( val2.i_int > INT_MAX )
                             val2.i_int = INT_MAX; /* FIXME */
                         slider->setMaximum( val2.i_int );
                         if( !var_Change( p_obj, psz_var, VLC_VAR_GETSTEP,
-                                         &val2, NULL ) )
+                                         &val2 ) )
                             slider->setSingleStep( val2.i_int );
                         slider->setValue( i_val );
                         CONNECT( slider, valueChanged( int ), this,
@@ -771,8 +779,10 @@ void ExtV4l2::Refresh( void )
                     msg_Warn( p_intf, "Unhandled var type for %s", psz_var );
                     break;
             }
+            free(psz_var);
         }
-        var_FreeList( &val, &text );
+        free(text);
+        free(val);
         vlc_object_release( p_obj );
     }
     else

@@ -328,7 +328,6 @@ static inline void vlc_fourcc_to_char( vlc_fourcc_t fcc, char *psz_fourcc )
  *****************************************************************************/
 
 /* Internal types */
-typedef struct vlc_list_t vlc_list_t;
 typedef struct vlc_object_t vlc_object_t;
 typedef struct libvlc_int_t libvlc_int_t;
 typedef struct date_t date_t;
@@ -453,20 +452,9 @@ typedef union
     float           f_float;
     char *          psz_string;
     void *          p_address;
-    vlc_list_t *    p_list;
     struct { int32_t x; int32_t y; } coords;
 
 } vlc_value_t;
-
-/**
- * VLC list structure
- */
-struct vlc_list_t
-{
-    int          i_type;
-    int          i_count;
-    vlc_value_t *p_values;
-};
 
 /*****************************************************************************
  * Error values (shouldn't be exposed)
@@ -1126,8 +1114,9 @@ static inline void *vlc_alloc(size_t count, size_t size)
 /*****************************************************************************
  * I18n stuff
  *****************************************************************************/
-VLC_API char *vlc_gettext( const char *msgid ) VLC_FORMAT_ARG(1);
-VLC_API char *vlc_ngettext( const char *s, const char *p, unsigned long n ) VLC_FORMAT_ARG(1) VLC_FORMAT_ARG(2);
+VLC_API const char *vlc_gettext(const char *msgid) VLC_FORMAT_ARG(1);
+VLC_API const char *vlc_ngettext(const char *s, const char *p, unsigned long n)
+VLC_FORMAT_ARG(1) VLC_FORMAT_ARG(2);
 
 #define vlc_pgettext( ctx, id ) \
         vlc_pgettext_aux( ctx "\004" id, id )

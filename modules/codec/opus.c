@@ -154,14 +154,13 @@ static const uint32_t pi_3channels_in[] =
  * Local prototypes
  ****************************************************************************/
 
-static block_t *Packetize ( decoder_t *, block_t ** );
 static int  DecodeAudio ( decoder_t *, block_t * );
 static void Flush( decoder_t * );
 static int  ProcessHeaders( decoder_t * );
 static int  ProcessInitialHeader ( decoder_t *, ogg_packet * );
 static block_t *ProcessPacket( decoder_t *, ogg_packet *, block_t * );
 
-static block_t *DecodePacket( decoder_t *, ogg_packet *, int, int );
+static block_t *DecodePacket( decoder_t *, ogg_packet *, int, mtime_t );
 
 /*****************************************************************************
  * OpenDecoder: probe the decoder and return score
@@ -179,13 +178,12 @@ static int OpenDecoder( vlc_object_t *p_this )
         return VLC_ENOMEM;
     p_sys->b_has_headers = false;
 
-    date_Set( &p_sys->end_date, 0 );
+    date_Set( &p_sys->end_date, VLC_TS_INVALID );
 
     /* Set output properties */
     p_dec->fmt_out.i_codec = VLC_CODEC_FL32;
 
     p_dec->pf_decode    = DecodeAudio;
-    p_dec->pf_packetize = Packetize;
     p_dec->pf_flush     = Flush;
 
     p_sys->p_st = NULL;
@@ -235,16 +233,6 @@ static int DecodeAudio( decoder_t *p_dec, block_t *p_block )
     if( p_block != NULL )
         decoder_QueueAudio( p_dec, p_block );
     return VLCDEC_SUCCESS;
-}
-
-static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
-{
-    if( pp_block == NULL ) /* No Drain */
-        return NULL;
-    block_t *p_block = *pp_block; *pp_block = NULL;
-    if( p_block == NULL )
-        return NULL;
-    return DecodeBlock( p_dec, p_block );
 }
 
 /*****************************************************************************
@@ -315,6 +303,7 @@ static int ProcessHeaders( decoder_t *p_dec )
 static int ProcessInitialHeader( decoder_t *p_dec, ogg_packet *p_oggpacket )
 {
     int err;
+    unsigned char* p_stream_map;
     unsigned char new_stream_map[8];
     decoder_sys_t *p_sys = p_dec->p_sys;
 
@@ -328,36 +317,61 @@ static int ProcessInitialHeader( decoder_t *p_dec, ogg_packet *p_oggpacket )
     msg_Dbg( p_dec, "Opus audio with %d channels", p_header->channels);
 
     if((p_header->channels>2 && p_header->channel_mapping==0) ||
-        p_header->channels>8 ||
-        p_header->channel_mapping>1)
+        (p_header->channels>8 && p_header->channel_mapping==1) ||
+        (p_header->channels>18 && p_header->channel_mapping==2) ||
+        p_header->channel_mapping>2)
     {
         msg_Err( p_dec, "Unsupported channel mapping" );
         return VLC_EGENERIC;
     }
+    if (p_header->channel_mapping == 2)
+    {
+        int i_order = floor(sqrt(p_header->channels));
+        int i_nondiegetic = p_header->channels - i_order * i_order;
+        if (i_nondiegetic != 0 && i_nondiegetic != 2)
+        {
+            msg_Err( p_dec, "Unsupported ambisonic channel mapping" );
+            return VLC_EGENERIC;
+        }
+    }
 
     /* Setup the format */
-    p_dec->fmt_out.audio.i_physical_channels =
-        pi_channels_maps[p_header->channels];
     p_dec->fmt_out.audio.i_channels = p_header->channels;
     p_dec->fmt_out.audio.i_rate = 48000;
 
-    if( p_header->channels>2 )
+    if (p_header->channel_mapping <= 1)
     {
-        static const uint32_t *pi_ch[6] = { pi_3channels_in, pi_4channels_in,
-                                            pi_5channels_in, pi_6channels_in,
-                                            pi_7channels_in, pi_8channels_in };
-        uint8_t pi_chan_table[AOUT_CHAN_MAX];
+        p_dec->fmt_out.audio.i_physical_channels =
+            pi_channels_maps[p_header->channels];
 
-        aout_CheckChannelReorder( pi_ch[p_header->channels-3], NULL,
-                                  p_dec->fmt_out.audio.i_physical_channels,
-                                  pi_chan_table );
-        for(int i=0;i<p_header->channels;i++)
-            new_stream_map[pi_chan_table[i]]=p_header->stream_map[i];
+        if( p_header->channels>2 )
+        {
+            static const uint32_t *pi_ch[6] = { pi_3channels_in, pi_4channels_in,
+                                                pi_5channels_in, pi_6channels_in,
+                                                pi_7channels_in, pi_8channels_in };
+            uint8_t pi_chan_table[AOUT_CHAN_MAX];
+
+            aout_CheckChannelReorder( pi_ch[p_header->channels-3], NULL,
+                                      p_dec->fmt_out.audio.i_physical_channels,
+                                      pi_chan_table );
+            for(int i=0;i<p_header->channels;i++)
+                new_stream_map[pi_chan_table[i]]=p_header->stream_map[i];
+
+            p_stream_map = new_stream_map;
+        }
+        else
+            p_stream_map = p_header->stream_map;
     }
+    else //p_header->channel_mapping == 2
+    {
+        p_dec->fmt_out.audio.channel_type = AUDIO_CHANNEL_TYPE_AMBISONICS;
+        p_stream_map = p_header->stream_map;
+    }
+
     /* Opus decoder init */
     p_sys->p_st = opus_multistream_decoder_create( 48000, p_header->channels,
                     p_header->nb_streams, p_header->nb_coupled,
-                    p_header->channels>2?new_stream_map:p_header->stream_map,
+                    p_stream_map,
                     &err );
     if( !p_sys->p_st || err!=OPUS_OK )
     {
@@ -386,7 +400,7 @@ static void Flush( decoder_t *p_dec )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
 
-    date_Set( &p_sys->end_date, 0 );
+    date_Set( &p_sys->end_date, VLC_TS_INVALID );
 }
 
 /*****************************************************************************
@@ -421,9 +435,13 @@ static block_t *ProcessPacket( decoder_t *p_dec, ogg_packet *p_oggpacket,
         return NULL;
     }
 
+    /* trimming info */
+    mtime_t i_max_duration = (p_block->i_flags & BLOCK_FLAG_END_OF_SEQUENCE) ?
+                             p_block->i_length : 0;
+
     block_t *p_aout_buffer = DecodePacket( p_dec, p_oggpacket,
                                            p_block->i_nb_samples,
-                                           (int)p_block->i_length );
+                                           i_max_duration );
 
     block_Release( p_block );
     return p_aout_buffer;
@@ -433,7 +451,7 @@ static block_t *ProcessPacket( decoder_t *p_dec, ogg_packet *p_oggpacket,
  * DecodePacket: decodes a Opus packet.
  *****************************************************************************/
 static block_t *DecodePacket( decoder_t *p_dec, ogg_packet *p_oggpacket,
-                              int i_nb_samples, int i_end_trim )
+                              int i_nb_samples, mtime_t i_duration )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
 
@@ -461,6 +479,14 @@ static block_t *DecodePacket( decoder_t *p_dec, ogg_packet *p_oggpacket,
 
     spp=opus_multistream_decode_float(p_sys->p_st, p_oggpacket->packet,
          p_oggpacket->bytes, (float *)p_aout_buffer->p_buffer, spp, 0);
+
+    int i_end_trim = 0;
+    if( i_duration > 0 && spp > 0 &&
+        i_duration < i_nb_samples * CLOCK_FREQ / 48000 )
+    {
+        i_end_trim = spp - VLC_CLIP(i_duration * 48000 / CLOCK_FREQ, 0, spp);
+    }
+
     if( spp < 0 || i_nb_samples <= 0 || i_end_trim >= i_nb_samples)
     {
         block_Release(p_aout_buffer);

@@ -44,8 +44,6 @@
 #include "display.h"
 #include "window.h"
 
-#include "event.h"
-
 static void SplitterManage(vout_display_t *vd);
 static void SplitterClose(vout_display_t *vd);
 
@@ -372,14 +370,16 @@ typedef struct {
     atomic_bool reset_pictures;
 } vout_display_owner_sys_t;
 
+static const struct filter_video_callbacks vout_display_filter_cbs = {
+    .buffer_new = VideoBufferNew,
+};
+
 static int VoutDisplayCreateRender(vout_display_t *vd)
 {
     vout_display_owner_sys_t *osys = vd->owner.sys;
     filter_owner_t owner = {
+        .video = &vout_display_filter_cbs,
         .sys = vd,
-        .video = {
-            .buffer_new = VideoBufferNew,
-        },
     };
 
     osys->filters = filter_chain_NewVideo(vd, false, &owner);
@@ -542,8 +542,8 @@ static void VoutDisplayEvent(vout_display_t *vd, int event, va_list args)
         break;
 
     case VOUT_DISPLAY_EVENT_VIEWPOINT_MOVED:
-        vout_SendEventViewpointMoved(osys->vout,
-                                     va_arg(args, const vlc_viewpoint_t *));
+        var_SetAddress(osys->vout, "viewpoint-moved",
+                       (void *)va_arg(args, const vlc_viewpoint_t *));
         break;
 
 #if defined(_WIN32) || defined(__OS2__)
@@ -1020,8 +1020,8 @@ static vout_display_t *DisplayNew(vout_thread_t *vout,
         osys->sar.den != source->i_sar_den)
         osys->ch_sar = true;
 
-    vout_SendEventViewpointChangeable(osys->vout,
-        p_display->fmt.projection_mode != PROJECTION_MODE_RECTANGULAR);
+    var_SetBool(osys->vout, "viewpoint-changeable",
+                p_display->fmt.projection_mode != PROJECTION_MODE_RECTANGULAR);
 
     return p_display;
 error:
@@ -1295,6 +1295,7 @@ vout_display_t *vout_NewSplitter(vout_thread_t *vout,
  * TODO move out
  *****************************************************************************/
 #include "vout_internal.h"
+
 void vout_SendDisplayEventMouse(vout_thread_t *vout, const vlc_mouse_t *m)
 {
     vlc_mouse_t tmp1, tmp2;
@@ -1312,18 +1313,22 @@ void vout_SendDisplayEventMouse(vout_thread_t *vout, const vlc_mouse_t *m)
     }
     vlc_mutex_unlock( &vout->p->filter.lock );
 
-    if (vlc_mouse_HasMoved(&vout->p->mouse, m)) {
-        vout_SendEventMouseMoved(vout, m->i_x, m->i_y);
-    }
+    if (vlc_mouse_HasMoved(&vout->p->mouse, m))
+        var_SetCoords(vout, "mouse-moved", m->i_x, m->i_y);
+
     if (vlc_mouse_HasButton(&vout->p->mouse, m)) {
-        for (unsigned button = 0; button < MOUSE_BUTTON_MAX; button++) {
-            if (vlc_mouse_HasPressed(&vout->p->mouse, m, button))
-                vout_SendEventMousePressed(vout, button);
-            else if (vlc_mouse_HasReleased(&vout->p->mouse, m, button))
-                vout_SendEventMouseReleased(vout, button);
+        var_SetInteger(vout, "mouse-button-down", m->i_pressed);
+
+        if (vlc_mouse_HasPressed(&vout->p->mouse, m, MOUSE_BUTTON_LEFT)) {
+            /* FIXME? */
+            int x, y;
+
+            var_GetCoords(vout, "mouse-moved", &x, &y);
+            var_SetCoords(vout, "mouse-clicked", x, y);
         }
     }
+
     if (m->b_double_click)
-        vout_SendEventMouseDoubleClick(vout);
+        var_ToggleBool(vout, "fullscreen");
     vout->p->mouse = *m;
 }

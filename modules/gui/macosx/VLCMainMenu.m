@@ -105,7 +105,6 @@
 #endif
 
     NSString* keyString;
-    vlc_value_t val;
     VLCStringUtility *stringUtility = [VLCStringUtility sharedInstance];
     char *key;
 
@@ -276,7 +275,7 @@
     var_Create(p_playlist, "freetype-outline-thickness", VLC_VAR_INTEGER | VLC_VAR_DOINHERIT);
 
     [self setupMenu: _subtitle_textcolorMenu withIntList:"freetype-color" andSelector:@selector(switchSubtitleOption:)];
-    [_subtitle_bgopacity_sld setIntValue: config_GetInt("freetype-background-opacity")];
+    [_subtitle_bgopacity_sld setIntegerValue: config_GetInt("freetype-background-opacity")];
     [self setupMenu: _subtitle_bgcolorMenu withIntList:"freetype-background-color" andSelector:@selector(switchSubtitleOption:)];
     [self setupMenu: _subtitle_outlinethicknessMenu withIntList:"freetype-outline-thickness" andSelector:@selector(switchSubtitleOption:)];
 
@@ -683,7 +682,7 @@
     config_PutInt("macosx-show-playback-buttons", b_value);
 
     [(VLCMainWindowControlsBar *)[[[VLCMain sharedInstance] mainWindow] controlsBar] toggleJumpButtons];
-    [[[VLCMain sharedInstance] voutController] updateWindowsUsingBlock:^(VLCVideoWindowCommon *window) {
+    [[[VLCMain sharedInstance] voutProvider] updateWindowsUsingBlock:^(VLCVideoWindowCommon *window) {
         [[window controlsBar] toggleForwardBackwardMode: b_value];
     }];
 
@@ -837,9 +836,9 @@
     if (p_input) {
         /* we can obviously only do that if an input is available */
         int64_t length = var_GetInteger(p_input, "length");
-        [_timeSelectionPanel setMaxValue:(length / CLOCK_FREQ)];
+        [_timeSelectionPanel setMaxValue:(int)(length / CLOCK_FREQ)];
         int64_t pos = var_GetInteger(p_input, "time");
-        [_timeSelectionPanel setJumpTimeValue: (pos / CLOCK_FREQ)];
+        [_timeSelectionPanel setJumpTimeValue: (int)(pos / CLOCK_FREQ)];
         [_timeSelectionPanel runModalForWindow:[NSApp mainWindow]
                              completionHandler:^(NSInteger returnCode, int64_t returnTime) {
 
@@ -995,7 +994,6 @@
 
 - (void)togglePostProcessing:(id)sender
 {
-    char *psz_name = "postproc";
     NSInteger count = [_postprocessingMenu numberOfItems];
     for (NSUInteger x = 0; x < count; x++)
         [[_postprocessingMenu itemAtIndex:x] setState:NSOffState];
@@ -1058,14 +1056,14 @@
 
 - (void)switchSubtitleSize:(id)sender
 {
-    int intValue = [sender tag];
+    NSInteger intValue = [sender tag];
     var_SetInteger(pl_Get(getIntf()), "sub-text-scale", intValue);
 }
 
 
 - (void)switchSubtitleOption:(id)sender
 {
-    int intValue = [sender tag];
+    NSInteger intValue = [sender tag];
     NSString *representedObject = [sender representedObject];
 
     var_SetInteger(pl_Get(getIntf()), [representedObject UTF8String], intValue);
@@ -1153,7 +1151,10 @@
     NSSavePanel *savePanel = [NSSavePanel savePanel];
     NSString * name = [NSString stringWithFormat: @"%@", _NS("Untitled")];
 
-    [NSBundle loadNibNamed:@"PlaylistAccessoryView" owner:self];
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [[NSBundle mainBundle] loadNibNamed:@"PlaylistAccessoryView" owner:self topLevelObjects:nil];
+    });
 
     [_playlistSaveAccessoryText setStringValue: _NS("File Format:")];
     [[_playlistSaveAccessoryPopup itemAtIndex:0] setTitle: _NS("Extended M3U")];
@@ -1241,7 +1242,7 @@
 
 - (IBAction)showPreferences:(id)sender
 {
-    NSInteger i_level = [[[VLCMain sharedInstance] voutController] currentStatusWindowLevel];
+    NSInteger i_level = [[[VLCMain sharedInstance] voutProvider] currentStatusWindowLevel];
     [[[VLCMain sharedInstance] simplePreferences] showSimplePrefsWithLevel:i_level];
 }
 
@@ -1382,7 +1383,8 @@
                      var:(const char *)psz_variable
                 selector:(SEL)pf_callback
 {
-    vlc_value_t val, text;
+    vlc_value_t val;
+    char *text;
     int i_type = var_Type(p_object, psz_variable);
 
     switch(i_type & VLC_VAR_TYPE) {
@@ -1398,8 +1400,8 @@
     }
 
     /* Get the descriptive name of the variable */
-    var_Change(p_object, psz_variable, VLC_VAR_GETTEXT, &text, NULL);
-    [mi setTitle: _NS(text.psz_string ? text.psz_string : psz_variable)];
+    var_Change(p_object, psz_variable, VLC_VAR_GETTEXT, &text);
+    [mi setTitle: _NS(text ? text : psz_variable)];
 
     if (i_type & VLC_VAR_HASCHOICE) {
         NSMenu *menu = [mi submenu];
@@ -1407,7 +1409,7 @@
         [self setupVarMenu:menu forMenuItem:mi target:p_object
                        var:psz_variable selector:pf_callback];
 
-        free(text.psz_string);
+        free(text);
         return;
     }
 
@@ -1435,7 +1437,7 @@
     }
 
     if ((i_type & VLC_VAR_TYPE) == VLC_VAR_STRING) free(val.psz_string);
-    free(text.psz_string);
+    free(text);
 }
 
 
@@ -1445,8 +1447,11 @@
                  var:(const char *)psz_variable
             selector:(SEL)pf_callback
 {
-    vlc_value_t val, val_list, text_list;
-    int i_type, i;
+    vlc_value_t val;
+    vlc_value_t *val_list;
+    char **text_list;
+    size_t count, i;
+    int i_type;
 
     /* remove previous items */
     [menu removeAllItems];
@@ -1470,8 +1475,10 @@
 
     /* Make sure we want to display the variable */
     if (i_type & VLC_VAR_HASCHOICE) {
-        var_Change(p_object, psz_variable, VLC_VAR_CHOICESCOUNT, &val, NULL);
-        if (val.i_int == 0 || val.i_int == 1)
+        size_t count;
+
+        var_Change(p_object, psz_variable, VLC_VAR_CHOICESCOUNT, &count);
+        if (count <= 1)
             return;
     }
     else
@@ -1493,15 +1500,15 @@
     }
 
     if (var_Change(p_object, psz_variable, VLC_VAR_GETCHOICES,
-                   &val_list, &text_list) < 0) {
+                   &count, &val_list, &text_list) < 0) {
         if ((i_type & VLC_VAR_TYPE) == VLC_VAR_STRING) free(val.psz_string);
         return;
     }
 
     /* make (un)sensitive */
-    [parent setEnabled: (val_list.p_list->i_count > 1)];
+    [parent setEnabled: (count > 1)];
 
-    for (i = 0; i < val_list.p_list->i_count; i++) {
+    for (i = 0; i < count; i++) {
         NSMenuItem *lmi;
         NSString *title = @"";
         VLCAutoGeneratedMenuContent *data;
@@ -1509,32 +1516,36 @@
         switch(i_type & VLC_VAR_TYPE) {
             case VLC_VAR_STRING:
 
-                title = _NS(text_list.p_list->p_values[i].psz_string ? text_list.p_list->p_values[i].psz_string : val_list.p_list->p_values[i].psz_string);
+                title = _NS(text_list[i] ? text_list[i] : val_list[i].psz_string);
 
                 lmi = [menu addItemWithTitle: title action: pf_callback keyEquivalent: @""];
                 data = [[VLCAutoGeneratedMenuContent alloc] initWithVariableName: psz_variable ofObject: p_object
-                                                                          andValue: val_list.p_list->p_values[i] ofType: i_type];
+                                                                          andValue: val_list[i] ofType: i_type];
                 [lmi setRepresentedObject:data];
                 [lmi setTarget: self];
 
-                if (!strcmp(val.psz_string, val_list.p_list->p_values[i].psz_string) && !(i_type & VLC_VAR_ISCOMMAND))
+                if (!strcmp(val.psz_string, val_list[i].psz_string) && !(i_type & VLC_VAR_ISCOMMAND))
                     [lmi setState: TRUE ];
 
+                free(text_list[i]);
+                free(val_list[i].psz_string);
                 break;
 
             case VLC_VAR_INTEGER:
 
-                title = text_list.p_list->p_values[i].psz_string ?
-                _NS(text_list.p_list->p_values[i].psz_string) : [NSString stringWithFormat: @"%"PRId64, val_list.p_list->p_values[i].i_int];
+                title = text_list[i] ?
+                _NS(text_list[i]) : [NSString stringWithFormat: @"%"PRId64, val_list[i].i_int];
 
                 lmi = [menu addItemWithTitle: title action: pf_callback keyEquivalent: @""];
                 data = [[VLCAutoGeneratedMenuContent alloc] initWithVariableName: psz_variable ofObject: p_object
-                                                                          andValue: val_list.p_list->p_values[i] ofType: i_type];
+                                                                          andValue: val_list[i] ofType: i_type];
                 [lmi setRepresentedObject:data];
                 [lmi setTarget: self];
 
-                if (val_list.p_list->p_values[i].i_int == val.i_int && !(i_type & VLC_VAR_ISCOMMAND))
+                if (val_list[i].i_int == val.i_int && !(i_type & VLC_VAR_ISCOMMAND))
                     [lmi setState: TRUE ];
+
+                free(text_list[i]);
                 break;
 
             default:
@@ -1544,7 +1555,8 @@
 
     /* clean up everything */
     if ((i_type & VLC_VAR_TYPE) == VLC_VAR_STRING) free(val.psz_string);
-    var_FreeList(&val_list, &text_list);
+    free(text_list);
+    free(val_list);
 }
 
 - (void)toggleVar:(id)sender
@@ -1604,7 +1616,6 @@
 
 - (BOOL)validateMenuItem:(NSMenuItem *)mi
 {
-    NSString *title = [mi title];
     BOOL enabled = YES;
     vlc_value_t val;
     playlist_t *p_playlist = pl_Get(getIntf());

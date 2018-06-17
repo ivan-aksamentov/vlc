@@ -32,6 +32,7 @@
 #include "main_interface.hpp"
 #include "input_manager.hpp"                    // Creation
 #include "actions_manager.hpp"                  // killInstance
+#include "managers/renderer_manager.hpp"
 
 #include "util/customwidgets.hpp"               // qtEventToVLCKey, QVLCStackedWidget
 #include "util/qt_dirs.hpp"                     // toNativeSeparators
@@ -240,12 +241,12 @@ MainInterface::MainInterface( intf_thread_t *_p_intf ) : QVLCMW( _p_intf )
     /************
      * Callbacks
      ************/
-    var_AddCallback( p_intf->obj.libvlc, "intf-toggle-fscontrol", IntfShowCB, p_intf );
-    var_AddCallback( p_intf->obj.libvlc, "intf-boss", IntfBossCB, p_intf );
-    var_AddCallback( p_intf->obj.libvlc, "intf-show", IntfRaiseMainCB, p_intf );
+    var_AddCallback( pl_Get(p_intf), "intf-toggle-fscontrol", IntfShowCB, p_intf );
+    var_AddCallback( pl_Get(p_intf), "intf-boss", IntfBossCB, p_intf );
+    var_AddCallback( pl_Get(p_intf), "intf-show", IntfRaiseMainCB, p_intf );
 
     /* Register callback for the intf-popupmenu variable */
-    var_AddCallback( p_intf->obj.libvlc, "intf-popupmenu", PopupMenuCB, p_intf );
+    var_AddCallback( pl_Get(p_intf), "intf-popupmenu", PopupMenuCB, p_intf );
 
 
     /* Final Sizing, restoration and placement of the interface */
@@ -280,6 +281,8 @@ MainInterface::~MainInterface()
     /* Delete the FSC controller */
     delete fullscreenControls;
 
+    RendererManager::killInstance();
+
     /* Save states */
 
     settings->beginGroup("MainWindow");
@@ -301,10 +304,10 @@ MainInterface::~MainInterface()
     QVLCTools::saveWidgetPosition(settings, this);
 
     /* Unregister callbacks */
-    var_DelCallback( p_intf->obj.libvlc, "intf-boss", IntfBossCB, p_intf );
-    var_DelCallback( p_intf->obj.libvlc, "intf-show", IntfRaiseMainCB, p_intf );
-    var_DelCallback( p_intf->obj.libvlc, "intf-toggle-fscontrol", IntfShowCB, p_intf );
-    var_DelCallback( p_intf->obj.libvlc, "intf-popupmenu", PopupMenuCB, p_intf );
+    var_DelCallback( pl_Get(p_intf), "intf-boss", IntfBossCB, p_intf );
+    var_DelCallback( pl_Get(p_intf), "intf-show", IntfRaiseMainCB, p_intf );
+    var_DelCallback( pl_Get(p_intf), "intf-toggle-fscontrol", IntfShowCB, p_intf );
+    var_DelCallback( pl_Get(p_intf), "intf-popupmenu", PopupMenuCB, p_intf );
 
     p_intf->p_sys->p_mi = NULL;
 }
@@ -679,7 +682,11 @@ inline void MainInterface::showTab( QWidget *widget, bool video_closing )
 
     stackCentralW->setCurrentWidget( widget );
     if( b_autoresize )
-        resizeStack( stackWidgetsSizes[widget].width(), stackWidgetsSizes[widget].height() );
+    {
+        QSize size = stackWidgetsSizes[widget];
+        if( size.isValid() )
+            resizeStack( size.width(), size.height() );
+    }
 
 #ifdef DEBUG_INTF
     msg_Dbg( p_intf, "Stack state changed to %s, index %i",

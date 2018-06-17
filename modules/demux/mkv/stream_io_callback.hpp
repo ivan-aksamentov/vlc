@@ -21,7 +21,19 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
-#include "mkv.hpp"
+
+#ifndef VLC_MKV_STREAM_IO_CALLBACK_HPP_
+#define VLC_MKV_STREAM_IO_CALLBACK_HPP_
+
+#ifdef HAVE_CONFIG_H
+# include "config.h"
+#endif
+
+#include <vlc_demux.h>
+
+#include "ebml/IOCallback.h"
+
+using namespace LIBEBML_NAMESPACE;
 
 /*****************************************************************************
  * Stream managment
@@ -52,3 +64,4 @@ class vlc_stream_io_callback: public IOCallback
     uint64           toRead          ( void );
 };
 
+#endif

@@ -406,8 +406,12 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
     if (self != nil) {
         _p_item = p_item;
-        psz_name = p_item->psz_name;
-        _type = p_item->i_type;
+        if (p_item) {
+            psz_name = p_item->psz_name;
+            _type = p_item->i_type;
+        } else {
+            psz_name = NULL;
+        }
         [self setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin ];
     }
     return (self);
@@ -916,7 +920,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         if (p_item->i_type == CONFIG_ITEM_PASSWORD)
             self.viewType = CONFIG_ITEM_PASSWORD;
         else
@@ -931,10 +935,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
         [self addSubview: self.label];
 
         /* build the textfield */
-        if (p_item->value.psz)
-            o_textfieldString = toNSStr(p_item->value.psz);
-        else
-            o_textfieldString = @"";
+        o_textfieldString = toNSStr(p_item->value.psz);
         if (p_item->i_type == CONFIG_ITEM_PASSWORD) {
             ADD_SECURETEXTFIELD(o_textfield, mainFrame, [self.label frame].size.width + 2,
                                 0, mainFrame.size.width - [self.label frame].size.width -
@@ -972,12 +973,8 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
 - (void)resetValues
 {
-    NSString *o_textfieldString;
     char *psz_value = config_GetPsz(self.p_item->psz_name);
-    if (psz_value)
-        o_textfieldString = _NS(psz_value);
-    else
-        o_textfieldString = @"";
+    [o_textfield setStringValue:toNSStr(psz_value)];
     free(psz_value);
     [super resetValues];
 }
@@ -1000,7 +997,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame: mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame: mainFrame item:p_item]) {
         if (p_item->i_type == CONFIG_ITEM_STRING)
             self.viewType = CONFIG_ITEM_STRING_LIST;
         else
@@ -1101,7 +1098,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_LOADFILE;
 
         o_itemTooltip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1122,10 +1119,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
         [self addSubview: o_button];
 
         /* build the textfield */
-        if (p_item->value.psz)
-            o_textfieldString = [NSString stringWithFormat: @"%s", (char *)p_item->value.psz];
-        else
-            o_textfieldString = @"";
+        o_textfieldString = toNSStr(p_item->value.psz);
         ADD_TEXTFIELD(o_textfield, mainFrame, 12, 2, mainFrame.size.width -
                       8 - [o_button frame].size.width,
                       o_itemTooltip, o_textfieldString)
@@ -1168,13 +1162,8 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
 -(void)resetValues
 {
-    NSString *o_textfieldString;
     char *psz_value = config_GetPsz(self.p_item->psz_name);
-    if (psz_value)
-        o_textfieldString = [NSString stringWithFormat: @"%s", psz_value];
-    else
-        o_textfieldString = @"";
-
+    [o_textfield setStringValue:toNSStr(psz_value)];
     free(psz_value);
     [super resetValues];
 }
@@ -1197,7 +1186,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_MODULE;
 
         o_popupTooltip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1329,7 +1318,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_INTEGER;
 
         toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1394,7 +1383,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
 -(void)resetValues
 {
-    [o_textfield setIntValue: config_GetInt(self.p_item->psz_name)];
+    [o_textfield setIntegerValue: config_GetInt(self.p_item->psz_name)];
     [super resetValues];
 }
 
@@ -1418,7 +1407,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_STRING_LIST;
 
         o_textfieldTooltip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1470,13 +1459,13 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 {
     [o_popup removeAllItems];
 
-    int i_current_selection = config_GetInt(self.p_item->psz_name);
+    NSInteger i_current_selection = config_GetInt(self.p_item->psz_name);
     int64_t *values;
     char **texts;
     ssize_t count = config_GetIntChoices(self.p_item->psz_name, &values, &texts);
     for (ssize_t i = 0; i < count; i++) {
         NSMenuItem *mi = [[NSMenuItem alloc] initWithTitle: toNSStr(texts[i]) action: NULL keyEquivalent: @""];
-        [mi setRepresentedObject:[NSNumber numberWithInt:values[i]]];
+        [mi setRepresentedObject:[NSNumber numberWithInteger:values[i]]];
         [[o_popup menu] addItem:mi];
 
         if (i_current_selection == values[i])
@@ -1508,7 +1497,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame: mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame: mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_RANGED_INTEGER;
 
         toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1522,7 +1511,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
         /* build the textfield */
         ADD_TEXTFIELD(o_textfield, mainFrame, [self.label frame].size.width + 2,
                       28, 70, toolTip, @"")
-        [o_textfield setIntValue: p_item->value.i];
+        [o_textfield setIntegerValue: p_item->value.i];
         [o_textfield setAutoresizingMask:NSViewMaxXMargin ];
         [o_textfield setDelegate: self];
         [[NSNotificationCenter defaultCenter] addObserver: self
@@ -1533,7 +1522,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
         /* build the mintextfield */
         ADD_LABEL(o_textfield_min, mainFrame, 12, -30, @"-88888", @"")
-        [o_textfield_min setIntValue: p_item->min.i];
+        [o_textfield_min setIntegerValue: p_item->min.i];
         [o_textfield_min setAutoresizingMask:NSViewMaxXMargin ];
         [o_textfield_min setAlignment:NSRightTextAlignment];
         [self addSubview: o_textfield_min];
@@ -1541,7 +1530,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
         /* build the maxtextfield */
         ADD_LABEL(o_textfield_max, mainFrame,
                   mainFrame.size.width - 50, -30, @"88888", @"")
-        [o_textfield_max setIntValue: p_item->max.i];
+        [o_textfield_max setIntegerValue: p_item->max.i];
         [o_textfield_max setAutoresizingMask:NSViewMinXMargin ];
         [self addSubview: o_textfield_max];
 
@@ -1554,7 +1543,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
                    [o_textfield_max frame].origin.x -
                    ([o_textfield_min frame].origin.x + [o_textfield_min frame].size.width) - 14, toolTip,
                    p_item->min.i, p_item->max.i)
-        [o_slider setIntValue: p_item->value.i];
+        [o_slider setIntegerValue: p_item->value.i];
         [o_slider setAutoresizingMask:NSViewWidthSizable ];
         [o_slider setTarget: self];
         [o_slider setAction: @selector(sliderChanged:)];
@@ -1595,9 +1584,9 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
 - (void)resetValues
 {
-    int value = config_GetInt(self.p_item->psz_name);
-    [o_textfield setIntValue:value];
-    [o_slider setIntValue:value];
+    NSInteger value = config_GetInt(self.p_item->psz_name);
+    [o_textfield setIntegerValue:value];
+    [o_slider setIntegerValue:value];
     [super resetValues];
 }
 @end
@@ -1620,7 +1609,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_INTEGER;
 
         toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1711,7 +1700,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_RANGED_INTEGER;
 
         toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1831,7 +1820,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
         /* add the checkbox */
         ADD_CHECKBOX(o_checkbox, mainFrame, 0,
-                     0, labelString, toolTip, p_item->value.i, NSImageLeft)
+                     0, labelString, toolTip, (int)p_item->value.i, NSImageLeft)
         [o_checkbox setAutoresizingMask:NSViewNotSizable];
         [self addSubview: o_checkbox];
     }
@@ -1867,7 +1856,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         self.viewType = CONFIG_ITEM_KEY;
 
         toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
@@ -1885,11 +1874,10 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
         [o_popup setAutoresizingMask:NSViewWidthSizable ];
 
         if (o_keys_menu == nil) {
-            unsigned int i;
             o_keys_menu = [[NSMenu alloc] initWithTitle: @"Keys Menu"];
 #warning This does not work anymore. FIXME.
 #if 0
-            for (i = 0; i < sizeof(vlc_key) / sizeof(key_descriptor_t); i++)
+            for (unsigned int i = 0; i < sizeof(vlc_key) / sizeof(key_descriptor_t); i++)
                 if (vlc_key[i].psz_key_string)
                     POPULATE_A_KEY(o_keys_menu,toNSStr(vlc_key[i].psz_key_string),
                                    vlc_key[i].i_key_code)
@@ -1919,7 +1907,7 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 
 - (int)intValue
 {
-    return [o_popup selectedTag];
+    return (int)[o_popup selectedTag];
 }
 
 - (void)resetValues
@@ -1941,6 +1929,12 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
 - (id)initWithItem:(module_config_t *)p_item
           withView:(NSView *)parentView
 {
+    self = [super initWithFrame:CGRectZero item:p_item];
+    if (!self) {
+        return self;
+    }
+    self.viewType = CONFIG_ITEM_MODULE_LIST;
+
     BOOL b_by_cat = p_item->i_type == CONFIG_ITEM_MODULE_LIST_CAT;
 
     //Fill our array to know how may items we have...
@@ -1965,7 +1959,6 @@ o_textfield = [[NSSecureTextField alloc] initWithFrame: s_rc];              \
             module_config_t *p_configlist = module_config_get(p_parser, &confsize);
 
             for (i = 0; i < confsize; i++) {
-                unsigned int unused;
                 module_config_t *p_config = &p_configlist[i];
                 NSString *o_modulelongname, *o_modulename;
                 NSNumber *o_moduleenabled = nil;
@@ -2011,7 +2004,6 @@ o_moduleenabled = [NSNumber numberWithBool:NO];\
 
             }
             module_config_free(p_configlist);
-
 
         } else if (module_provides(p_parser, p_item->psz_type)) {
 
@@ -2081,30 +2073,26 @@ o_moduleenabled = [NSNumber numberWithBool:NO];\
     mainFrame.size.width = mainFrame.size.width - LEFTMARGIN - RIGHTMARGIN;
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
-        self.viewType = CONFIG_ITEM_MODULE_LIST;
+    self.frame = mainFrame;
 
-        toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
+    toolTip = [[VLCStringUtility sharedInstance] wrapString: _NS(p_item->psz_longtext) toWidth: PREFS_WRAP];
 
-        /* add the label */
-        labelString = _NS((char *)p_item->psz_text);
-        ADD_LABEL(self.label, mainFrame, 0, -3, labelString, toolTip)
-        [self.label setAutoresizingMask:NSViewNotSizable ];
-        [self addSubview: self.label];
+    /* add the label */
+    labelString = _NS((char *)p_item->psz_text);
+    ADD_LABEL(self.label, mainFrame, 0, -3, labelString, toolTip)
+    [self.label setAutoresizingMask:NSViewNotSizable ];
+    [self addSubview: self.label];
 
-        /* build the textfield */
-        if (p_item->value.psz)
-            o_textfieldString = _NS(p_item->value.psz);
-        else
-            o_textfieldString = @"";
-        ADD_TEXTFIELD(o_textfield, mainFrame, [self.label frame].size.width + 2,
-                      mainFrame.size.height - 22, mainFrame.size.width -
-                      [self.label frame].size.width - 2, toolTip, o_textfieldString)
-        [o_textfield setAutoresizingMask:NSViewWidthSizable ];
-        [self addSubview: o_textfield];
+    /* build the textfield */
+    o_textfieldString = _NS(p_item->value.psz);
+    ADD_TEXTFIELD(o_textfield, mainFrame, [self.label frame].size.width + 2,
+                  mainFrame.size.height - 22, mainFrame.size.width -
+                  [self.label frame].size.width - 2, toolTip, o_textfieldString)
+    [o_textfield setAutoresizingMask:NSViewWidthSizable ];
+    [self addSubview: o_textfield];
 
-        [self addSubview: o_tableview];
-    }
+    [self addSubview: o_tableview];
+
     return self;
 }
 
@@ -2188,7 +2176,6 @@ o_moduleenabled = [NSNumber numberWithBool:NO];\
               row:(NSInteger)dropRow dropOperation:(NSTableViewDropOperation)op;
 {
     NSPasteboard    *pb = [info draggingPasteboard];
-    NSDragOperation srcMask = [info draggingSourceOperationMask];
     BOOL accepted = NO;
 
     NS_DURING
@@ -2200,7 +2187,6 @@ o_moduleenabled = [NSNumber numberWithBool:NO];\
                       [pb propertyListForType:@"VLC media player module"]) != NULL) {
         NSEnumerator *iter = nil;
         id val;
-        BOOL isCopy = (srcMask & NSDragOperationMove) ? NO:YES;
         // Move the modules
         iter = [array objectEnumerator];
         while ((val = [iter nextObject]) != NULL) {
@@ -2267,13 +2253,13 @@ objectValueForTableColumn:(NSTableColumn *)aTableColumn row:(NSInteger)rowIndex
           withView:(NSView *)parentView
 {
     NSRect mainFrame = [parentView frame];
-    NSString *labelString, *toolTip;
+    NSString *labelString;
     mainFrame.size.height = 17;
     mainFrame.size.width = mainFrame.size.width - LEFTMARGIN - RIGHTMARGIN;
     mainFrame.origin.x = LEFTMARGIN;
     mainFrame.origin.y = 0;
 
-    if ([super initWithFrame:mainFrame item:p_item] != nil) {
+    if (self = [super initWithFrame:mainFrame item:p_item]) {
         /* add the label */
         labelString = _NS(p_item->psz_text);
 

@@ -100,7 +100,7 @@ if HAVE_GL
 vout_LTLIBRARIES += libgl_plugin.la
 if HAVE_EGL
 if HAVE_VAAPI
-if HAVE_WAYLAND_EGL
+if HAVE_WAYLAND
 if HAVE_VAAPI_WL
 vout_LTLIBRARIES += libglconv_vaapi_wl_plugin.la
 endif
@@ -150,8 +150,10 @@ libxcb_xv_plugin_la_LIBADD = libvlc_xcb_events.la \
 libxcb_window_plugin_la_SOURCES = video_output/xcb/window.c
 libxcb_window_plugin_la_CFLAGS = $(AM_CFLAGS) \
 	$(CFLAGS_xcb_window) \
-	$(XPROTO_CFLAGS) $(XCB_CFLAGS) $(XCB_KEYSYMS_CFLAGS)
-libxcb_window_plugin_la_LIBADD = $(XPROTO_LIBS) $(XCB_LIBS) $(XCB_KEYSYMS_LIBS)
+	$(XPROTO_CFLAGS) $(XCB_CFLAGS) \
+	$(XCB_XKB_CFLAGS) $(XKBCOMMON_X11_CFLAGS)
+libxcb_window_plugin_la_LIBADD = $(XPROTO_LIBS) $(XCB_LIBS) \
+	$(XCB_XKB_LIBS) $(XKBCOMMON_X11_LIBS)
 
 libegl_x11_plugin_la_SOURCES = video_output/opengl/egl.c
 libegl_x11_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -DUSE_PLATFORM_X11=1
@@ -165,15 +167,13 @@ libglx_plugin_la_LIBADD = $(GL_LIBS) $(X_LIBS) $(X_PRE_LIBS) -lX11
 if HAVE_XCB
 pkglib_LTLIBRARIES += libvlc_xcb_events.la
 vout_LTLIBRARIES += libxcb_x11_plugin.la libxcb_window_plugin.la
-if HAVE_XCB_KEYSYMS
+if HAVE_XKBCOMMON_X11
 libxcb_window_plugin_la_SOURCES += \
 	video_output/xcb/keysym.h video_output/xcb/xcb_keysym.h \
-	video_output/xcb/keys.c
-libxcb_window_plugin_la_CFLAGS += -DHAVE_XCB_KEYSYMS
+	video_output/xcb/vlc_xkb.h video_output/xcb/xkb.c
+libxcb_window_plugin_la_CFLAGS += -DHAVE_XKBCOMMON
 endif
-if HAVE_XCB_XVIDEO
 vout_LTLIBRARIES += libxcb_xv_plugin.la
-endif
 if HAVE_EGL
 vout_LTLIBRARIES += libegl_x11_plugin.la
 endif
@@ -202,16 +202,20 @@ video_output/wayland/viewporter-protocol.c: \
 		$(WAYLAND_PROTOCOLS)/stable/viewporter/viewporter.xml
 	$(AM_V_GEN)$(WAYLAND_SCANNER) private-code $< $@
 
-libwl_shell_plugin_la_SOURCES = video_output/wayland/xdg-shell.c
+libwl_shell_plugin_la_SOURCES = $(libxdg_shell_plugin_la_SOURCES)
 nodist_libwl_shell_plugin_la_SOURCES = \
 	video_output/wayland/server-decoration-client-protocol.h \
 	video_output/wayland/server-decoration-protocol.c
 libwl_shell_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) \
 	-I$(builddir)/video_output/wayland
-libwl_shell_plugin_la_CFLAGS = $(WAYLAND_CLIENT_CFLAGS)
-libwl_shell_plugin_la_LIBADD = $(WAYLAND_CLIENT_LIBS) $(LIBPTHREAD)
+libwl_shell_plugin_la_CFLAGS = $(libxdg_shell_plugin_la_CFLAGS)
+libwl_shell_plugin_la_LIBADD = $(libxdg_shell_plugin_la_LIBADD)
 
-libxdg_shell_plugin_la_SOURCES = video_output/wayland/xdg-shell.c
+libxdg_shell_plugin_la_SOURCES = \
+	video_output/wayland/output.h video_output/wayland/output.c \
+	video_output/wayland/input.h video_output/wayland/input.c \
+	video_output/xcb/vlc_xkb.h video_output/xcb/xkb.c \
+	video_output/wayland/xdg-shell.c
 nodist_libxdg_shell_plugin_la_SOURCES = \
 	video_output/wayland/xdg-shell-client-protocol.h \
 	video_output/wayland/xdg-shell-protocol.c \
@@ -219,8 +223,16 @@ nodist_libxdg_shell_plugin_la_SOURCES = \
 	video_output/wayland/server-decoration-protocol.c
 libxdg_shell_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -DXDG_SHELL \
 	-I$(builddir)/video_output/wayland
-libxdg_shell_plugin_la_CFLAGS = $(WAYLAND_CLIENT_CFLAGS)
-libxdg_shell_plugin_la_LIBADD = $(WAYLAND_CLIENT_LIBS) $(LIBPTHREAD)
+libxdg_shell_plugin_la_CFLAGS = \
+	$(WAYLAND_CLIENT_CFLAGS) $(WAYLAND_CURSOR_CFLAGS) \
+	$(XKBCOMMON_CFLAGS)
+libxdg_shell_plugin_la_LIBADD = \
+	$(WAYLAND_CLIENT_LIBS) $(WAYLAND_CURSOR_LIBS) \
+	$(XKBCOMMON_LIBS) $(LIBPTHREAD)
+if HAVE_XKBCOMMON
+libwl_shell_plugin_la_CPPFLAGS += -DHAVE_XKBCOMMON
+libxdg_shell_plugin_la_CPPFLAGS += -DHAVE_XKBCOMMON
+endif
 
 video_output/wayland/xdg-shell-client-protocol.h: \
 		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
@@ -238,27 +250,6 @@ video_output/wayland/server-decoration-protocol.c: \
 		video_output/wayland/server-decoration.xml
 EXTRA_DIST += video_output/wayland/server-decoration.xml
 
-libxdg_shell_v6_plugin_la_SOURCES = video_output/wayland/xdg-shell.c
-nodist_libxdg_shell_v6_plugin_la_SOURCES = \
-	video_output/wayland/xdg-shell-unstable-v6-client-protocol.h \
-	video_output/wayland/xdg-shell-unstable-v6-protocol.c \
-	video_output/wayland/server-decoration-client-protocol.h \
-	video_output/wayland/server-decoration-protocol.c
-libxdg_shell_v6_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -DXDG_SHELL \
-	-I$(builddir)/video_output/wayland -DXDG_SHELL_UNSTABLE_VERSION=6
-libxdg_shell_v6_plugin_la_CFLAGS = $(libxdg_shell_plugin_la_CFLAGS)
-libxdg_shell_v6_plugin_la_LIBADD = $(libxdg_shell_plugin_la_LIBADD)
-
-video_output/wayland/xdg-shell-unstable-v6-client-protocol.h: \
-		$(WAYLAND_PROTOCOLS)/unstable/xdg-shell/xdg-shell-unstable-v6.xml \
-		video_output/Makefile.am
-	$(AM_V_GEN)$(WAYLAND_SCANNER) client-header $< $@
-
-video_output/wayland/xdg-shell-unstable-v6-protocol.c: \
-		$(WAYLAND_PROTOCOLS)/unstable/xdg-shell/xdg-shell-unstable-v6.xml \
-		video_output/Makefile.am
-	$(AM_V_GEN)$(WAYLAND_SCANNER) private-code $< $@
-
 libegl_wl_plugin_la_SOURCES = video_output/opengl/egl.c
 libegl_wl_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -DUSE_PLATFORM_WAYLAND=1
 libegl_wl_plugin_la_CFLAGS = $(AM_CFLAGS) $(EGL_CFLAGS) $(WAYLAND_EGL_CFLAGS)
@@ -270,12 +261,8 @@ vout_LTLIBRARIES += libwl_shm_plugin.la
 vout_LTLIBRARIES += libwl_shell_plugin.la
 BUILT_SOURCES += $(nodist_libxdg_shell_plugin_la_SOURCES)
 vout_LTLIBRARIES += libxdg_shell_plugin.la
-BUILT_SOURCES += $(nodist_libxdg_shell_v6_plugin_la_SOURCES)
-vout_LTLIBRARIES += libxdg_shell_v6_plugin.la
-if HAVE_WAYLAND_EGL
 if HAVE_EGL
 vout_LTLIBRARIES += libegl_wl_plugin.la
-endif
 endif
 endif
 
@@ -305,7 +292,9 @@ if !HAVE_WINSTORE
 libdirect3d11_plugin_la_SOURCES += video_output/win32/events.c \
  video_output/win32/events.h \
  video_output/win32/sensors.cpp \
- video_output/win32/win32touch.c video_output/win32/win32touch.h
+ video_output/win32/win32touch.c video_output/win32/win32touch.h \
+ video_output/win32/d3d11_quad.c video_output/win32/d3d11_quad.h \
+ video_output/win32/d3d11_shaders.c video_output/win32/d3d11_shaders.h
 libdirect3d11_plugin_la_LIBADD += -lgdi32
 else
 libdirect3d11_plugin_la_LIBADD += -ld3d11

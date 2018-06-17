@@ -659,21 +659,19 @@ static void *Run( void *data )
         {
             if( p_sys->p_input )
             {
-                int i, j;
+                int i;
                 vlc_mutex_lock( &input_GetItem(p_sys->p_input)->lock );
                 for ( i = 0; i < input_GetItem(p_sys->p_input)->i_categories; i++ )
                 {
                     info_category_t *p_category = input_GetItem(p_sys->p_input)
                                                         ->pp_categories[i];
+                    info_t *p_info;
 
                     msg_rc( "+----[ %s ]", p_category->psz_name );
                     msg_rc( "| " );
-                    for ( j = 0; j < p_category->i_infos; j++ )
-                    {
-                        info_t *p_info = p_category->pp_infos[j];
+                    info_foreach(p_info, &p_category->infos)
                         msg_rc( "| %s: %s", p_info->psz_name,
                                 p_info->psz_value );
-                    }
                     msg_rc( "| " );
                 }
                 msg_rc( "+----[ end of stream info ]" );
@@ -985,7 +983,7 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
         }
         else
         {
-            mtime_t t = atoi( newval.psz_string );
+            int t = atoi( newval.psz_string );
             var_SetInteger( p_input, "time", CLOCK_FREQ * t );
         }
         i_error = VLC_SUCCESS;
@@ -1094,7 +1092,7 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
              || !strcmp( psz_cmd, "strack" ) )
     {
         const char *psz_variable;
-        vlc_value_t val_name;
+        char *name;
 
         if( !strcmp( psz_cmd, "atrack" ) )
         {
@@ -1110,9 +1108,8 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
         }
 
         /* Get the descriptive name of the variable */
-        var_Change( p_input, psz_variable, VLC_VAR_GETTEXT,
-                     &val_name, NULL );
-        if( !val_name.psz_string ) val_name.psz_string = strdup(psz_variable);
+        var_Change( p_input, psz_variable, VLC_VAR_GETTEXT, &name );
+        if( !name ) name = strdup(psz_variable);
 
         if( newval.psz_string && *newval.psz_string )
         {
@@ -1123,30 +1120,31 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
         else
         {
             /* get */
-            vlc_value_t val, text;
+            vlc_value_t *val;
+            char **text;
+            size_t count;
 
             int i_value = var_GetInteger( p_input, psz_variable );
 
-            if ( var_Change( p_input, psz_variable,
-                             VLC_VAR_GETCHOICES, &val, &text ) < 0 )
-                goto out;
-
-            msg_rc( "+----[ %s ]", val_name.psz_string );
-            for ( int i = 0; i < val.p_list->i_count; i++ )
+            if ( var_Change( p_input, psz_variable, VLC_VAR_GETCHOICES,
+                             &count, &val, &text ) < 0 )
             {
-                if ( i_value == val.p_list->p_values[i].i_int )
-                    msg_rc( "| %"PRId64" - %s *",
-                            val.p_list->p_values[i].i_int,
-                            text.p_list->p_values[i].psz_string );
-                else
-                    msg_rc( "| %"PRId64" - %s",
-                            val.p_list->p_values[i].i_int,
-                            text.p_list->p_values[i].psz_string );
+                free( name );
+                goto out;
             }
-            var_FreeList( &val, &text );
-            msg_rc( "+----[ end of %s ]", val_name.psz_string );
+
+            msg_rc( "+----[ %s ]", name );
+            for ( size_t i = 0; i < count; i++ )
+            {
+                msg_rc( "| %"PRId64" - %s%s", val[i].i_int, text[i],
+                        (i_value == val[i].i_int) ? " *" : "" );
+                free(text[i]);
+            }
+            free(text);
+            free(val);
+            msg_rc( "+----[ end of %s ]", name );
         }
-        free( val_name.psz_string );
+        free( name );
     }
 out:
     vlc_object_release( p_input );
@@ -1555,10 +1553,12 @@ static int VideoConfig( vlc_object_t *p_this, char const *psz_cmd,
     else
     {
         /* get */
-        vlc_value_t val_name;
-        vlc_value_t val, text;
+        char *name;
+        vlc_value_t *val;
+        char **text;
         float f_value = 0.;
         char *psz_value = NULL;
+        size_t count;
 
         if( !strcmp( psz_variable, "zoom" ) )
             f_value = var_GetFloat( p_vout, "zoom" );
@@ -1572,8 +1572,8 @@ static int VideoConfig( vlc_object_t *p_this, char const *psz_cmd,
             }
         }
 
-        if ( var_Change( p_vout, psz_variable,
-                         VLC_VAR_GETCHOICES, &val, &text ) < 0 )
+        if ( var_Change( p_vout, psz_variable, VLC_VAR_GETCHOICES,
+                         &count, &val, &text ) < 0 )
         {
             vlc_object_release( p_vout );
             free( psz_value );
@@ -1581,40 +1581,36 @@ static int VideoConfig( vlc_object_t *p_this, char const *psz_cmd,
         }
 
         /* Get the descriptive name of the variable */
-        var_Change( p_vout, psz_variable, VLC_VAR_GETTEXT,
-                    &val_name, NULL );
-        if( !val_name.psz_string ) val_name.psz_string = strdup(psz_variable);
+        var_Change( p_vout, psz_variable, VLC_VAR_GETTEXT, &name );
+        if( !name ) name = strdup(psz_variable);
 
-        msg_rc( "+----[ %s ]", val_name.psz_string );
+        msg_rc( "+----[ %s ]", name );
         if( !strcmp( psz_variable, "zoom" ) )
         {
-            for ( int i = 0; i < val.p_list->i_count; i++ )
+            for ( size_t i = 0; i < count; i++ )
             {
-                if ( f_value == val.p_list->p_values[i].f_float )
-                    msg_rc( "| %f - %s *", val.p_list->p_values[i].f_float,
-                            text.p_list->p_values[i].psz_string );
-                else
-                    msg_rc( "| %f - %s", val.p_list->p_values[i].f_float,
-                            text.p_list->p_values[i].psz_string );
+                msg_rc( "| %f - %s%s", val[i].f_float, text[i],
+                        f_value == val[i].f_float ? " *" : "" );
+                free(text[i]);
             }
         }
         else
         {
-            for ( int i = 0; i < val.p_list->i_count; i++ )
+            for ( size_t i = 0; i < count; i++ )
             {
-                if ( !strcmp( psz_value, val.p_list->p_values[i].psz_string ) )
-                    msg_rc( "| %s - %s *", val.p_list->p_values[i].psz_string,
-                            text.p_list->p_values[i].psz_string );
-                else
-                    msg_rc( "| %s - %s", val.p_list->p_values[i].psz_string,
-                            text.p_list->p_values[i].psz_string );
+                msg_rc( "| %s - %s%s", val[i].psz_string, text[i],
+                       strcmp(psz_value, val[i].psz_string)
+                           ? "" : " *" );
+                free(text[i]);
+                free(val[i].psz_string);
             }
             free( psz_value );
         }
-        var_FreeList( &val, &text );
-        msg_rc( "+----[ end of %s ]", val_name.psz_string );
+        free(text);
+        free(val);
+        msg_rc( "+----[ end of %s ]", name );
 
-        free( val_name.psz_string );
+        free( name );
     }
     vlc_object_release( p_vout );
     return i_error;
@@ -1676,9 +1672,12 @@ static int AudioChannel( vlc_object_t *obj, char const *cmd,
     if ( !*cur.psz_string )
     {
         /* Retrieve all registered ***. */
-        vlc_value_t val, text;
-        if ( var_Change( p_aout, "stereo-mode",
-                         VLC_VAR_GETCHOICES, &val, &text ) < 0 )
+        vlc_value_t *val;
+        char **text;
+        size_t count;
+
+        if ( var_Change( p_aout, "stereo-mode", VLC_VAR_GETCHOICES,
+                         &count, &val, &text ) < 0 )
         {
             ret = VLC_ENOVAR;
             goto out;
@@ -1687,16 +1686,14 @@ static int AudioChannel( vlc_object_t *obj, char const *cmd,
         int i_value = var_GetInteger( p_aout, "stereo-mode" );
 
         msg_rc( "+----[ %s ]", cmd );
-        for ( int i = 0; i < val.p_list->i_count; i++ )
+        for ( size_t i = 0; i < count; i++ )
         {
-            if ( i_value == val.p_list->p_values[i].i_int )
-                msg_rc( "| %"PRId64" - %s *", val.p_list->p_values[i].i_int,
-                        text.p_list->p_values[i].psz_string );
-            else
-                msg_rc( "| %"PRId64" - %s", val.p_list->p_values[i].i_int,
-                        text.p_list->p_values[i].psz_string );
+            msg_rc( "| %"PRId64" - %s%s", val[i].i_int, text[i],
+                    i_value == val[i].i_int ? " *" : "" );
+            free(text[i]);
         }
-        var_FreeList( &val, &text );
+        free(text);
+        free(val);
         msg_rc( "+----[ end of %s ]", cmd );
     }
     else

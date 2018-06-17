@@ -309,9 +309,6 @@ create_toolbar_item(NSString *itemIdent, NSString *name, NSString *desc, NSStrin
     /* interface */
     [_intf_generalSettingsBox setTitle:_NS("General settings")];
     [_intf_languageLabel setStringValue: _NS("Language")];
-    [_intf_styleLabel setStringValue: _NS("Interface style")];
-    [_intf_style_darkButtonCell setTitle: _NS("Dark")];
-    [_intf_style_brightButtonCell setTitle: _NS("Bright")];
 
     [_intf_playbackControlBox setTitle:_NS("Playback control")];
     [_intf_continueplaybackLabel setStringValue:_NS("Continue playback")];
@@ -468,7 +465,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     ssize_t count = config_GetIntChoices(name, &values, &texts);
     for (ssize_t i = 0; i < count; i++) {
         NSMenuItem *mi = [[NSMenuItem alloc] initWithTitle: toNSStr(texts[i]) action: NULL keyEquivalent: @""];
-        [mi setRepresentedObject:[NSNumber numberWithInt:values[i]]];
+        [mi setRepresentedObject:[NSNumber numberWithInteger:values[i]]];
         [[object menu] addItem:mi];
 
         if (p_item->value.i == values[i])
@@ -528,9 +525,8 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
 
 - (void)resetControls
 {
-    module_config_t *p_item;
-    int i, y = 0;
-    char *psz_tmp;
+    int i = 0;
+    NSInteger y = 0;
 
     /**********************
      * interface settings *
@@ -578,14 +574,6 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     BOOL growlEnabled = [self hasModule:@"growl" inConfig:@"control"];
     [_intf_enableNotificationsCheckbox setState: growlEnabled ? NSOnState : NSOffState];
 
-    if (config_GetInt("macosx-interfacestyle")) {
-        [_intf_style_darkButtonCell setState: YES];
-        [_intf_style_brightButtonCell setState: NO];
-    } else {
-        [_intf_style_darkButtonCell setState: NO];
-        [_intf_style_brightButtonCell setState: YES];
-    }
-
     BOOL httpEnabled = [self hasModule:@"http" inConfig:@"extraintf"];
     [_intf_enableluahttpCheckbox setState: httpEnabled ? NSOnState : NSOffState];
     _intf_luahttppwdTextField.enabled = httpEnabled;
@@ -611,7 +599,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
         [_audio_volTextField setEnabled: YES];
         [_audio_volSlider setEnabled: YES];
 
-        i = var_InheritInteger(p_intf, "auhal-volume");
+        i = (int)var_InheritInteger(p_intf, "auhal-volume");
         i = i * 200. / AOUT_VOLUME_MAX;
         [_audio_volSlider setIntValue: i];
         [_audio_volTextField setIntValue: i];
@@ -680,7 +668,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     [self setupField:_input_recordTextField forOption:"input-record-path"];
 
     [self setupButton:_input_hardwareAccelerationCheckbox forBoolValue: "videotoolbox"];
-    [_input_postprocTextField setIntValue: config_GetInt("postproc-q")];
+//    [_input_postprocTextField setIntValue: config_GetInt("postproc-q")];
     [_input_postprocTextField setToolTip: _NS(config_GetLabel(p_intf, "postproc-q"))];
     [self setupButton:_input_skipFramesCheckbox forBoolValue: "skip-frames"];
     [self setupButton:_input_aviPopup forIntList: "avi-index"];
@@ -706,7 +694,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
 
     /* Select the accurate value of the PopupButton */
     bool cache_equal = true;
-    int i_cache = config_GetInt("file-caching");
+    int i_cache = (int)config_GetInt("file-caching");
 
     TestCaC("network-caching", 10/3);
     TestCaC("disc-caching", 1);
@@ -817,42 +805,40 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
 
 - (IBAction)resetPreferences:(NSControl *)sender
 {
-    NSBeginInformationalAlertSheet(_NS("Reset Preferences"), _NS("Cancel"),
-                                   _NS("Continue"), nil, [sender window], self,
-                                   @selector(sheetDidEnd: returnCode: contextInfo:), NULL, nil, @"%@",
-                                   _NS("This will reset VLC media player's preferences.\n\n"
-                                       "Note that VLC will restart during the process, so your current "
-                                       "playlist will be emptied and eventual playback, streaming or "
-                                       "transcoding activities will stop immediately.\n\n"
-                                       "The Media Library will not be affected.\n\n"
-                                       "Are you sure you want to continue?"));
-}
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setAlertStyle:NSInformationalAlertStyle];
+    [alert setMessageText:_NS("Reset Preferences")];
+    [alert setInformativeText:_NS("This will reset VLC media player's preferences.\n\n"
+                                  "Note that VLC will restart during the process, so your current "
+                                  "playlist will be emptied and eventual playback, streaming or "
+                                  "transcoding activities will stop immediately.\n\n"
+                                  "The Media Library will not be affected.\n\n"
+                                  "Are you sure you want to continue?")];
+    [alert addButtonWithTitle:_NS("Cancel")];
+    [alert addButtonWithTitle:_NS("Continue")];
+    [alert beginSheetModalForWindow:[sender window] completionHandler:^(NSModalResponse returnCode) {
+        if (returnCode == NSAlertSecondButtonReturn) {
+            /* reset VLC's config */
+            config_ResetAll();
+            [self resetControls];
 
-- (void)sheetDidEnd:(NSWindow *)o_sheet
-         returnCode:(int)i_return
-        contextInfo:(void *)o_context
-{
-    if (i_return == NSAlertAlternateReturn) {
-        /* reset VLC's config */
-        config_ResetAll();
-        [self resetControls];
+            /* force config file creation, since libvlc won't exit normally */
+            config_SaveConfigFile(p_intf);
 
-        /* force config file creation, since libvlc won't exit normally */
-        config_SaveConfigFile(p_intf);
+            /* reset OS X defaults */
+            [[VLCMain sharedInstance] resetAndReinitializeUserDefaults];
 
-        /* reset OS X defaults */
-        [[VLCMain sharedInstance] resetAndReinitializeUserDefaults];
+            /* Relaunch now */
+            const char * path = [[[NSBundle mainBundle] executablePath] UTF8String];
 
-        /* Relaunch now */
-        const char * path = [[[NSBundle mainBundle] executablePath] UTF8String];
-
-        /* For some reason we need to fork(), not just execl(), which reports a ENOTSUP then. */
-        if (fork() != 0) {
-            exit(0);
-            return;
+            /* For some reason we need to fork(), not just execl(), which reports a ENOTSUP then. */
+            if (fork() != 0) {
+                exit(0);
+                return;
+            }
+            execl(path, path, NULL);
         }
-        execl(path, path, NULL);
-    }
+    }];
 }
 
 static inline void save_int_list(intf_thread_t * p_intf, id object, const char * name)
@@ -918,7 +904,6 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
         config_PutInt("macosx-appleremote-sysvol", [_intf_appleremote_sysvolCheckbox state]);
         config_PutInt("macosx-statusicon", [_intf_statusIconCheckbox state]);
         config_PutInt("macosx-mediakeys", [_intf_mediakeysCheckbox state]);
-        config_PutInt("macosx-interfacestyle", [_intf_style_darkButtonCell state]);
 
         [self changeModule:@"growl" inConfig:@"control" enable:[_intf_enableNotificationsCheckbox state] == NSOnState];
 
@@ -1240,10 +1225,14 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
     [self osdSettingChanged:self];
 }
 
-- (NSUInteger)validModesForFontPanel:(NSFontPanel *)fontPanel
+// NSFontPanelModeMask is replacing NSUInteger, and should be backwards compatible
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
+- (NSFontPanelModeMask)validModesForFontPanel:(NSFontPanel *)fontPanel
 {
     return NSFontPanelFaceModeMask | NSFontPanelCollectionModeMask;
 }
+#pragma clang diagnostic pop
 
 - (IBAction)inputSettingChanged:(id)sender
 {
@@ -1307,43 +1296,36 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
 
 - (IBAction)urlHandlerAction:(id)sender
 {
-    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-
     if (sender == _input_urlhandlerButton) {
-        NSArray *handlers;
-        NSString *handler;
-        NSString *rawhandler;
-        NSMutableArray *rawHandlers;
-        NSUInteger count;
 
-#define fillUrlHandlerPopup( protocol, object ) \
-        handlers = (__bridge NSArray *)LSCopyAllHandlersForURLScheme(CFSTR( protocol )); \
-        rawHandlers = [[NSMutableArray alloc] init]; \
-        [object removeAllItems]; \
-        count = [handlers count]; \
-        for (NSUInteger x = 0; x < count; x++) { \
-            rawhandler = [handlers objectAtIndex:x]; \
-            handler = [self applicationNameForBundleIdentifier:rawhandler]; \
-            if (handler && ![handler isEqualToString:@""]) { \
-                [object addItemWithTitle:handler]; \
-                [[object lastItem] setImage: [self iconForBundleIdentifier:[handlers objectAtIndex:x]]]; \
-                [rawHandlers addObject: rawhandler]; \
-            } \
-        } \
-        [object selectItemAtIndex: [rawHandlers indexOfObject:(__bridge id)LSCopyDefaultHandlerForURLScheme(CFSTR( protocol ))]];
+        void (^fillUrlHandlerPopup)(NSString*, NSPopUpButton*) = ^void(NSString *protocol, NSPopUpButton *object) {
 
-        fillUrlHandlerPopup( "ftp", _urlhandler_ftpPopup);
-        fillUrlHandlerPopup( "mms", _urlhandler_mmsPopup);
-        fillUrlHandlerPopup( "rtmp", _urlhandler_rtmpPopup);
-        fillUrlHandlerPopup( "rtp", _urlhandler_rtpPopup);
-        fillUrlHandlerPopup( "rtsp", _urlhandler_rtspPopup);
-        fillUrlHandlerPopup( "sftp", _urlhandler_sftpPopup);
-        fillUrlHandlerPopup( "smb", _urlhandler_smbPopup);
-        fillUrlHandlerPopup( "udp", _urlhandler_udpPopup);
+            NSArray *handlers = (__bridge_transfer NSArray *)LSCopyAllHandlersForURLScheme((__bridge CFStringRef)protocol);
+            NSMutableArray *rawHandlers = [[NSMutableArray alloc] init];
+            [object removeAllItems];
+            NSUInteger count = [handlers count];
+            for (NSUInteger x = 0; x < count; x++) {
+                NSString *rawhandler = [handlers objectAtIndex:x];
+                NSString *handler = [self applicationNameForBundleIdentifier:rawhandler];
+                if (handler && ![handler isEqualToString:@""]) {
+                    [object addItemWithTitle:handler];
+                    [[object lastItem] setImage: [self iconForBundleIdentifier:[handlers objectAtIndex:x]]];
+                    [rawHandlers addObject: rawhandler];
+                }
+            }
+            [object selectItemAtIndex: [rawHandlers indexOfObject:(__bridge_transfer id)LSCopyDefaultHandlerForURLScheme((__bridge CFStringRef)protocol)]];
+        };
 
-#undef fillUrlHandlerPopup
+        fillUrlHandlerPopup(@"ftp", _urlhandler_ftpPopup);
+        fillUrlHandlerPopup(@"mms", _urlhandler_mmsPopup);
+        fillUrlHandlerPopup(@"rtmp", _urlhandler_rtmpPopup);
+        fillUrlHandlerPopup(@"rtp", _urlhandler_rtpPopup);
+        fillUrlHandlerPopup(@"rtsp", _urlhandler_rtspPopup);
+        fillUrlHandlerPopup(@"sftp", _urlhandler_sftpPopup);
+        fillUrlHandlerPopup(@"smb", _urlhandler_smbPopup);
+        fillUrlHandlerPopup(@"udp", _urlhandler_udpPopup);
 
-        [NSApp beginSheet:_urlhandler_win modalForWindow:self.window modalDelegate:self didEndSelector:NULL contextInfo:nil];
+        [self.window beginSheet:_urlhandler_win completionHandler:nil];
     } else {
         [_urlhandler_win orderOut:sender];
         [NSApp endSheet:_urlhandler_win];
@@ -1423,7 +1405,7 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
     [self showSettingsForCategory:_hotkeysView];
 }
 
-- (int)numberOfRowsInTableView:(NSTableView *)aTableView
+- (NSUInteger)numberOfRowsInTableView:(NSTableView *)aTableView
 {
     return [_hotkeySettings count];
 }

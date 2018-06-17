@@ -87,11 +87,9 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
     [self setupControls];
 }
 
-#define setupButton(target, title, desc)                                              \
-    [target accessibilitySetOverrideValue:title                                       \
-                             forAttribute:NSAccessibilityTitleAttribute];             \
-    [target accessibilitySetOverrideValue:desc                                        \
-                             forAttribute:NSAccessibilityDescriptionAttribute];       \
+#define setupButton(target, title, desc)            \
+    target.accessibilityTitle = title;              \
+    target.accessibilityLabel = desc;               \
     [target setToolTip:title];
 
 - (void)setupControls
@@ -270,15 +268,15 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
             mtime_t remaining = 0;
             if (dur > t)
                 remaining = dur - t;
-            totalTime = [NSString stringWithFormat:@"-%s", secstotimestr(psz_time, (remaining / CLOCK_FREQ))];
+            totalTime = [NSString stringWithFormat:@"-%s", secstotimestr(psz_time, (int)(remaining / CLOCK_FREQ))];
         } else {
-            totalTime = toNSStr(secstotimestr(psz_time, (dur / 1000000)));
+            totalTime = toNSStr(secstotimestr(psz_time, (int)(dur / 1000000)));
         }
         [_remainingOrTotalTime setStringValue:totalTime];
     }
 
     /* Update current position (left field) */
-    NSString *playbackPosition = toNSStr(secstotimestr(psz_time, t / CLOCK_FREQ));
+    NSString *playbackPosition = toNSStr(secstotimestr(psz_time, (int)(t / CLOCK_FREQ)));
 
     [_elapsedTime setStringValue:playbackPosition];
     vlc_object_release(p_input);
@@ -401,7 +399,7 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
         return;
 
     /* Get timeout and make sure it is not lower than 1 second */
-    int _timeToKeepVisibleInSec = MAX(var_CreateGetInteger(getIntf(), "mouse-hide-timeout") / 1000, 1);
+    long long _timeToKeepVisibleInSec = MAX(var_CreateGetInteger(getIntf(), "mouse-hide-timeout") / 1000, 1);
 
     _hideTimer = [NSTimer scheduledTimerWithTimeInterval:_timeToKeepVisibleInSec
                                                   target:self

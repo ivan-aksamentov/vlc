@@ -288,8 +288,9 @@ static int Open( vlc_object_t* p_this )
     char *psz_knownhosts_file;
     if( asprintf( &psz_knownhosts_file, "%s/.ssh/known_hosts", psz_home ) != -1 )
     {
-        libssh2_knownhost_readfile( ssh_knownhosts, psz_knownhosts_file,
-                LIBSSH2_KNOWNHOST_FILE_OPENSSH );
+        if( libssh2_knownhost_readfile( ssh_knownhosts, psz_knownhosts_file,
+                                        LIBSSH2_KNOWNHOST_FILE_OPENSSH ) < 0 )
+            msg_Err( p_access, "Failure reading known_hosts '%s'", psz_knownhosts_file );
         free( psz_knownhosts_file );
     }
 
@@ -306,7 +307,19 @@ static int Open( vlc_object_t* p_this )
         case LIBSSH2_HOSTKEY_TYPE_DSS:
             knownhost_fingerprint_algo = LIBSSH2_KNOWNHOST_KEY_SSHDSS;
             break;
+#if LIBSSH2_VERSION_NUM >= 0x010801
+        case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
+            knownhost_fingerprint_algo = LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
+            break;
 
+        case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:
+            knownhost_fingerprint_algo = LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
+            break;
+
+        case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:
+            knownhost_fingerprint_algo = LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
+            break;
+#endif
         default:
             msg_Err( p_access, "Host uses unrecognized session-key algorithm" );
             libssh2_knownhost_free( ssh_knownhosts );
@@ -314,12 +327,21 @@ static int Open( vlc_object_t* p_this )
 
     }
 
+#if LIBSSH2_VERSION_NUM >= 0x010206
+    int check = libssh2_knownhost_checkp( ssh_knownhosts, url.psz_host, i_port,
+                                         fingerprint, i_len,
+                                         LIBSSH2_KNOWNHOST_TYPE_PLAIN |
+                                         LIBSSH2_KNOWNHOST_KEYENC_RAW |
+                                         knownhost_fingerprint_algo,
+                                         &host );
+#else
     int check = libssh2_knownhost_check( ssh_knownhosts, url.psz_host,
                                          fingerprint, i_len,
                                          LIBSSH2_KNOWNHOST_TYPE_PLAIN |
                                          LIBSSH2_KNOWNHOST_KEYENC_RAW |
                                          knownhost_fingerprint_algo,
                                          &host );
+#endif
 
     libssh2_knownhost_free( ssh_knownhosts );
 

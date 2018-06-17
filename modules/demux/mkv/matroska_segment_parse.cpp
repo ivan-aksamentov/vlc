@@ -268,7 +268,7 @@ void matroska_segment_c::ParseTrackEntry( const KaxTrackEntry *m )
         }
         E_CASE( KaxTrackUID, tuid )
         {
-            debug( vars, "Track UID=%u", static_cast<uint32>( tuid ) );
+            debug( vars, "Track UID=%x", static_cast<uint32>( tuid ) );
         }
         E_CASE( KaxTrackType, ttype )
         {
@@ -980,7 +980,7 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
             {
                 vars.obj->p_segment_uid = new KaxSegmentUID( uid );
             }
-            debug( vars, "UID=%d", *reinterpret_cast<uint32*>( vars.obj->p_segment_uid->GetBuffer() ) );
+            debug( vars, "UID=%" PRIx64, *reinterpret_cast<uint64*>( vars.obj->p_segment_uid->GetBuffer() ) );
         }
         E_CASE( KaxPrevUID, uid )
         {
@@ -989,7 +989,7 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
                 vars.obj->p_prev_segment_uid = new KaxPrevUID( uid );
                 vars.obj->b_ref_external_segments = true;
             }
-            debug( vars, "PrevUID=%d", *reinterpret_cast<uint32*>( vars.obj->p_prev_segment_uid->GetBuffer() ) );
+            debug( vars, "PrevUID=%" PRIx64, *reinterpret_cast<uint64*>( vars.obj->p_prev_segment_uid->GetBuffer() ) );
         }
         E_CASE( KaxNextUID, uid )
         {
@@ -998,7 +998,7 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
                 vars.obj->p_next_segment_uid = new KaxNextUID( uid );
                 vars.obj->b_ref_external_segments = true;
             }
-            debug( vars, "NextUID=%d", *reinterpret_cast<uint32*>( vars.obj->p_next_segment_uid->GetBuffer() ) );
+            debug( vars, "NextUID=%" PRIx64, *reinterpret_cast<uint64*>( vars.obj->p_next_segment_uid->GetBuffer() ) );
         }
         E_CASE( KaxTimecodeScale, tcs )
         {
@@ -1033,7 +1033,7 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
         E_CASE( KaxSegmentFamily, uid )
         {
             vars.obj->families.push_back( new KaxSegmentFamily(uid) );
-            debug( vars, "Family=%d", *reinterpret_cast<uint32*>( uid.GetBuffer() ) );
+            debug( vars, "Family=%" PRIx64, *reinterpret_cast<uint64*>( uid.GetBuffer() ) );
         }
         E_CASE( KaxDateUTC, date )
         {
@@ -1141,7 +1141,7 @@ void matroska_segment_c::ParseChapterAtom( int i_level, KaxChapterAtom *ca, chap
         E_CASE( KaxChapterUID, uid )
         {
             vars.chapters.i_uid = static_cast<uint64_t>( uid );
-            debug( vars, "ChapterUID=%" PRIu64, vars.chapters.i_uid );
+            debug( vars, "ChapterUID=%" PRIx64, vars.chapters.i_uid );
         }
         E_CASE( KaxChapterFlagHidden, flag )
         {
@@ -1153,13 +1153,13 @@ void matroska_segment_c::ParseChapterAtom( int i_level, KaxChapterAtom *ca, chap
             vars.chapters.p_segment_uid = new KaxChapterSegmentUID( uid );
             vars.obj->b_ref_external_segments = true;
 
-            debug( vars, "ChapterSegmentUID=%u", *reinterpret_cast<uint32*>( vars.chapters.p_segment_uid->GetBuffer() ) );
+            debug( vars, "ChapterSegmentUID=%" PRIx64, *reinterpret_cast<uint64*>( vars.chapters.p_segment_uid->GetBuffer() ) );
         }
         E_CASE( KaxChapterSegmentEditionUID, euid )
         {
             vars.chapters.p_segment_edition_uid = new KaxChapterSegmentEditionUID( euid );
 
-            debug( vars, "ChapterSegmentEditionUID=%u",
+            debug( vars, "ChapterSegmentEditionUID=%x",
 #if LIBMATROSKA_VERSION < 0x010300
               *reinterpret_cast<uint32*>( vars.chapters.p_segment_edition_uid->GetBuffer() )
 #else
@@ -1187,18 +1187,16 @@ void matroska_segment_c::ParseChapterAtom( int i_level, KaxChapterAtom *ca, chap
         }
         E_CASE( KaxChapterString, name )
         {
-            char *psz_tmp_utf8 = ToUTF8( UTFstring( name ) );
+            std::string str_name( UTFstring( name ).GetUTF8() );
 
             for ( int k = 0; k < vars.i_level; k++)
-                vars.chapters.psz_name += '+';
+                vars.chapters.str_name += '+';
 
-            vars.chapters.psz_name += ' ';
-            vars.chapters.psz_name += psz_tmp_utf8;
+            vars.chapters.str_name += ' ';
+            vars.chapters.str_name += str_name;
             vars.chapters.b_user_display = true;
 
-            debug( vars, "ChapterString=%s", psz_tmp_utf8 );
-
-            free( psz_tmp_utf8 );
+            debug( vars, "ChapterString=%s", str_name.c_str() );
         }
         E_CASE( KaxChapterLanguage, lang )
         {
@@ -1286,9 +1284,7 @@ void matroska_segment_c::ParseAttachments( KaxAttachments *attachments )
     while( attachedFile && ( attachedFile->GetSize() > 0 ) )
     {
         KaxFileData  &img_data     = GetChild<KaxFileData>( *attachedFile );
-        char *psz_tmp_utf8 =  ToUTF8( UTFstring( GetChild<KaxFileName>( *attachedFile ) ) );
-        std::string attached_filename(psz_tmp_utf8);
-        free(psz_tmp_utf8);
+        std::string attached_filename( UTFstring( GetChild<KaxFileName>( *attachedFile ) ).GetUTF8() );
         attachment_c *new_attachment = new attachment_c( attached_filename,
                                                          GetChild<KaxMimeType>( *attachedFile ),
                                                          img_data.GetSize() );
@@ -1532,7 +1528,6 @@ bool matroska_segment_c::TrackInit( mkv_track_t * p_tk )
         }
         static void v_real_helper (vlc_fourcc_t codec, HandlerPayload& vars)
         {
-            vars.p_tk->b_dts_only = true;
             vars.p_fmt->i_codec   = codec;
 
             /* Extract the framerate from the header */
@@ -1591,17 +1586,13 @@ bool matroska_segment_c::TrackInit( mkv_track_t * p_tk )
             /* HACK: if we found invalid format, made by mkvmerge < 16.0.0,
              *       we try to fix it. They fixed it in 16.0.0. */
             const char* app = vars.obj->psz_writing_application;
-            if( p_extra && p_extra[0] == 0 && app != NULL &&
-                    strncmp(app, "mkvmerge", sizeof("mkvmerge")-1) == 0 )
+            if( p_extra && vars.p_tk->i_extra_data >= 3 &&
+                    p_extra[0] == 0 && (p_extra[1] != 0 || p_extra[2] > 1) )
             {
-                int major_version;
-                if( sscanf(app, "mkvmerge v%d.", &major_version) && major_version < 16 )
-                {
-                    msg_Dbg(vars.p_demuxer,
-                            "Invalid HEVC reserved bits in mkv file"
-                            "made by mkvmerge < v16.0.0 detected, fixing it");
-                    p_extra[0] = 0x01;
-                }
+                msg_Warn(vars.p_demuxer,
+                        "Invalid HEVC reserved bits in mkv file "
+                        "made by %s, fixing it", app ? app : "unknown app");
+                p_extra[0] = 0x01;
             }
 
             fill_extra_data( vars.p_tk, 0 );

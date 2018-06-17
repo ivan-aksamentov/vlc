@@ -733,11 +733,6 @@ vout_display_opengl_t *vout_display_opengl_New(video_format_t *fmt,
                                                vlc_gl_t *gl,
                                                const vlc_viewpoint_t *viewpoint)
 {
-    if (gl->getProcAddress == NULL) {
-        msg_Err(gl, "getProcAddress not implemented, bailing out");
-        return NULL;
-    }
-
     vout_display_opengl_t *vgl = calloc(1, sizeof(*vgl));
     if (!vgl)
         return NULL;
@@ -876,8 +871,8 @@ vout_display_opengl_t *vout_display_opengl_New(video_format_t *fmt,
      * so checks for extensions are bound to fail. Check for OpenGL ES version instead. */
     vgl->supports_npot = true;
 #else
-    vgl->supports_npot = HasExtension(extensions, "GL_ARB_texture_non_power_of_two") ||
-                         HasExtension(extensions, "GL_APPLE_texture_2D_limited_npot");
+    vgl->supports_npot = vlc_gl_StrHasToken(extensions, "GL_ARB_texture_non_power_of_two") ||
+                         vlc_gl_StrHasToken(extensions, "GL_APPLE_texture_2D_limited_npot");
 #endif
 
     bool b_dump_shaders = var_InheritInteger(gl, "verbose") >= 4;
@@ -1223,6 +1218,9 @@ int vout_display_opengl_Prepare(vout_display_opengl_t *vgl,
                 if (ret != VLC_SUCCESS)
                     continue;
             }
+            /* Use the visible pitch of the region */
+            r->p_picture->p[0].i_visible_pitch = r->fmt.i_visible_width
+                                               * r->p_picture->p[0].i_pixel_pitch;
             ret = tc->pf_update(tc, &glr->texture, &glr->width, &glr->height,
                                 r->p_picture, &pixels_offset);
         }

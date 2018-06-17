@@ -302,7 +302,7 @@ static int  Open ( vlc_object_t *p_this )
     if (p_demux->out == NULL)
         return VLC_EGENERIC;
 
-    /* if the rtsp URL may contain a sat.ip fake DNS, bail-out early and 
+    /* if the rtsp URL may contain a sat.ip fake DNS, bail-out early and
      * let the SAT>IP module handle that */
     if( !strncmp(p_demux->psz_location, "sat.ip", 6) )
     {
@@ -1286,6 +1286,8 @@ static int Play( demux_t *p_demux )
  *****************************************************************************/
 static bool HasSharedSession( MediaSubsession *session )
 {
+    if( session->sessionId() == NULL )
+        return false;
     MediaSubsessionIterator *it =
             new MediaSubsessionIterator( session->parentSession() );
     MediaSubsession *subsession;
@@ -1294,7 +1296,8 @@ static bool HasSharedSession( MediaSubsession *session )
     {
         if( session == subsession )
             continue;
-        if( !strcmp( session->sessionId(), subsession->sessionId() ) )
+        if( subsession->sessionId() != NULL &&
+            !strcmp( session->sessionId(), subsession->sessionId() ) )
         {
             b_shared = true;
             break;

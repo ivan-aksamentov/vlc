@@ -146,11 +146,8 @@ VLC_API void var_Destroy(vlc_object_t *obj, const char *name);
  * \param obj Object holding the variable
  * \param name Variable name
  * \param action Action to perform. Must be one of \ref var_action
- * \param val First action parameter
- * \param val2 Second action parameter
  */
-VLC_API int var_Change(vlc_object_t *obj, const char *name, int action,
-                       vlc_value_t *val, vlc_value_t *val2);
+VLC_API int var_Change(vlc_object_t *obj, const char *name, int action, ...);
 
 /**
  * Get the type of a variable.
@@ -209,13 +206,6 @@ VLC_API int var_GetAndSet(vlc_object_t *obj, const char *name, int op,
  * match is found, the value is read from the configuration.
  */
 VLC_API int var_Inherit( vlc_object_t *, const char *, int, vlc_value_t * );
-
-/**
- * Frees a list and the associated strings.
- * @param p_val: the list variable
- * @param p_val2: the variable associated or NULL
- */
-VLC_API void var_FreeList( vlc_value_t *, vlc_value_t * );
 
 
 /*****************************************************************************
@@ -667,10 +657,10 @@ static inline char *var_CreateGetNonEmptyStringCommand( vlc_object_t *p_obj,
 VLC_USED
 static inline int var_CountChoices( vlc_object_t *p_obj, const char *psz_name )
 {
-    vlc_value_t count;
-    if( var_Change( p_obj, psz_name, VLC_VAR_CHOICESCOUNT, &count, NULL ) )
+    size_t count;
+    if( var_Change( p_obj, psz_name, VLC_VAR_CHOICESCOUNT, &count ) )
         return 0;
-    return count.i_int;
+    return count;
 }
 
 static inline bool var_ToggleBool( vlc_object_t *p_obj, const char *psz_name )
@@ -780,7 +770,7 @@ VLC_API int var_LocationParse(vlc_object_t *, const char *mrl, const char *prefi
 #ifndef DOC
 #define var_Create(a,b,c) var_Create(VLC_OBJECT(a), b, c)
 #define var_Destroy(a,b) var_Destroy(VLC_OBJECT(a), b)
-#define var_Change(a,b,c,d,e) var_Change(VLC_OBJECT(a), b, c, d, e)
+#define var_Change(a,b,...) var_Change(VLC_OBJECT(a), b, __VA_ARGS__)
 #define var_Type(a,b) var_Type(VLC_OBJECT(a), b)
 #define var_Set(a,b,c) var_Set(VLC_OBJECT(a), b, c)
 #define var_Get(a,b,c) var_Get(VLC_OBJECT(a), b, c)

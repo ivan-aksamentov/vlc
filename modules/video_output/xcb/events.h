@@ -26,13 +26,6 @@
 
 #include <vlc_vout_display.h>
 
-#ifdef HAVE_XCB_KEYSYMS
-# include <xcb/xcb_keysyms.h>
-/* keys.c */
-int XCB_keyHandler_Process(xcb_key_symbols_t *, xcb_generic_event_t *,
-                           vout_window_t *);
-#endif
-
 /* events.c */
 
 /**

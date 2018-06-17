@@ -1058,49 +1058,46 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         }
         break;
 
-    case DEMUX_SET_GROUP:
-    {
-        vlc_list_t *p_list;
+    case DEMUX_SET_GROUP_DEFAULT:
+        msg_Dbg( p_demux, "DEMUX_SET_GROUP_%s", "DEFAULT" );
 
-        i_int = va_arg( args, int );
-        p_list = va_arg( args, vlc_list_t * );
-        msg_Dbg( p_demux, "DEMUX_SET_GROUP %d %p", i_int, (void *)p_list );
-
-        if( i_int != 0 ) /* If not default program */
-        {
-            /* Deselect/filter current ones */
-            ARRAY_RESET( p_sys->programs );
-
-            if( i_int != -1 )
-            {
-                p_sys->seltype = PROGRAM_LIST;
-                ARRAY_APPEND( p_sys->programs, i_int );
-                UpdatePESFilters( p_demux, false );
-            }
-            else if( likely( p_list != NULL ) )
-            {
-                p_sys->seltype = PROGRAM_LIST;
-                for( int i = 0; i < p_list->i_count; i++ )
-                   ARRAY_APPEND( p_sys->programs, p_list->p_values[i].i_int );
-                UpdatePESFilters( p_demux, false );
-            }
-            else // All ES Mode
-            {
-                p_pat = GetPID(p_sys, 0)->u.p_pat;
-                for( int i = 0; i < p_pat->programs.i_size; i++ )
-                   ARRAY_APPEND( p_sys->programs, p_pat->programs.p_elems[i]->i_pid );
-                p_sys->seltype = PROGRAM_ALL;
-                UpdatePESFilters( p_demux, true );
-            }
-
-            p_sys->b_default_selection = false;
-        }
-        else if( !p_sys->b_default_selection )
+        if( !p_sys->b_default_selection )
         {
             ARRAY_RESET( p_sys->programs );
             p_sys->seltype = PROGRAM_AUTO_DEFAULT;
         }
+        return VLC_SUCCESS;
 
+    case DEMUX_SET_GROUP_ALL: // All ES Mode
+    {
+        msg_Dbg( p_demux, "DEMUX_SET_GROUP_%s", "ALL" );
+
+        ARRAY_RESET( p_sys->programs );
+        p_pat = GetPID(p_sys, 0)->u.p_pat;
+        for( int i = 0; i < p_pat->programs.i_size; i++ )
+             ARRAY_APPEND( p_sys->programs, p_pat->programs.p_elems[i]->i_pid );
+        p_sys->seltype = PROGRAM_ALL;
+        UpdatePESFilters( p_demux, true );
+
+        p_sys->b_default_selection = false;
+        return VLC_SUCCESS;
+    }
+
+    case DEMUX_SET_GROUP_LIST:
+    {
+        size_t count = va_arg(args, size_t);
+        const int *pids = va_arg(args, const int *);
+
+        msg_Dbg( p_demux, "DEMUX_SET_GROUP_%s", "LIST" );
+
+        /* Deselect/filter current ones */
+        ARRAY_RESET( p_sys->programs );
+        p_sys->seltype = PROGRAM_LIST;
+        for( size_t i = 0; i < count; i++ )
+            ARRAY_APPEND( p_sys->programs, pids[i] );
+        UpdatePESFilters( p_demux, false );
+
+        p_sys->b_default_selection = false;
         return VLC_SUCCESS;
     }
 
@@ -2125,7 +2122,7 @@ int ProbeStart( demux_t *p_demux, int i_program )
 
         /* Go ahead one more chunk if end of file contained only stuffing packets */
         i_probe_count += PROBE_CHUNK_COUNT;
-    } while( i_pos > 0 && (i_pcr == -1 || !b_found) &&
+    } while( i_pos < i_stream_size && !b_found &&
              i_probe_count < PROBE_MAX );
 
     if( vlc_stream_Seek( p_sys->stream, i_initial_pos ) )
@@ -2157,7 +2154,7 @@ int ProbeEnd( demux_t *p_demux, int i_program )
 
         /* Go ahead one more chunk if end of file contained only stuffing packets */
         i_probe_count += PROBE_CHUNK_COUNT;
-    } while( i_pos > 0 && (i_pcr == -1 || !b_found) &&
+    } while( i_pos > 0 && !b_found &&
              i_probe_count < PROBE_MAX );
 
     if( vlc_stream_Seek( p_sys->stream, i_initial_pos ) )

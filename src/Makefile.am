@@ -60,6 +60,7 @@ pluginsinclude_HEADERS = \
 	../include/vlc_input_item.h \
 	../include/vlc_interface.h \
 	../include/vlc_keystore.h \
+	../include/vlc_list.h \
 	../include/vlc_md5.h \
 	../include/vlc_messages.h \
 	../include/vlc_meta.h \
@@ -278,7 +279,6 @@ libvlccore_la_SOURCES = \
 	video_output/control.h \
 	video_output/display.c \
 	video_output/display.h \
-	video_output/event.h \
 	video_output/inhibit.c \
 	video_output/inhibit.h \
 	video_output/interlacing.c \
@@ -512,6 +512,7 @@ check_PROGRAMS = \
 	test_dictionary \
 	test_i18n_atof \
 	test_interrupt \
+	test_list \
 	test_md5 \
 	test_picture_pool \
 	test_sort \
@@ -532,6 +533,7 @@ test_dictionary_SOURCES = test/dictionary.c
 test_i18n_atof_SOURCES = test/i18n_atof.c
 test_interrupt_SOURCES = test/interrupt.c
 test_interrupt_LDADD = $(LDADD) $(LIBS_libvlccore) $(LIBPTHREAD)
+test_list_SOURCES = test/list.c
 test_md5_SOURCES = test/md5.c
 test_picture_pool_SOURCES = test/picture_pool.c
 test_sort_SOURCES = test/sort.c

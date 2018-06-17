@@ -133,7 +133,7 @@ typedef struct
     /* ASF in MP4 */
     asf_packet_sys_t asfpacketsys;
     uint64_t i_preroll;         /* foobar */
-    int64_t  i_preroll_start;
+    mtime_t i_preroll_start;
 
     struct
     {
@@ -2192,7 +2192,9 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
         }
         case DEMUX_SET_NEXT_DEMUX_TIME:
-        case DEMUX_SET_GROUP:
+        case DEMUX_SET_GROUP_DEFAULT:
+        case DEMUX_SET_GROUP_ALL:
+        case DEMUX_SET_GROUP_LIST:
         case DEMUX_HAS_UNSUPPORTED_META:
         case DEMUX_CAN_RECORD:
             return VLC_EGENERIC;
@@ -4835,7 +4837,7 @@ static int FragGetMoofByTfraIndex( demux_t *p_demux, const mtime_t i_target_time
                 stime_t i_track_target_time = MP4_rescale( i_target_time, CLOCK_FREQ, p_track->i_timescale );
                 for ( uint32_t i = 0; i<p_data->i_number_of_entries; i += ( p_data->i_version == 1 ) ? 2 : 1 )
                 {
-                    mtime_t i_time;
+                    stime_t i_time;
                     uint64_t i_offset;
                     if ( p_data->i_version == 1 )
                     {

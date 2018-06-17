@@ -713,12 +713,21 @@ static int SubDrawObject(intf_sys_t *sys, int l, vlc_object_t *p_obj, int i_leve
                   p_obj->obj.object_type, name ? name : "", (void *)p_obj);
     free(name);
 
-    vlc_list_t *list = vlc_list_children(p_obj);
-    for (int i = 0; i < list->i_count ; i++) {
-        l = SubDrawObject(sys, l, list->p_values[i].p_address, i_level,
-            (i == list->i_count - 1) ? "`-" : "|-" );
+    size_t count = 0, size;
+    vlc_object_t **tab = NULL;
+
+    do {
+        size = count;
+        tab = xrealloc(tab, size * sizeof (*tab));
+        count = vlc_list_children(p_obj, tab, size);
+    } while (size < count);
+
+    for (size_t i = 0; i < count ; i++) {
+        l = SubDrawObject(sys, l, tab[i], i_level,
+            (i == count - 1) ? "`-" : "|-" );
+        vlc_object_release(tab[i]);
     }
-    vlc_list_release(list);
+    free(tab);
     return l;
 }
 
@@ -767,14 +776,14 @@ static int DrawInfo(intf_thread_t *intf, input_thread_t *p_input)
     vlc_mutex_lock(&item->lock);
     for (int i = 0; i < item->i_categories; i++) {
         info_category_t *p_category = item->pp_categories[i];
+        info_t *p_info;
+
         if (sys->color) color_set(C_CATEGORY, NULL);
         MainBoxWrite(sys, l++, _("  [%s]"), p_category->psz_name);
         if (sys->color) color_set(C_DEFAULT, NULL);
-        for (int j = 0; j < p_category->i_infos; j++) {
-            info_t *p_info = p_category->pp_infos[j];
+        info_foreach(p_info, &p_category->infos)
             MainBoxWrite(sys, l++, _("      %s: %s"),
                          p_info->psz_name, p_info->psz_value);
-        }
     }
     vlc_mutex_unlock(&item->lock);
 
@@ -1021,7 +1030,7 @@ static int DrawStatus(intf_thread_t *intf, input_thread_t *p_input)
 {
     intf_sys_t     *sys = intf->p_sys;
     playlist_t     *p_playlist = pl_Get(intf);
-    char *name = _("VLC media player");
+    const char *name = _("VLC media player");
     const size_t name_len = strlen(name) + sizeof(PACKAGE_VERSION);
     int y = 0;
     const char *repeat, *loop, *random;
@@ -1529,21 +1538,24 @@ static void CycleESTrack(input_thread_t *input, const char *var)
     if (!input)
         return;
 
-    vlc_value_t val;
-    if (var_Change(input, var, VLC_VAR_GETCHOICES, &val, NULL) < 0)
+    vlc_value_t *list;
+    size_t count;
+
+    if (var_Change(input, var, VLC_VAR_GETCHOICES,
+                   &count, &list, (char ***)NULL) < 0)
         return;
 
-    vlc_list_t *list = val.p_list;
     int64_t current = var_GetInteger(input, var);
 
-    int i;
-    for (i = 0; i < list->i_count; i++)
-        if (list->p_values[i].i_int == current)
+    size_t i;
+    for (i = 0; i < count; i++)
+        if (list[i].i_int == current)
             break;
 
-    if (++i >= list->i_count)
+    if (++i >= count)
         i = 0;
-    var_SetInteger(input, var, list->p_values[i].i_int);
+    var_SetInteger(input, var, list[i].i_int);
+    free(list);
 }
 
 static void HandleCommonKey(intf_thread_t *intf, input_thread_t *input,

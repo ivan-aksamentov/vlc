@@ -25,9 +25,7 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <limits.h>
-#ifdef HAVE_SEARCH_H
 #include <search.h>
-#endif
 #include <assert.h>
 
 struct keysym
@@ -81,9 +79,9 @@ static int parse (FILE *in)
         if (sym == NULL)
             abort ();
 
-        int val = sscanf (line,
-                          "#define XK_%31s %"SCNu32" /*%*cU+%"SCNx32" %63[^*]",
-                          sym->xname, &sym->xsym, &sym->usym, sym->uname);
+        int val = sscanf(line,
+                         "#define XK_%31s 0x%"SCNx32" /*%*cU+%"SCNx32" %63[^*]",
+                         sym->xname, &sym->xsym, &sym->usym, sym->uname);
         if (val < 3)
         {
             free (sym);

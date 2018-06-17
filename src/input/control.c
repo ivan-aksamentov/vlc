@@ -597,7 +597,7 @@ static void UpdateBookmarksOption( input_thread_t *p_input )
     vlc_memstream_puts( &vstr, "bookmarks=" );
 
     vlc_mutex_lock( &priv->p_item->lock );
-    var_Change( p_input, "bookmark", VLC_VAR_CLEARCHOICES, 0, 0 );
+    var_Change( p_input, "bookmark", VLC_VAR_CLEARCHOICES );
 
     for( int i = 0; i < priv->i_bookmark; i++ )
     {
@@ -605,8 +605,7 @@ static void UpdateBookmarksOption( input_thread_t *p_input )
 
         /* Add bookmark to choice-list */
         var_Change( p_input, "bookmark", VLC_VAR_ADDCHOICE,
-                    &(vlc_value_t){ .i_int = i },
-                    &(vlc_value_t){ .psz_string = sp->psz_name } );
+                    (vlc_value_t){ .i_int = i }, sp->psz_name );
 
         /* Append bookmark to option-buffer */
         /* TODO: escape inappropriate values */

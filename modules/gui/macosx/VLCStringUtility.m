@@ -73,8 +73,8 @@ NSString *const kVLCMediaUnknown = @"Unknown";
     NSMutableString *o_wrapped;
     NSString *o_out_string;
     NSRange glyphRange, effectiveRange, charRange;
-    NSRect lineFragmentRect;
-    unsigned glyphIndex, breaksInserted = 0;
+    NSUInteger glyphIndex;
+    unsigned breaksInserted = 0;
 
     NSTextStorage *o_storage = [[NSTextStorage alloc] initWithString: o_in_string
                                                           attributes: [NSDictionary dictionaryWithObjectsAndKeys:
@@ -91,8 +91,8 @@ NSString *const kVLCMediaUnknown = @"Unknown";
 
     for (glyphIndex = glyphRange.location ; glyphIndex < NSMaxRange(glyphRange) ;
         glyphIndex += effectiveRange.length) {
-        lineFragmentRect = [o_layout_manager lineFragmentRectForGlyphAtIndex: glyphIndex
-                                                              effectiveRange: &effectiveRange];
+        [o_layout_manager lineFragmentRectForGlyphAtIndex: glyphIndex
+                                           effectiveRange: &effectiveRange];
         charRange = [o_layout_manager characterRangeForGlyphRange: effectiveRange
                                                  actualGlyphRange: &effectiveRange];
         if ([o_wrapped lineRangeForRange:
@@ -118,9 +118,9 @@ NSString *const kVLCMediaUnknown = @"Unknown";
         mtime_t remaining = 0;
         if (dur > t)
             remaining = dur - t;
-        return [NSString stringWithFormat: @"-%s", secstotimestr(psz_time, (remaining / 1000000))];
+        return [NSString stringWithFormat: @"-%s", secstotimestr(psz_time, (int)(remaining / 1000000))];
     } else
-        return toNSStr(secstotimestr(psz_time, t / CLOCK_FREQ ));
+        return toNSStr(secstotimestr(psz_time, (int)(t / CLOCK_FREQ )));
 }
 
 - (NSString *)stringForTime:(long long int)time

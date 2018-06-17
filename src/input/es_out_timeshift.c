@@ -245,13 +245,11 @@ typedef struct
     /* */
     int            i_es;
     es_out_id_t    **pp_es;
+
+    es_out_t       out;
 } es_out_sys_t;
 
-static es_out_id_t *Add    ( es_out_t *, const es_format_t * );
-static int          Send   ( es_out_t *, es_out_id_t *, block_t * );
 static void         Del    ( es_out_t *, es_out_id_t * );
-static int          Control( es_out_t *, int i_query, va_list );
-static void         Destroy( es_out_t * );
 
 static int          TsStart( es_out_t * );
 static void         TsAutoStop( es_out_t * );
@@ -296,29 +294,18 @@ static int  CmdExecuteControl( es_out_t *, ts_cmd_t * );
 /* File helpers */
 static int GetTmpFile( char **ppsz_file, const char *psz_path );
 
+static const struct es_out_callbacks es_out_timeshift_cbs;
+
 /*****************************************************************************
  * input_EsOutTimeshiftNew:
  *****************************************************************************/
 es_out_t *input_EsOutTimeshiftNew( input_thread_t *p_input, es_out_t *p_next_out, int i_rate )
 {
-    es_out_t *p_out = malloc( sizeof(*p_out) );
-    if( !p_out )
-        return NULL;
-
     es_out_sys_t *p_sys = malloc( sizeof(*p_sys) );
     if( !p_sys )
-    {
-        free( p_out );
         return NULL;
-    }
 
-    /* */
-    p_out->pf_add     = Add;
-    p_out->pf_send    = Send;
-    p_out->pf_del     = Del;
-    p_out->pf_control = Control;
-    p_out->pf_destroy = Destroy;
-    p_out->p_sys      = p_sys;
+    p_sys->out.cbs = &es_out_timeshift_cbs;
 
     /* */
     p_sys->b_input_paused = false;
@@ -398,7 +385,7 @@ es_out_t *input_EsOutTimeshiftNew( input_thread_t *p_input, es_out_t *p_next_out
 #undef S
 #endif
 
-    return p_out;
+    return &p_sys->out;
 }
 
 /*****************************************************************************
@@ -406,7 +393,7 @@ es_out_t *input_EsOutTimeshiftNew( input_thread_t *p_input, es_out_t *p_next_out
  *****************************************************************************/
 static void Destroy( es_out_t *p_out )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     if( p_sys->b_delayed )
     {
@@ -421,12 +408,11 @@ static void Destroy( es_out_t *p_out )
     free( p_sys->psz_tmp_path );
     vlc_mutex_destroy( &p_sys->lock );
     free( p_sys );
-    free( p_out );
 }
 
 static es_out_id_t *Add( es_out_t *p_out, const es_format_t *p_fmt )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     ts_cmd_t cmd;
 
     es_out_id_t *p_es = malloc( sizeof( *p_es ) );
@@ -457,7 +443,7 @@ static es_out_id_t *Add( es_out_t *p_out, const es_format_t *p_fmt )
 }
 static int Send( es_out_t *p_out, es_out_id_t *p_es, block_t *p_block )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     ts_cmd_t cmd;
     int i_ret = VLC_SUCCESS;
 
@@ -477,7 +463,7 @@ static int Send( es_out_t *p_out, es_out_id_t *p_es, block_t *p_block )
 }
 static void Del( es_out_t *p_out, es_out_id_t *p_es )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     ts_cmd_t cmd;
 
     vlc_mutex_lock( &p_sys->lock );
@@ -497,7 +483,7 @@ static void Del( es_out_t *p_out, es_out_id_t *p_es )
 
 static int ControlLockedGetEmpty( es_out_t *p_out, bool *pb_empty )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     if( p_sys->b_delayed && TsHasCmd( p_sys->p_ts ) )
         *pb_empty = false;
@@ -508,7 +494,7 @@ static int ControlLockedGetEmpty( es_out_t *p_out, bool *pb_empty )
 }
 static int ControlLockedGetWakeup( es_out_t *p_out, mtime_t *pi_wakeup )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     if( p_sys->b_delayed )
     {
@@ -524,7 +510,7 @@ static int ControlLockedGetWakeup( es_out_t *p_out, mtime_t *pi_wakeup )
 }
 static int ControlLockedGetBuffering( es_out_t *p_out, bool *pb_buffering )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     if( p_sys->b_delayed )
         *pb_buffering = true;
@@ -535,7 +521,7 @@ static int ControlLockedGetBuffering( es_out_t *p_out, bool *pb_buffering )
 }
 static int ControlLockedSetPauseState( es_out_t *p_out, bool b_source_paused, bool b_paused, mtime_t i_date )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     int i_ret;
 
     if( !p_sys->b_delayed && !b_source_paused == !b_paused )
@@ -570,7 +556,7 @@ static int ControlLockedSetPauseState( es_out_t *p_out, bool b_source_paused, bo
 }
 static int ControlLockedSetRate( es_out_t *p_out, int i_src_rate, int i_rate )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     int i_ret;
 
     if( !p_sys->b_delayed && i_src_rate == i_rate )
@@ -606,14 +592,14 @@ static int ControlLockedSetRate( es_out_t *p_out, int i_src_rate, int i_rate )
 }
 static int ControlLockedSetFrameNext( es_out_t *p_out )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     return es_out_SetFrameNext( p_sys->p_out );
 }
 
 static int ControlLocked( es_out_t *p_out, int i_query, va_list args )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     switch( i_query )
     {
@@ -737,7 +723,7 @@ static int ControlLocked( es_out_t *p_out, int i_query, va_list args )
 }
 static int Control( es_out_t *p_out, int i_query, va_list args )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     int i_ret;
 
     vlc_mutex_lock( &p_sys->lock );
@@ -751,6 +737,15 @@ static int Control( es_out_t *p_out, int i_query, va_list args )
     return i_ret;
 }
 
+static const struct es_out_callbacks es_out_timeshift_cbs =
+{
+    .add = Add,
+    .send = Send,
+    .del = Del,
+    .control = Control,
+    .destroy = Destroy,
+};
+
 /*****************************************************************************
  *
  *****************************************************************************/
@@ -762,7 +757,7 @@ static void TsDestroy( ts_thread_t *p_ts )
 }
 static int TsStart( es_out_t *p_out )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
     ts_thread_t *p_ts;
 
     assert( !p_sys->b_delayed );
@@ -803,7 +798,7 @@ static int TsStart( es_out_t *p_out )
 }
 static void TsAutoStop( es_out_t *p_out )
 {
-    es_out_sys_t *p_sys = p_out->p_sys;
+    es_out_sys_t *p_sys = container_of(p_out, es_out_sys_t, out);
 
     if( !p_sys->b_delayed || !TsIsUnused( p_sys->p_ts ) )
         return;

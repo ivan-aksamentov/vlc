@@ -1585,7 +1585,7 @@ static int MuxBlock( sout_mux_t *p_mux, sout_input_t *p_input )
     block_t *p_data = block_FifoGet( p_input->p_fifo );
     block_t *p_og = NULL;
     ogg_packet op;
-    uint64_t i_time;
+    mtime_t i_time;
 
     if( p_stream->fmt.i_codec != VLC_CODEC_VORBIS &&
         p_stream->fmt.i_codec != VLC_CODEC_FLAC &&
@@ -1661,11 +1661,11 @@ static int MuxBlock( sout_mux_t *p_mux, sout_input_t *p_input )
         a += 5000;\
     a /= CLOCK_FREQ;
 
-            mtime_t dt = (p_data->i_dts - p_sys->i_start_dts) * p_stream->fmt.video.i_frame_rate /
+            int64_t dt = (p_data->i_dts - p_sys->i_start_dts) * p_stream->fmt.video.i_frame_rate /
                     p_stream->fmt.video.i_frame_rate_base;
             FRAME_ROUND( dt );
 
-            mtime_t pt = (p_data->i_pts - p_sys->i_start_dts - p_stream->i_baseptsdelay ) *
+            int64_t pt = (p_data->i_pts - p_sys->i_start_dts - p_stream->i_baseptsdelay ) *
                     p_stream->fmt.video.i_frame_rate / p_stream->fmt.video.i_frame_rate_base;
             FRAME_ROUND( pt );
 
@@ -1683,7 +1683,7 @@ static int MuxBlock( sout_mux_t *p_mux, sout_input_t *p_input )
 
             if( p_data->i_flags & BLOCK_FLAG_TYPE_I )
                 p_stream->i_last_keyframe = dt;
-            mtime_t dist = dt - p_stream->i_last_keyframe;
+            int64_t dist = dt - p_stream->i_last_keyframe;
 
             /* Everything increments by two for progressive */
             if ( true )
@@ -1692,7 +1692,7 @@ static int MuxBlock( sout_mux_t *p_mux, sout_input_t *p_input )
                 dt *=2;
             }
 
-            mtime_t delay = pt - dt;
+            int64_t delay = pt - dt;
             if ( delay < 0 ) delay *= -1;
 
             op.granulepos = (pt - delay) << 31 | (dist&0xff00) << 14

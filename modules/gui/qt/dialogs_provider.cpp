@@ -114,21 +114,6 @@ DialogsProvider::~DialogsProvider()
     delete miscPopupMenu;
 }
 
-QStringList DialogsProvider::getOpenURL( QWidget *parent,
-                                         const QString &caption,
-                                         const QUrl &dir,
-                                         const QString &filter,
-                                         QString *selectedFilter )
-{
-    QStringList res;
-    QList<QUrl> urls = QFileDialog::getOpenFileUrls( parent, caption, dir, filter, selectedFilter );
-
-    foreach( const QUrl& url, urls )
-        res.append( url.toEncoded() );
-
-    return res;
-}
-
 QString DialogsProvider::getSaveFileName( QWidget *parent,
                                           const QString &caption,
                                           const QUrl &dir,
@@ -405,17 +390,15 @@ void DialogsProvider::openFileGenericDialog( intf_dialog_args_t *p_arg )
     }
     else /* non-save mode */
     {
-        QStringList urls = getOpenURL( NULL, qfu( p_arg->psz_title ),
+        QList<QUrl> urls = QFileDialog::getOpenFileUrls( NULL, qfu( p_arg->psz_title ),
                                        p_intf->p_sys->filepath, extensions );
         p_arg->i_results = urls.count();
         p_arg->psz_results = (char **)vlc_alloc( p_arg->i_results, sizeof( char * ) );
         i = 0;
-        foreach( const QString &uri, urls )
-            p_arg->psz_results[i++] = strdup( qtu( uri ) );
-        if(i == 0)
-            p_intf->p_sys->filepath = "";
-        else
-            p_intf->p_sys->filepath = QUrl::fromEncoded(p_arg->psz_results[i-1]);
+        foreach( const QUrl &uri, urls )
+            p_arg->psz_results[i++] = strdup( uri.toEncoded().constData() );
+        if( !urls.isEmpty() )
+            p_intf->p_sys->filepath =  urls.last();
     }
 
     /* Callback */
@@ -504,15 +487,19 @@ QStringList DialogsProvider::showSimpleOpen( const QString& help,
     fileTypes.replace( ";*", " *");
     fileTypes.chop(2); //remove trailling ";;"
 
-    QStringList urls = getOpenURL( NULL,
+    QList<QUrl> urls = QFileDialog::getOpenFileUrls( NULL,
         help.isEmpty() ? qtr(I_OP_SEL_FILES ) : help,
         path.isEmpty() ? p_intf->p_sys->filepath : path,
         fileTypes );
 
     if( !urls.isEmpty() )
-        p_intf->p_sys->filepath = QUrl( urls.last() );
+        p_intf->p_sys->filepath = urls.last();
 
-    return urls;
+    QStringList res;
+    foreach( const QUrl &url, urls )
+        res << url.toEncoded();
+
+    return res;
 }
 
 /**
@@ -581,14 +568,15 @@ static void openDirectory( intf_thread_t *p_intf, bool pl, bool go )
 QString DialogsProvider::getDirectoryDialog( intf_thread_t *p_intf )
 {
     const QStringList schemes = QStringList(QStringLiteral("file"));
-    QString dir = QFileDialog::getExistingDirectoryUrl( NULL,
+    QUrl dirurl = QFileDialog::getExistingDirectoryUrl( NULL,
             qtr( I_OP_DIR_WINTITLE ), p_intf->p_sys->filepath,
-            QFileDialog::ShowDirsOnly, schemes ).toLocalFile();
+            QFileDialog::ShowDirsOnly, schemes );
 
-    if( dir.isEmpty() ) return QString();
+    if( dirurl.isEmpty() ) return QString();
 
-    p_intf->p_sys->filepath = dir;
+    p_intf->p_sys->filepath = dirurl;
 
+    QString dir = dirurl.toLocalFile();
     const char *scheme = "directory";
     if( dir.endsWith( DIR_SEP "VIDEO_TS", Qt::CaseInsensitive ) )
         scheme = "dvd";
@@ -806,22 +794,20 @@ void DialogsProvider::loadSubtitlesFile()
     if( !p_item ) return;
 
     char *path = input_item_GetURI( p_item );
-    char *path2 = NULL;
+    QUrl url;
     if( path )
     {
-        path2 = vlc_uri2path( path );
-        free( path );
-        if( path2 )
-        {
-            char *sep = strrchr( path2, DIR_SEP_CHAR );
-            if( sep ) *sep = '\0';
-        }
+        url.setUrl( qfu(path) );
+        url = url.adjusted(QUrl::RemoveFilename);
+        if (url.scheme() != "file")
+            url.clear();
+        free(path);
     }
 
     QStringList qsl = showSimpleOpen( qtr( "Open subtitles..." ),
                                       EXT_FILTER_SUBTITLE,
-                                      qfu( path2 ) );
-    free( path2 );
+                                      url );
+
     foreach( const QString &qsUrl, qsl )
     {
         if( input_AddSlave( p_input, SLAVE_TYPE_SPU, qtu( qsUrl ), true, true, false ) )

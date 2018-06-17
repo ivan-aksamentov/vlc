@@ -102,6 +102,7 @@ case "${host_os}" in
     ;;
   linux*)
     SYS=linux
+    test "${host_cpu}" = "riscv64" && CFLAGS="${CFLAGS} -pthread"
     ;;
   bsdi*)
     SYS=bsdi
@@ -129,8 +130,8 @@ case "${host_os}" in
 
     dnl Force gcc "-arch" flag
     ARCH_flag=""
-    case "${host}" in
-      i?86*)
+    case "${host_cpu}" in
+      i?86)
         ARCH_flag="-arch i386"
       ;;
       ppc64*)
@@ -139,7 +140,7 @@ case "${host_os}" in
       ppc*)
         ARCH_flag="-arch ppc"
       ;;
-      x86_64*)
+      x86_64)
         ARCH_flag="-arch x86_64"
       ;;
       arm*)
@@ -249,8 +250,8 @@ case "${host_os}" in
         dnl
         dnl NSIS/MSI Installer prefix and WIN64
         dnl
-        case "${host}" in
-            amd64*|x86_64*)
+        case "${host_cpu}" in
+            amd64|x86_64)
                 HAVE_WIN64="1"
                 WINDOWS_ARCH="x64"
                 PROGRAMFILES="PROGRAMFILES64"
@@ -936,7 +937,7 @@ dnl
 AX_APPEND_COMPILE_FLAGS([-Wall -Wextra -Wsign-compare -Wundef -Wpointer-arith -Wvolatile-register-var -Wformat -Wformat-security -Wduplicated-branches -Wduplicated-cond], [CFLAGS])
 AX_APPEND_COMPILE_FLAGS([-Wall -Wextra -Wsign-compare -Wundef -Wpointer-arith -Wvolatile-register-var -Wformat -Wformat-security -Wduplicated-branches -Wduplicated-cond], [CXXFLAGS])
 
-AX_APPEND_COMPILE_FLAGS([-Wbad-function-cast -Wwrite-strings -Wmissing-prototypes -Werror-implicit-function-declaration -Winit-self -Wlogical-op -Wshadow=local -Wmultistatement-macros -Wvla-larger-than=1024], [CFLAGS])
+AX_APPEND_COMPILE_FLAGS([-Wbad-function-cast -Wwrite-strings -Wmissing-prototypes -Werror-implicit-function-declaration -Winit-self -Wlogical-op -Wshadow=local -Wmultistatement-macros], [CFLAGS])
 AX_APPEND_COMPILE_FLAGS([-pipe], [CFLAGS])
 
 dnl
@@ -2931,25 +2932,6 @@ AS_IF( [test "${enable_telx}" != "no" ],[
   ])
 
 dnl
-dnl libass subtitle rendering module
-dnl
-AC_ARG_ENABLE(libass,
-  [  --enable-libass         Subtitle support using libass (default enabled)])
-AS_IF( [test "${enable_libass}" != "no"], [
-  PKG_CHECK_MODULES(LIBASS, [libass >= 0.9.8],
-      [
-        VLC_ADD_PLUGIN([libass])
-
-        AC_CHECK_HEADERS(fontconfig/fontconfig.h,
-          [VLC_ADD_CPPFLAGS([libass],[-DHAVE_FONTCONFIG])
-           VLC_ADD_LIBS([libass],[-lfontconfig])
-       ])
-      ],[
-        AC_MSG_WARN([${LIBASS_PKG_ERRORS}.])
-      ])
-  ])
-
-dnl
 dnl ARIB subtitles rendering module
 dnl
 AC_ARG_ENABLE(aribsub,
@@ -3068,38 +3050,54 @@ AC_ARG_ENABLE(xcb,
     enable_xcb="no"
   ])
 ])
-AC_ARG_ENABLE(xvideo,
-  [  --enable-xvideo         XVideo support (default enabled)],, [
-    enable_xvideo="$enable_xcb"
-])
 
 have_xcb="no"
+have_xkbcommon_x11="no"
 have_xcb_keysyms="no"
-have_xcb_randr="no"
-have_xcb_xvideo="no"
 AS_IF([test "${enable_xcb}" != "no"], [
-  dnl libxcb
-  PKG_CHECK_MODULES(XCB, [xcb >= 1.6])
-  have_xcb="yes"
-  PKG_CHECK_MODULES(XCB_SHM, [xcb-shm])
-  PKG_CHECK_MODULES(XCB_COMPOSITE, [xcb-composite])
-  PKG_CHECK_MODULES(XPROTO, [xproto])
+  xcb_err=""
 
-  AS_IF([test "${enable_xvideo}" != "no"], [
-    PKG_CHECK_MODULES(XCB_XV, [xcb-xv >= 1.1.90.1], [have_xcb_xvideo="yes"])
+  dnl libxcb
+  PKG_CHECK_MODULES([XCB], [xcb >= 1.6],, [
+    xcb_err="$xcb_err ${XCB_PKG_ERRORS}."])
+  PKG_CHECK_MODULES([XCB_COMPOSITE], [xcb-composite],, [
+    xcb_err="$xcb_err ${XCB_COMPOSITE_PKG_ERRORS}."])
+  PKG_CHECK_MODULES([XCB_RANDR], [xcb-randr >= 1.3],, [
+    xcb_err="$xcb_err ${XCB_RANDR_PKG_ERRORS}."])
+  PKG_CHECK_MODULES([XCB_SHM], [xcb-shm],, [
+    xcb_err="$xcb_err ${XCB_SHM_PKG_ERRORS}."])
+  PKG_CHECK_MODULES([XCB_XKB], [xcb-xkb],, [
+    xcb_err="$xcb_err ${XCB_XKB_PKG_ERRORS}."])
+  PKG_CHECK_MODULES([XCB_XV], [xcb-xv >= 1.1.90.1],, [
+    xcb_err="$xcb_err ${XCB_XV_PKG_ERRORS}."])
+
+  dnl xproto
+  PKG_CHECK_MODULES(XPROTO, [xproto],, [
+    xcb_err="$xcb_err ${XPROTO_PKG_ERRORS}."])
+
+  AS_IF([test -n "$xcb_err"], [
+    AC_MSG_ERROR([$xcb_err Pass --disable-xcb to skip X11 support.])
   ])
 
-  PKG_CHECK_MODULES(XCB_RANDR, [xcb-randr >= 1.3], [have_xcb_randr="yes"])
+  dnl xkbcommon
+  PKG_CHECK_MODULES([XKBCOMMON_X11], [xkbcommon-x11], [
+    have_xkbcommon_x11="yes"
+  ], [
+    AC_MSG_WARN([${XKBCOMMON_X11_PKG_ERRORS}. Hotkeys are disabled.])
+  ])
 
   dnl xcb-utils
-  PKG_CHECK_MODULES(XCB_KEYSYMS, [xcb-keysyms >= 0.3.4], [have_xcb_keysyms="yes"], [
-    AC_MSG_WARN([${XCB_KEYSYMS_PKG_ERRORS}. Hotkeys will not work.])
+  PKG_CHECK_MODULES([XCB_KEYSYMS], [xcb-keysyms >= 0.3.4], [
+    have_xcb_keysyms="yes"
+  ], [
+    AC_MSG_WARN([${XCB_KEYSYMS_PKG_ERRORS}. Global hotkeys are disabled.])
   ])
+
+  have_xcb="yes"
 ])
 AM_CONDITIONAL([HAVE_XCB], [test "${have_xcb}" = "yes"])
+AM_CONDITIONAL([HAVE_XKBCOMMON_X11], [test "${have_xkbcommon_x11}" = "yes"])
 AM_CONDITIONAL([HAVE_XCB_KEYSYMS], [test "${have_xcb_keysyms}" = "yes"])
-AM_CONDITIONAL([HAVE_XCB_RANDR], [test "${have_xcb_randr}" = "yes"])
-AM_CONDITIONAL([HAVE_XCB_XVIDEO], [test "${have_xcb_xvideo}" = "yes"])
 
 
 dnl
@@ -3147,48 +3145,55 @@ dnl  Wayland
 dnl
 AC_ARG_ENABLE(wayland,
   [AS_HELP_STRING([--enable-wayland], [Wayland support (default auto)])])
+
 have_wayland="no"
-have_wayland_egl="no"
-
 AS_IF([test "${enable_wayland}" != "no"], [
-  PKG_CHECK_MODULES([WAYLAND_CLIENT], [wayland-client >= 1.5.91], [
-    AC_MSG_CHECKING([for the Wayland protocols])
-    PKG_CHECK_EXISTS([wayland-protocols >= 1.12], [
-      WAYLAND_PROTOCOLS="$(${PKG_CONFIG} wayland-protocols --variable pkgdatadir)"
-      AC_MSG_RESULT([${WAYLAND_PROTOCOLS}])
+  wl_err=""
+
+  dnl wayland
+  PKG_CHECK_MODULES([WAYLAND_CLIENT], [wayland-client >= 1.5.91],, [
+    wl_err="$wl_err ${WAYLAND_CLIENT_PKG_ERRORS}."
+  ])
+  PKG_CHECK_MODULES([WAYLAND_CURSOR], [wayland-cursor],, [
+    wl_err="$wl_err ${WAYLAND_CURSOR_PKG_ERRORS}."
+  ])
+  PKG_CHECK_MODULES([WAYLAND_EGL], [wayland-egl],, [
+    wl_err="$wl_err ${WAYLAND_EGL_PKG_ERRORS}."
+  ])
+  PKG_CHECK_MODULES([WAYLAND_SCANNER], [wayland-scanner >= 1.15], [
+    WAYLAND_SCANNER="$(${PKG_CONFIG} wayland-scanner --variable wayland_scanner)"
+  ], [
+    wl_err="$wl_err ${WAYLAND_SCANNER_PKG_ERRORS}."
+  ])
+
+  dnl wayland-protocols
+  PKG_CHECK_MODULES([WAYLAND_PROTOCOLS], [wayland-protocols >= 1.12], [
+    WAYLAND_PROTOCOLS="$(${PKG_CONFIG} wayland-protocols --variable pkgdatadir)"
+  ], [
+    wl_err="$wl_err ${WAYLAND_PROTOCOLS_PKG_ERRORS}."
+  ])
+
+  AS_IF([test -n "$wl_err"], [
+    AS_IF([test -n "$enable_wayland"], [
+      AC_MSG_ERROR([$wl_err])
     ], [
-      AC_MSG_RESULT([not found])
-      AC_MSG_ERROR([$(${PKG_CONFIG} --print-errors 'wayland-protocols >= 1.12')])
-    ])
-
-    AC_MSG_CHECKING([for the Wayland scanner])
-    PKG_CHECK_EXISTS([wayland-scanner >= 1.15], [
-      WAYLAND_SCANNER="$(${PKG_CONFIG} wayland-scanner --variable wayland_scanner)"
-      AC_MSG_RESULT([${WAYLAND_SCANNER}])
-    ], [
-      AC_MSG_RESULT([not found])
-      AC_MSG_ERROR([$(${PKG_CONFIG} --print-errors 'wayland-scanner >= 1.15')])
-    ])
-
-    have_wayland="yes"
-
-    AS_IF([test "${have_egl}" = "yes"], [
-      PKG_CHECK_MODULES([WAYLAND_EGL], [wayland-egl], [
-        have_wayland_egl="yes"
-      ], [
-        AC_MSG_ERROR([${WAYLAND_EGL_PKG_ERRORS}.])
-      ])
+      AC_MSG_WARN([$wl_err])
     ])
   ], [
-    AS_IF([test -n "${enable_wayland}"], [
-      AC_MSG_ERROR([${WAYLAND_CLIENT_PKG_ERRORS}.])
-    ])
+    have_wayland="yes"
+  ])
+
+  dnl xkbcommon
+  PKG_CHECK_MODULES([XKBCOMMON], [xkbcommon], [
+    have_xkbcommon="yes"
+  ], [
+    AC_MSG_WARN([${XKBCOMMON_PKG_ERRORS}. Hotkeys are disabled.])
   ])
 ])
+AM_CONDITIONAL([HAVE_WAYLAND], [test "${have_wayland}" = "yes"])
 AC_SUBST([WAYLAND_PROTOCOLS])
 AC_SUBST([WAYLAND_SCANNER])
-AM_CONDITIONAL([HAVE_WAYLAND], [test "${have_wayland}" = "yes"])
-AM_CONDITIONAL([HAVE_WAYLAND_EGL], [test "${have_wayland_egl}" = "yes"])
+AM_CONDITIONAL([HAVE_XKBCOMMON], [test "${have_xkbcommon}" = "yes"])
 
 
 dnl
@@ -3288,6 +3293,25 @@ AM_CONDITIONAL([HAVE_FREETYPE], [test "${have_freetype}" = "yes"])
 AM_CONDITIONAL([HAVE_FONTCONFIG], [test "${have_fontconfig}" = "yes"])
 AM_CONDITIONAL([HAVE_FRIBIDI], [test "${have_fribidi}" = "yes"])
 AM_CONDITIONAL([HAVE_HARFBUZZ], [test "${have_harfbuzz}" = "yes"])
+
+dnl
+dnl libass subtitle rendering module
+dnl
+AC_ARG_ENABLE(libass,
+  [  --enable-libass         Subtitle support using libass (default enabled)])
+AS_IF( [test "${enable_libass}" != "no"], [
+  PKG_CHECK_MODULES(LIBASS, [libass >= 0.9.8],
+      [
+        VLC_ADD_PLUGIN([libass])
+
+        if test "${have_fontconfig}" != "no"; then
+            VLC_ADD_CPPFLAGS([libass],[-DHAVE_FONTCONFIG])
+            VLC_ADD_LIBS([libass],[${FONTCONFIG_LIBS}])
+        fi
+      ],[
+        AC_MSG_WARN([${LIBASS_PKG_ERRORS}.])
+      ])
+  ])
 
 dnl
 dnl SAPI (text to Speech renderer for Windows)
@@ -3669,7 +3693,7 @@ AC_ARG_ENABLE(qt, [
 ])
 have_qt5_x11="no"
 AS_IF([test "${enable_qt}" != "no"], [
-  PKG_CHECK_MODULES([QT], [Qt5Core >= 5.5.0 Qt5Widgets Qt5Gui Qt5Svg], [
+  PKG_CHECK_MODULES([QT], [Qt5Core >= 5.9.0 Qt5Widgets Qt5Gui Qt5Svg], [
       PKG_CHECK_MODULES([QT5_X11], [Qt5X11Extras], [
           have_qt5_x11="yes"
       ],[

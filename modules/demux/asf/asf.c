@@ -111,7 +111,7 @@ typedef struct
 {
     mtime_t             i_time;     /* s */
     mtime_t             i_sendtime;
-    mtime_t             i_length;   /* length of file file */
+    mtime_t             i_length;   /* length of file */
     uint64_t            i_bitrate;  /* global file bitrate */
     bool                b_eos;      /* end of current stream */
     bool                b_eof;      /* end of current media */
@@ -1255,7 +1255,7 @@ static int DemuxInit( demux_t *p_demux )
 
         if( p_sys->i_length > 0 )
         {
-            p_sys->i_bitrate = 8 * i_size * 1000000 / p_sys->i_length;
+            p_sys->i_bitrate = 8 * i_size * CLOCK_FREQ / p_sys->i_length;
         }
     }
 

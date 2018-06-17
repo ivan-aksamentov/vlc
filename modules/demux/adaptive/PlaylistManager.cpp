@@ -209,7 +209,7 @@ static bool streamCompare(const PrioritizedAbstractStream &a,  const Prioritized
 }
 
 AbstractStream::buffering_status PlaylistManager::bufferize(mtime_t i_nzdeadline,
-                                                            unsigned i_min_buffering, unsigned i_extra_buffering)
+                                                            mtime_t i_min_buffering, mtime_t i_extra_buffering)
 {
     AbstractStream::buffering_status i_return = AbstractStream::buffering_end;
 
@@ -412,7 +412,7 @@ int PlaylistManager::demux_callback(demux_t *p_demux)
     return manager->doDemux(DEMUX_INCREMENT);
 }
 
-int PlaylistManager::doDemux(int64_t increment)
+int PlaylistManager::doDemux(mtime_t increment)
 {
     vlc_mutex_lock(&demux.lock);
     if(demux.i_nzpcr == VLC_TS_INVALID)
@@ -617,8 +617,8 @@ void PlaylistManager::setBufferingRunState(bool b)
 void PlaylistManager::Run()
 {
     vlc_mutex_lock(&lock);
-    const unsigned i_min_buffering = playlist->getMinBuffering();
-    const unsigned i_extra_buffering = playlist->getMaxBuffering() - i_min_buffering;
+    const mtime_t i_min_buffering = playlist->getMinBuffering();
+    const mtime_t i_extra_buffering = playlist->getMaxBuffering() - i_min_buffering;
     while(1)
     {
         mutex_cleanup_push(&lock);

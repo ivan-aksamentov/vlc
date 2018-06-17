@@ -277,33 +277,34 @@ static void ProcessGesture( intf_thread_t *p_intf )
             if( p_input == NULL )
                 break;
 
-            vlc_value_t list, list2;
-            var_Change( p_input, "audio-es", VLC_VAR_GETCHOICES,
-                        &list, &list2 );
+            vlc_value_t *list;
+            size_t count;
 
-            if( list.p_list->i_count > 1 )
+            var_Change( p_input, "audio-es", VLC_VAR_GETCHOICES,
+                        &count, &list, (char ***)NULL );
+
+            if( count > 1 )
             {
                 int i_audio_es = var_GetInteger( p_input, "audio-es" );
-                int i;
+                size_t i;
 
-                for( i = 0; i < list.p_list->i_count; i++ )
-                     if( i_audio_es == list.p_list->p_values[i].i_int )
+                for( i = 0; i < count; i++ )
+                     if( i_audio_es == list[i].i_int )
                          break;
                 /* value of audio-es was not in choices list */
-                if( i == list.p_list->i_count )
+                if( i == count )
                 {
                     msg_Warn( p_input,
                               "invalid current audio track, selecting 0" );
                     i = 0;
                 }
-                else if( i == list.p_list->i_count - 1 )
+                else if( i == count - 1 )
                     i = 1;
                 else
                     i++;
-                var_SetInteger( p_input, "audio-es",
-                                list.p_list->p_values[i].i_int );
+                var_SetInteger( p_input, "audio-es", list[i].i_int );
             }
-            var_FreeList( &list, &list2 );
+            free(list);
             vlc_object_release( p_input );
             break;
         }
@@ -314,33 +315,34 @@ static void ProcessGesture( intf_thread_t *p_intf )
             if( p_input == NULL )
                 break;
 
-            vlc_value_t list, list2;
-            var_Change( p_input, "spu-es", VLC_VAR_GETCHOICES,
-                        &list, &list2 );
+            vlc_value_t *list;
+            size_t count;
 
-            if( list.p_list->i_count > 1 )
+            var_Change( p_input, "spu-es", VLC_VAR_GETCHOICES,
+                        &count, &list, (char ***)NULL );
+
+            if( count > 1 )
             {
                 int i_audio_es = var_GetInteger( p_input, "spu-es" );
-                int i;
+                size_t i;
 
-                for( i = 0; i < list.p_list->i_count; i++ )
-                     if( i_audio_es == list.p_list->p_values[i].i_int )
+                for( i = 0; i < count; i++ )
+                     if( i_audio_es == list[i].i_int )
                          break;
                 /* value of audio-es was not in choices list */
-                if( i == list.p_list->i_count )
+                if( i == count )
                 {
                     msg_Warn( p_input,
                               "invalid current subtitle track, selecting 0" );
                     i = 0;
                 }
-                else if( i == list.p_list->i_count - 1 )
+                else if( i == count - 1 )
                     i = 1;
                 else
                     i++;
-                var_SetInteger( p_input, "audio-es",
-                                list.p_list->p_values[i].i_int );
+                var_SetInteger( p_input, "audio-es", list[i].i_int );
             }
-            var_FreeList( &list, &list2 );
+            free(list);
             vlc_object_release( p_input );
             break;
         }

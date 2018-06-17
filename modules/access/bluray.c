@@ -928,6 +928,7 @@ typedef struct
     es_out_t *p_dst_out;
     vlc_object_t *p_obj;
     void *priv;
+    es_out_t es_out;
 } es_out_sys_t;
 
 typedef struct  fmt_es_pair {
@@ -1006,7 +1007,7 @@ static int blurayEsPid(demux_sys_t *p_sys, int es_type, int i_es_idx)
 
 static es_out_id_t *esOutAdd(es_out_t *p_out, const es_format_t *p_fmt)
 {
-    es_out_sys_t *es_out_sys = p_out->p_sys;
+    es_out_sys_t *es_out_sys = container_of(p_out, es_out_sys_t, es_out);
     demux_t *p_demux = es_out_sys->priv;
     demux_sys_t *p_sys = p_demux->p_sys;
     es_format_t fmt;
@@ -1067,14 +1068,14 @@ static es_out_id_t *esOutAdd(es_out_t *p_out, const es_format_t *p_fmt)
 
 static int esOutSend(es_out_t *p_out, es_out_id_t *p_es, block_t *p_block)
 {
-    es_out_sys_t *es_out_sys = p_out->p_sys;
+    es_out_sys_t *es_out_sys = container_of(p_out, es_out_sys_t, es_out);
 
     return es_out_Send(es_out_sys->p_dst_out, p_es, p_block);
 }
 
 static void esOutDel(es_out_t *p_out, es_out_id_t *p_es)
 {
-    es_out_sys_t *es_out_sys = p_out->p_sys;
+    es_out_sys_t *es_out_sys = container_of(p_out, es_out_sys_t, es_out);
     demux_t *p_demux = es_out_sys->priv;
     demux_sys_t *p_sys = p_demux->p_sys;
 
@@ -1088,46 +1089,42 @@ static void esOutDel(es_out_t *p_out, es_out_id_t *p_es)
 
 static int esOutControl(es_out_t *p_out, int i_query, va_list args)
 {
-    es_out_sys_t *es_out_sys = p_out->p_sys;
+    es_out_sys_t *es_out_sys = container_of(p_out, es_out_sys_t, es_out);
 
     return es_out_vaControl(es_out_sys->p_dst_out, i_query, args);
 }
 
 static void esOutDestroy(es_out_t *p_out)
 {
-    es_out_sys_t *es_out_sys = p_out->p_sys;
+    es_out_sys_t *es_out_sys = container_of(p_out, es_out_sys_t, es_out);
     demux_t *p_demux = es_out_sys->priv;
     demux_sys_t *p_sys = p_demux->p_sys;
 
     for (size_t i = 0; i < vlc_array_count(&p_sys->es); ++i)
         free(vlc_array_item_at_index(&p_sys->es, i));
     vlc_array_clear(&p_sys->es);
-    free(p_out->p_sys);
-    free(p_out);
+    free(es_out_sys);
 }
+
+static const struct es_out_callbacks esOutCallbacks = {
+    .add = esOutAdd,
+    .send = esOutSend,
+    .del = esOutDel,
+    .control = esOutControl,
+    .destroy = esOutDestroy,
+};
 
 static es_out_t *esOutNew(vlc_object_t *p_obj, es_out_t *p_dst_out, void *priv)
 {
-    es_out_t    *p_out = malloc(sizeof(*p_out));
-    if (unlikely(p_out == NULL))
-        return NULL;
-
-    p_out->pf_add       = esOutAdd;
-    p_out->pf_control   = esOutControl;
-    p_out->pf_del       = esOutDel;
-    p_out->pf_destroy   = esOutDestroy;
-    p_out->pf_send      = esOutSend;
-
     es_out_sys_t *es_out_sys = malloc(sizeof(*es_out_sys));
-    if (unlikely(es_out_sys == NULL)) {
-        free(p_out);
+    if (unlikely(es_out_sys == NULL))
         return NULL;
-    }
-    p_out->p_sys = es_out_sys;
+
     es_out_sys->p_dst_out = p_dst_out;
     es_out_sys->p_obj = p_obj;
     es_out_sys->priv = priv;
-    return p_out;
+    es_out_sys->es_out.cbs = &esOutCallbacks;
+    return &es_out_sys->es_out;
 }
 
 /*****************************************************************************
@@ -2048,7 +2045,9 @@ static int blurayControl(demux_t *p_demux, int query, va_list args)
 
     case DEMUX_CAN_RECORD:
     case DEMUX_GET_FPS:
-    case DEMUX_SET_GROUP:
+    case DEMUX_SET_GROUP_DEFAULT:
+    case DEMUX_SET_GROUP_ALL:
+    case DEMUX_SET_GROUP_LIST:
     case DEMUX_HAS_UNSUPPORTED_META:
     default:
         return VLC_EGENERIC;

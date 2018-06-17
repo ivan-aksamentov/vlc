@@ -1219,7 +1219,8 @@ static void UpdatePtsDelay( input_thread_t *p_input )
 static void InitPrograms( input_thread_t * p_input )
 {
     int i_es_out_mode;
-    vlc_list_t list;
+    int *tab;
+    size_t count;
 
     /* Compute correct pts_delay */
     UpdatePtsDelay( p_input );
@@ -1234,16 +1235,15 @@ static void InitPrograms( input_thread_t * p_input )
         {
             char *buf;
 
-            TAB_INIT( list.i_count, list.p_values );
+            TAB_INIT(count, tab);
             for( const char *prgm = strtok_r( prgms, ",", &buf );
                  prgm != NULL;
                  prgm = strtok_r( NULL, ",", &buf ) )
             {
-                vlc_value_t val = { .i_int = atoi( prgm ) };
-                TAB_APPEND(list.i_count, list.p_values, val);
+                TAB_APPEND(count, tab, atoi(prgm));
             }
 
-            if( list.i_count > 0 )
+            if( count > 0 )
                 i_es_out_mode = ES_OUT_MODE_PARTIAL;
                 /* Note : we should remove the "program" callback. */
 
@@ -1259,18 +1259,25 @@ static void InitPrograms( input_thread_t * p_input )
     /* Inform the demuxer about waited group (needed only for DVB) */
     if( i_es_out_mode == ES_OUT_MODE_ALL )
     {
-        demux_Control( input_priv(p_input)->master->p_demux, DEMUX_SET_GROUP, -1, NULL );
+        demux_Control( input_priv(p_input)->master->p_demux,
+                       DEMUX_SET_GROUP_ALL );
     }
     else if( i_es_out_mode == ES_OUT_MODE_PARTIAL )
     {
-        demux_Control( input_priv(p_input)->master->p_demux, DEMUX_SET_GROUP, -1,
-                       &list );
-        TAB_CLEAN( list.i_count, list.p_values );
+        demux_Control( input_priv(p_input)->master->p_demux,
+                       DEMUX_SET_GROUP_LIST, count, tab );
+        free(tab);
     }
     else
     {
-        demux_Control( input_priv(p_input)->master->p_demux, DEMUX_SET_GROUP,
-                       es_out_GetGroupForced( input_priv(p_input)->p_es_out ), NULL );
+        int program = es_out_GetGroupForced( input_priv(p_input)->p_es_out );
+        if( program == 0 )
+            demux_Control( input_priv(p_input)->master->p_demux,
+                           DEMUX_SET_GROUP_DEFAULT );
+        else
+            demux_Control( input_priv(p_input)->master->p_demux,
+                           DEMUX_SET_GROUP_LIST, (size_t)1,
+                           (const int *)&program );
     }
 }
 
@@ -1694,7 +1701,7 @@ static void ViewpointApply( input_thread_t *p_input )
         var_SetAddress( pp_vout[i], "viewpoint", &priv->viewpoint );
         /* This variable can only be read from callbacks */
         var_Change( pp_vout[i], "viewpoint", VLC_VAR_SETVALUE,
-                    &(vlc_value_t) { .p_address = NULL }, NULL );
+                    (vlc_value_t) { .p_address = NULL } );
         vlc_object_release( pp_vout[i] );
     }
     free( pp_vout );
@@ -1706,7 +1713,7 @@ static void ViewpointApply( input_thread_t *p_input )
         var_SetAddress( p_aout, "viewpoint", &priv->viewpoint );
         /* This variable can only be read from callbacks */
         var_Change( p_aout, "viewpoint", VLC_VAR_SETVALUE,
-                    &(vlc_value_t) { .p_address = NULL }, NULL );
+                    (vlc_value_t) { .p_address = NULL } );
         vlc_object_release( p_aout );
     }
 }
@@ -2015,8 +2022,13 @@ static bool Control( input_thread_t *p_input,
             es_out_Control( input_priv(p_input)->p_es_out,
                             ES_OUT_SET_GROUP, val.i_int );
 
-            demux_Control( input_priv(p_input)->master->p_demux, DEMUX_SET_GROUP, val.i_int,
-                            NULL );
+            if( val.i_int == 0 )
+                demux_Control( input_priv(p_input)->master->p_demux,
+                               DEMUX_SET_GROUP_DEFAULT );
+            else
+                demux_Control( input_priv(p_input)->master->p_demux,
+                               DEMUX_SET_GROUP_LIST,
+                               (size_t)1, &(const int){ val.i_int });
             break;
 
         case INPUT_CONTROL_SET_ES:
@@ -3191,7 +3203,7 @@ static int input_SlaveSourceAdd( input_thread_t *p_input,
                                  enum slave_type i_type, const char *psz_uri,
                                  unsigned i_flags )
 {
-    vlc_value_t count;
+    size_t count;
     const char *psz_es;
     const char *psz_forced_demux;
     const bool b_can_fail = i_flags & SLAVE_ADD_CANFAIL;
@@ -3213,7 +3225,7 @@ static int input_SlaveSourceAdd( input_thread_t *p_input,
     }
 
     if( b_forced )
-        var_Change( p_input, psz_es, VLC_VAR_CHOICESCOUNT, &count, NULL );
+        var_Change( p_input, psz_es, VLC_VAR_CHOICESCOUNT, &count );
 
     msg_Dbg( p_input, "loading %s slave: %s (forced: %d)", psz_es, psz_uri,
              b_forced );
@@ -3265,23 +3277,25 @@ static int input_SlaveSourceAdd( input_thread_t *p_input,
         return VLC_SUCCESS;
 
     /* Select the ES */
-    vlc_value_t list;
+    vlc_value_t *list;
+    size_t entries;
 
-    if( var_Change( p_input, psz_es, VLC_VAR_GETCHOICES, &list, NULL ) )
+    if( var_Change( p_input, psz_es, VLC_VAR_GETCHOICES,
+                    &entries, &list, (char ***)NULL ) )
         return VLC_SUCCESS;
 
-    if( count.i_int == 0 )
-        count.i_int++;
+    if( count == 0 )
+        count++;
     /* if it was first one, there is disable too */
 
-    if( count.i_int < list.p_list->i_count )
+    if( count < entries )
     {
-        const int i_id = list.p_list->p_values[count.i_int].i_int;
+        const int i_id = list[count].i_int;
 
         es_out_Control( input_priv(p_input)->p_es_out_display, ES_OUT_SET_ES_DEFAULT_BY_ID, i_id );
         es_out_Control( input_priv(p_input)->p_es_out_display, ES_OUT_SET_ES_BY_ID, i_id );
     }
-    var_FreeList( &list, NULL );
+    free(list);
 
     return VLC_SUCCESS;
 }

@@ -111,8 +111,6 @@ struct vlc_va_sys_t
     ID3D11VideoContext           *d3dvidctx;
     DXGI_FORMAT                  render;
 
-    HANDLE                       context_mutex;
-
     /* pool */
     picture_t                    *extern_pics[MAX_SURFACE_COUNT];
 
@@ -150,7 +148,7 @@ void SetupAVCodecContext(vlc_va_t *va)
     sys->hw.cfg = &sys->cfg;
     sys->hw.surface_count = dx_sys->va_pool.surface_count;
     sys->hw.surface = dx_sys->hw_surface;
-    sys->hw.context_mutex = sys->context_mutex;
+    sys->hw.context_mutex = sys->d3d_dev.context_mutex;
 
     if (IsEqualGUID(&dx_sys->input, &DXVA_Intel_H264_NoFGT_ClearVideo))
         sys->hw.workaround |= FF_DXVA2_WORKAROUND_INTEL_CLEARVIDEO;
@@ -354,7 +352,7 @@ static int Open(vlc_va_t *va, AVCodecContext *ctx, enum PixelFormat pix_fmt,
             hr = ID3D11Device_GetPrivateData(sys->d3d_dev.d3ddevice, &GUID_CONTEXT_MUTEX, &dataSize, &context_lock);
             if (FAILED(hr))
                 msg_Warn(va, "No mutex found to lock the decoder");
-            sys->context_mutex = context_lock;
+            sys->d3d_dev.context_mutex = context_lock;
 
             sys->d3d_dev.d3dcontext = p_sys->context;
             sys->d3d_dev.owner = false;
@@ -371,7 +369,7 @@ static int Open(vlc_va_t *va, AVCodecContext *ctx, enum PixelFormat pix_fmt,
         }
     }
 
-    err = D3D11_Create( va, &sys->hd3d );
+    err = D3D11_Create( va, &sys->hd3d, false );
     if (err != VLC_SUCCESS)
         goto error;
 
@@ -708,6 +706,9 @@ static int DxCreateDecoderSurfaces(vlc_va_t *va, int codec_id,
         sys->textureHeight = fmt->i_height;
     }
 
+    assert(sys->textureWidth  >= fmt->i_width);
+    assert(sys->textureHeight >= fmt->i_height);
+
     if ((sys->textureWidth != fmt->i_width || sys->textureHeight != fmt->i_height) &&
         !CanUseDecoderPadding(sys))
     {
@@ -798,7 +799,7 @@ static int DxCreateDecoderSurfaces(vlc_va_t *va, int codec_id,
                 break;
             }
 
-            AllocateShaderView(VLC_OBJECT(va), sys->d3d_dev.d3ddevice, textureFmt, pic->p_sys->texture, pic->p_sys->slice_index, pic->p_sys->resourceView);
+            D3D11_AllocateShaderView(va, sys->d3d_dev.d3ddevice, textureFmt, pic->p_sys->texture, pic->p_sys->slice_index, pic->p_sys->resourceView);
 
             dx_sys->hw_surface[surface_idx] = pic->p_sys->decoder;
         }
@@ -868,7 +869,7 @@ static int DxCreateDecoderSurfaces(vlc_va_t *va, int codec_id,
             if (texDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)
             {
                 ID3D11Texture2D *textures[D3D11_MAX_SHADER_VIEW] = {p_texture, p_texture, p_texture};
-                AllocateShaderView(VLC_OBJECT(va), sys->d3d_dev.d3ddevice, textureFmt, textures, surface_idx,
+                D3D11_AllocateShaderView(va, sys->d3d_dev.d3ddevice, textureFmt, textures, surface_idx,
                                    &sys->resourceView[surface_idx * D3D11_MAX_SHADER_VIEW]);
             }
         }

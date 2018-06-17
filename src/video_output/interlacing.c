@@ -98,7 +98,7 @@ static int DeinterlaceCallback(vlc_object_t *object, char const *cmd,
 
 void vout_InitInterlacingSupport(vout_thread_t *vout, bool is_interlaced)
 {
-    vlc_value_t val, text;
+    vlc_value_t val;
 
     msg_Dbg(vout, "Deinterlacing available");
 
@@ -109,36 +109,34 @@ void vout_InitInterlacingSupport(vout_thread_t *vout, bool is_interlaced)
     var_Create(vout, "deinterlace", VLC_VAR_INTEGER | VLC_VAR_DOINHERIT );
     int deinterlace_state = var_GetInteger(vout, "deinterlace");
 
-    text.psz_string = _("Deinterlace");
-    var_Change(vout, "deinterlace", VLC_VAR_SETTEXT, &text, NULL);
+    var_Change(vout, "deinterlace", VLC_VAR_SETTEXT, _("Deinterlace"));
 
     const module_config_t *optd = config_FindConfig("deinterlace");
-    var_Change(vout, "deinterlace", VLC_VAR_CLEARCHOICES, NULL, NULL);
+    var_Change(vout, "deinterlace", VLC_VAR_CLEARCHOICES);
     if (likely(optd != NULL))
         for (unsigned i = 0; i < optd->list_count; i++) {
             val.i_int = optd->list.i[i];
-            text.psz_string = vlc_gettext(optd->list_text[i]);
-            var_Change(vout, "deinterlace", VLC_VAR_ADDCHOICE, &val, &text);
+            var_Change(vout, "deinterlace", VLC_VAR_ADDCHOICE, val,
+                       vlc_gettext(optd->list_text[i]));
         }
     var_AddCallback(vout, "deinterlace", DeinterlaceCallback, NULL);
     /* */
     var_Create(vout, "deinterlace-mode", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
     char *deinterlace_mode = var_GetNonEmptyString(vout, "deinterlace-mode");
 
-    text.psz_string = _("Deinterlace mode");
-    var_Change(vout, "deinterlace-mode", VLC_VAR_SETTEXT, &text, NULL);
+    var_Change(vout, "deinterlace-mode", VLC_VAR_SETTEXT,
+               _("Deinterlace mode"));
 
     const module_config_t *optm = config_FindConfig("deinterlace-mode");
-    var_Change(vout, "deinterlace-mode", VLC_VAR_CLEARCHOICES, NULL, NULL);
+    var_Change(vout, "deinterlace-mode", VLC_VAR_CLEARCHOICES);
     if (likely(optm != NULL))
         for (unsigned i = 0; i < optm->list_count; i++) {
              if (!DeinterlaceIsModeValid(optm->list.psz[i]))
                  continue;
 
              val.psz_string  = (char *)optm->list.psz[i];
-             text.psz_string = vlc_gettext(optm->list_text[i]);
              var_Change(vout, "deinterlace-mode", VLC_VAR_ADDCHOICE,
-                        &val, &text);
+                        val, vlc_gettext(optm->list_text[i]));
          }
     var_AddCallback(vout, "deinterlace-mode", DeinterlaceCallback, NULL);
     /* */
@@ -157,9 +155,9 @@ void vout_InitInterlacingSupport(vout_thread_t *vout, bool is_interlaced)
 
     /* */
     val.psz_string = deinterlace_mode ? deinterlace_mode : optm->orig.psz;
-    var_Change(vout, "deinterlace-mode", VLC_VAR_SETVALUE, &val, NULL);
+    var_Change(vout, "deinterlace-mode", VLC_VAR_SETVALUE, val);
     val.b_bool = is_interlaced;
-    var_Change(vout, "deinterlace-needed", VLC_VAR_SETVALUE, &val, NULL);
+    var_Change(vout, "deinterlace-needed", VLC_VAR_SETVALUE, val);
 
     var_SetInteger(vout, "deinterlace", deinterlace_state);
     free(deinterlace_mode);

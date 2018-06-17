@@ -33,38 +33,13 @@
 #include <poll.h>
 
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #ifdef XDG_SHELL
-#ifndef XDG_SHELL_UNSTABLE_VERSION
 #include "xdg-shell-client-protocol.h"
-#else
-#include "xdg-shell-unstable-v6-client-protocol.h"
-# define xdg_wm_base zxdg_shell_v6
-# define xdg_wm_base_interface zxdg_shell_v6_interface
-# define xdg_wm_base_listener zxdg_shell_v6_listener
-# define xdg_wm_base_add_listener zxdg_shell_v6_add_listener
-# define xdg_wm_base_destroy zxdg_shell_v6_destroy
-# define xdg_wm_base_get_xdg_surface zxdg_shell_v6_get_xdg_surface
-# define xdg_wm_base_pong zxdg_shell_v6_pong
-# define xdg_surface zxdg_surface_v6
-# define xdg_surface_listener zxdg_surface_v6_listener
-# define xdg_surface_add_listener zxdg_surface_v6_add_listener
-# define xdg_surface_destroy zxdg_surface_v6_destroy
-# define xdg_surface_get_toplevel zxdg_surface_v6_get_toplevel
-# define xdg_surface_set_window_geometry zxdg_surface_v6_set_window_geometry
-# define xdg_surface_ack_configure zxdg_surface_v6_ack_configure
-# define xdg_toplevel zxdg_toplevel_v6
-# define xdg_toplevel_listener zxdg_toplevel_v6_listener
-# define xdg_toplevel_add_listener zxdg_toplevel_v6_add_listener
-# define xdg_toplevel_destroy zxdg_toplevel_v6_destroy
-# define xdg_toplevel_set_title zxdg_toplevel_v6_set_title
-# define xdg_toplevel_set_app_id zxdg_toplevel_v6_set_app_id
-# define xdg_toplevel_set_fullscreen zxdg_toplevel_v6_set_fullscreen
-# define xdg_toplevel_unset_fullscreen zxdg_toplevel_v6_unset_fullscreen
-# define XDG_TOPLEVEL_STATE_FULLSCREEN ZXDG_TOPLEVEL_V6_STATE_FULLSCREEN
-#endif
+/** Temporary backward compatibility hack for XDG shell unstable v6 */
+# define XDG_SHELL_UNSTABLE
 #else
 # define xdg_wm_base wl_shell
-# define xdg_wm_base_interface wl_shell_interface
 # define xdg_wm_base_add_listener(s, l, q) (void)0
 # define xdg_wm_base_destroy wl_shell_destroy
 # define xdg_wm_base_get_xdg_surface wl_shell_get_shell_surface
@@ -90,10 +65,14 @@
 #include <vlc_plugin.h>
 #include <vlc_vout_window.h>
 
+#include "input.h"
+#include "output.h"
+
 struct vout_window_sys_t
 {
     struct wl_registry *registry;
     struct wl_compositor *compositor;
+    struct wl_shm *shm;
     struct xdg_wm_base *wm_base;
     struct xdg_surface *surface;
     struct xdg_toplevel *toplevel;
@@ -105,6 +84,15 @@ struct vout_window_sys_t
     unsigned width;
     unsigned height;
     bool fullscreen;
+# ifdef XDG_SHELL_UNSTABLE
+    bool unstable;
+#endif
+
+    struct wl_list outputs;
+    struct wl_list seats;
+    struct wl_cursor_theme *cursor_theme;
+    struct wl_cursor *cursor;
+    struct wl_surface *cursor_surface;
 
     vlc_thread_t thread;
 };
@@ -120,6 +108,7 @@ static void cleanup_wl_display_read(void *data)
 static void *Thread(void *data)
 {
     vout_window_t *wnd = data;
+    vout_window_sys_t *sys = wnd->sys;
     struct wl_display *display = wnd->display.wl;
     struct pollfd ufd[1];
 
@@ -131,15 +120,21 @@ static void *Thread(void *data)
 
     for (;;)
     {
+        int timeout;
+
         while (wl_display_prepare_read(display) != 0)
             wl_display_dispatch_pending(display);
 
         wl_display_flush(display);
+        timeout = seat_next_timeout(&sys->seats);
         vlc_restorecancel(canc);
 
-        while (poll(ufd, 1, -1) < 0);
+        int val = poll(ufd, 1, timeout);
 
         canc = vlc_savecancel();
+        if (val == 0)
+            seat_timeout(&sys->seats);
+
         wl_display_read_events(display);
         wl_display_dispatch_pending(display);
     }
@@ -148,12 +143,6 @@ static void *Thread(void *data)
     //vlc_restorecancel(canc);
     //return NULL;
 }
-
-struct device_data
-{
-    uint32_t name;
-    struct vout_window_t *window;
-};
 
 static int Control(vout_window_t *wnd, int cmd, va_list ap)
 {
@@ -340,64 +329,6 @@ static const struct wl_shell_surface_listener wl_shell_surface_cbs =
 #define xdg_surface_cbs wl_shell_surface_cbs
 #endif
 
-static void output_geometry_cb(void *data, struct wl_output *output,
-                               int32_t x, int32_t y, int32_t w, int32_t h,
-                               int32_t sp, const char *make, const char *model,
-                               int32_t transform)
-{
-    struct device_data *dd = data;
-    struct vout_window_t *wnd = dd->window;
-    char idstr[11];
-    char *name;
-
-    msg_Dbg(wnd, "output %"PRIu32" geometry: %"PRId32"x%"PRId32"mm"
-            "+%"PRId32"+%"PRId32", subpixel %"PRId32", transform %"PRId32,
-            dd->name, w, h, x, y, sp, transform);
-
-    sprintf(idstr, "%"PRIu32, dd->name);
-    if (likely(asprintf(&name, "%s - %s", make, model) >= 0))
-    {
-        vout_window_ReportOutputDevice(wnd, idstr, name);
-        free(name);
-    }
-    (void) output;
-}
-
-static void output_mode_cb(void *data, struct wl_output *output,
-                           uint32_t flags, int32_t w, int32_t h, int32_t vr)
-{
-    struct device_data *dd = data;
-    struct vout_window_t *wnd = dd->window;
-    div_t d = div(vr, 1000);
-
-    msg_Dbg(wnd, "output %"PRIu32" mode: 0x%"PRIx32" %"PRId32"x%"PRId32
-            ", %d.%03d Hz", dd->name, flags, w, h, d.quot, d.rem);
-    (void) output;
-}
-
-static void output_done_cb(void *data, struct wl_output *output)
-{
-    wl_output_destroy(output);
-    free(data);
-}
-
-static void output_scale_cb(void *data, struct wl_output *output, int32_t f)
-{
-    struct device_data *dd = data;
-    struct vout_window_t *wnd = dd->window;
-
-    msg_Dbg(wnd, "output %"PRIu32" scale: %"PRId32, dd->name, f);
-    (void) output;
-}
-
-static const struct wl_output_listener output_cbs =
-{
-    output_geometry_cb,
-    output_mode_cb,
-    output_done_cb,
-    output_scale_cb,
-};
-
 static void registry_global_cb(void *data, struct wl_registry *registry,
                                uint32_t name, const char *iface, uint32_t vers)
 {
@@ -411,33 +342,39 @@ static void registry_global_cb(void *data, struct wl_registry *registry,
                                            &wl_compositor_interface,
                                            (vers < 2) ? vers : 2);
     else
-    if (!strcmp(iface, "wl_output") && vers >= 2)
-    {
-        struct device_data *dd = malloc(sizeof (*dd));
-        if (unlikely(dd == NULL))
-            return;
-
-        struct wl_output *output = wl_registry_bind(registry, name,
-                                                    &wl_output_interface, 2);
-        if (unlikely(output == NULL))
-            return;
-
-        dd->name = name;
-        dd->window = wnd;
-        wl_output_add_listener(output, &output_cbs, dd);
-    }
-    else
 #ifdef XDG_SHELL
-# ifndef XDG_SHELL_UNSTABLE_VERSION
+# ifdef XDG_SHELL_UNSTABLE
+    if (!strcmp(iface, "zxdg_shell_v6") && sys->wm_base == NULL)
+        sys->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
+                                        1);
+    else
     if (!strcmp(iface, "xdg_wm_base"))
+    {
+        if (sys->wm_base != NULL)
+            xdg_wm_base_destroy(sys->wm_base);
+        sys->unstable = false;
+        sys->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
+                                        1);
+    }
 # else
-    if (!strcmp(iface, "zxdg_shell_v6"))
+    if (!strcmp(iface, "xdg_wm_base"))
+        sys->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
+                                        1);
 # endif
 #else
     if (!strcmp(iface, "wl_shell"))
-#endif
-        sys->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
+        sys->wm_base = wl_registry_bind(registry, name, &wl_shell_interface,
                                         1);
+#endif
+    else
+    if (!strcmp(iface, "wl_shm"))
+        sys->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+    else
+    if (!strcmp(iface, "wl_seat"))
+        seat_create(wnd, registry, name, vers, &sys->seats);
+    else
+    if (!strcmp(iface, "wl_output"))
+        output_create(wnd, registry, name, vers, &sys->outputs);
     else
     if (!strcmp(iface, "org_kde_kwin_server_decoration_manager"))
         sys->deco_manager = wl_registry_bind(registry, name,
@@ -448,13 +385,14 @@ static void registry_global_remove_cb(void *data, struct wl_registry *registry,
                                       uint32_t name)
 {
     vout_window_t *wnd = data;
-    char idstr[11];
+    vout_window_sys_t *sys = wnd->sys;
 
     msg_Dbg(wnd, "global remove %3"PRIu32, name);
 
-    /* If the global was an output, this will remove it. Otherwise, no-op. */
-    sprintf(idstr, "%"PRIu32, name);
-    vout_window_ReportOutputDevice(wnd, idstr, NULL);
+    if (seat_destroy_one(&sys->seats, name) == 0)
+        return;
+    if (output_destroy_one(&sys->outputs, name) == 0)
+        return;
 
     (void) registry;
 }
@@ -464,6 +402,32 @@ static const struct wl_registry_listener registry_cbs =
     registry_global_cb,
     registry_global_remove_cb,
 };
+
+struct wl_surface *window_get_cursor(vout_window_t *wnd, int32_t *restrict hsx,
+                                     int32_t *restrict hsy)
+{
+    vout_window_sys_t *sys = wnd->sys;
+
+    if (unlikely(sys->cursor == NULL))
+        return NULL;
+
+    assert(sys->cursor->image_count > 0);
+
+    /* TODO? animated cursor (more than one image) */
+    struct wl_cursor_image *img = sys->cursor->images[0];
+    struct wl_surface *surface = sys->cursor_surface;
+
+    if (likely(surface != NULL))
+    {
+        wl_surface_attach(surface, wl_cursor_image_get_buffer(img), 0, 0);
+        wl_surface_damage(surface, 0, 0, img->width, img->height);
+        wl_surface_commit(surface);
+    }
+
+    *hsx = img->hotspot_x;
+    *hsy = img->hotspot_y;
+    return surface;
+}
 
 /**
  * Creates a Wayland shell surface.
@@ -475,16 +439,22 @@ static int Open(vout_window_t *wnd, const vout_window_cfg_t *cfg)
         return VLC_ENOMEM;
 
     sys->compositor = NULL;
+    sys->shm = NULL;
     sys->wm_base = NULL;
     sys->surface = NULL;
     sys->toplevel = NULL;
+    sys->cursor_theme = NULL;
+    sys->cursor = NULL;
     sys->deco_manager = NULL;
     sys->deco = NULL;
     sys->default_output = var_InheritInteger(wnd, "wl-output");
     sys->width = cfg->width;
     sys->height = cfg->height;
     sys->fullscreen = false;
+    wl_list_init(&sys->outputs);
+    wl_list_init(&sys->seats);
     wnd->sys = sys;
+    wnd->handle.wl = NULL;
 
     /* Connect to the display server */
     char *dpy_name = var_InheritString(wnd, "wl-display");
@@ -503,19 +473,21 @@ static int Open(vout_window_t *wnd, const vout_window_cfg_t *cfg)
     if (sys->registry == NULL)
         goto error;
 
+#ifdef XDG_SHELL_UNSTABLE
+    sys->unstable = true;
+#endif
     wl_registry_add_listener(sys->registry, &registry_cbs, wnd);
     wl_display_roundtrip(display); /* complete registry enumeration */
-    wl_display_roundtrip(display); /* complete devices enumeration */
 
     if (sys->compositor == NULL || sys->wm_base == NULL)
         goto error;
-
-    xdg_wm_base_add_listener(sys->wm_base, &xdg_wm_base_cbs, NULL);
 
     /* Create a surface */
     struct wl_surface *surface = wl_compositor_create_surface(sys->compositor);
     if (surface == NULL)
         goto error;
+
+    xdg_wm_base_add_listener(sys->wm_base, &xdg_wm_base_cbs, NULL);
 
     struct xdg_surface *xdg_surface =
         xdg_wm_base_get_xdg_surface(sys->wm_base, surface);
@@ -548,6 +520,18 @@ static int Open(vout_window_t *wnd, const vout_window_cfg_t *cfg)
                                     cfg->width, cfg->height);
     vout_window_ReportSize(wnd, cfg->width, cfg->height);
 
+    if (sys->shm != NULL)
+    {
+        sys->cursor_theme = wl_cursor_theme_load(NULL, 32, sys->shm);
+        if (sys->cursor_theme != NULL)
+            sys->cursor = wl_cursor_theme_get_cursor(sys->cursor_theme,
+                                                     "left_ptr");
+
+        sys->cursor_surface = wl_compositor_create_surface(sys->compositor);
+    }
+    if (sys->cursor == NULL)
+        msg_Err(wnd, "failed to load cursor");
+
     const uint_fast32_t deco_mode =
         var_InheritBool(wnd, "video-deco")
             ? ORG_KDE_KWIN_SERVER_DECORATION_MODE_SERVER
@@ -576,29 +560,44 @@ static int Open(vout_window_t *wnd, const vout_window_cfg_t *cfg)
     wnd->control = Control;
 
     if (cfg->is_fullscreen)
+    {
         vout_window_SetFullScreen(wnd, NULL);
+        sys->fullscreen = true;
+    }
 
     if (vlc_clone(&sys->thread, Thread, wnd, VLC_THREAD_PRIORITY_LOW))
         goto error;
 
-#ifdef XDG_SHELL_UNSTABLE_VERSION
-    msg_Warn(wnd, "using XDG shell unstable version %d",
-             XDG_SHELL_UNSTABLE_VERSION);
-    msg_Info(wnd, "The window manager needs an update.");
+#ifdef XDG_SHELL_UNSTABLE
+    if (sys->unstable)
+    {
+        msg_Warn(wnd, "using XDG shell unstable version");
+        msg_Info(wnd, "The window manager needs an update.");
+    }
 #endif
     return VLC_SUCCESS;
 
 error:
+    seat_destroy_all(&sys->seats);
+    output_destroy_all(&sys->outputs);
     if (sys->deco != NULL)
         org_kde_kwin_server_decoration_destroy(sys->deco);
     if (sys->deco_manager != NULL)
         org_kde_kwin_server_decoration_manager_destroy(sys->deco_manager);
+    if (sys->cursor_surface != NULL)
+        wl_surface_destroy(sys->cursor_surface);
+    if (sys->cursor_theme != NULL)
+        wl_cursor_theme_destroy(sys->cursor_theme);
     if (sys->toplevel != NULL)
         xdg_toplevel_destroy(sys->toplevel);
     if (sys->surface != NULL)
         xdg_surface_destroy(sys->surface);
     if (sys->wm_base != NULL)
         xdg_wm_base_destroy(sys->wm_base);
+    if (wnd->handle.wl != NULL)
+        wl_surface_destroy(wnd->handle.wl);
+    if (sys->shm != NULL)
+        wl_shm_destroy(sys->shm);
     if (sys->compositor != NULL)
         wl_compositor_destroy(sys->compositor);
     if (sys->registry != NULL)
@@ -618,14 +617,22 @@ static void Close(vout_window_t *wnd)
     vlc_cancel(sys->thread);
     vlc_join(sys->thread, NULL);
 
+    seat_destroy_all(&sys->seats);
+    output_destroy_all(&sys->outputs);
     if (sys->deco != NULL)
         org_kde_kwin_server_decoration_destroy(sys->deco);
     if (sys->deco_manager != NULL)
         org_kde_kwin_server_decoration_manager_destroy(sys->deco_manager);
+    if (sys->cursor_surface != NULL)
+        wl_surface_destroy(sys->cursor_surface);
+    if (sys->cursor_theme != NULL)
+        wl_cursor_theme_destroy(sys->cursor_theme);
     xdg_toplevel_destroy(sys->toplevel);
     xdg_surface_destroy(sys->surface);
-    wl_surface_destroy(wnd->handle.wl);
     xdg_wm_base_destroy(sys->wm_base);
+    wl_surface_destroy(wnd->handle.wl);
+    if (sys->shm != NULL)
+        wl_shm_destroy(sys->shm);
     wl_compositor_destroy(sys->compositor);
     wl_registry_destroy(sys->registry);
     wl_display_disconnect(wnd->display.wl);
@@ -644,13 +651,8 @@ static void Close(vout_window_t *wnd)
 
 vlc_module_begin()
 #ifdef XDG_SHELL
-# ifndef XDG_SHELL_UNSTABLE_VERSION
     set_shortname(N_("XDG shell"))
     set_description(N_("XDG shell surface"))
-# else
-    set_shortname(N_("XDG shell v6"))
-    set_description(N_("XDG shell (unstable version 6) surface"))
-# endif
 #else
     set_shortname(N_("WL shell"))
     set_description(N_("Wayland shell surface"))
@@ -658,11 +660,7 @@ vlc_module_begin()
     set_category(CAT_VIDEO)
     set_subcategory(SUBCAT_VIDEO_VOUT)
 #ifdef XDG_SHELL
-# ifndef XDG_SHELL_UNSTABLE_VERSION
     set_capability("vout window", 20)
-# else
-    set_capability("vout window", 19)
-# endif
 #else
     set_capability("vout window", 10)
 #endif

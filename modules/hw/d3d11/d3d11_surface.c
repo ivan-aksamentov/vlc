@@ -42,6 +42,7 @@
 #include <d3d11.h>
 
 #include "d3d11_filters.h"
+#include "d3d11_processor.h"
 #include "../../video_chroma/d3d11_fmt.h"
 
 #ifdef ID3D11VideoContext_VideoProcessorBlt
@@ -65,11 +66,8 @@ typedef struct
         ID3D11Resource   *procOutResource;
     };
     /* 420_OPAQUE processor */
-    ID3D11VideoDevice              *d3dviddev;
-    ID3D11VideoContext             *d3dvidctx;
     ID3D11VideoProcessorOutputView *processorOutput;
-    ID3D11VideoProcessorEnumerator *procEnumerator;
-    ID3D11VideoProcessor           *videoProcessor;
+    d3d11_processor_t              d3d_proc;
 #endif
     d3d11_device_t                 d3d_dev;
 
@@ -81,54 +79,25 @@ typedef struct
 } filter_sys_t;
 
 #if CAN_PROCESSOR
-static int SetupProcessor(filter_t *p_filter, ID3D11Device *d3ddevice,
-                          ID3D11DeviceContext *d3dctx,
+static int SetupProcessor(filter_t *p_filter, d3d11_device_t *d3d_dev,
                           DXGI_FORMAT srcFormat, DXGI_FORMAT dstFormat)
 {
     filter_sys_t *sys = p_filter->p_sys;
     HRESULT hr;
-    ID3D11VideoProcessorEnumerator *processorEnumerator = NULL;
 
-    hr = ID3D11DeviceContext_QueryInterface(d3dctx, &IID_ID3D11VideoContext, (void **)&sys->d3dvidctx);
-    if (unlikely(FAILED(hr)))
+    if (D3D11_CreateProcessor(p_filter, d3d_dev, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+                              &p_filter->fmt_in.video, &p_filter->fmt_out.video, &sys->d3d_proc) != VLC_SUCCESS)
         goto error;
-
-    hr = ID3D11Device_QueryInterface( d3ddevice, &IID_ID3D11VideoDevice, (void **)&sys->d3dviddev);
-    if (unlikely(FAILED(hr)))
-        goto error;
-
-    const video_format_t *fmt = &p_filter->fmt_in.video;
-    D3D11_VIDEO_PROCESSOR_CONTENT_DESC processorDesc = {
-        .InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-        .InputFrameRate = {
-            .Numerator   = fmt->i_frame_rate_base > 0 ? fmt->i_frame_rate : 0,
-            .Denominator = fmt->i_frame_rate_base,
-        },
-        .InputWidth   = fmt->i_width,
-        .InputHeight  = fmt->i_height,
-        .OutputWidth  = fmt->i_width,
-        .OutputHeight = fmt->i_height,
-        .Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
-    };
-    hr = ID3D11VideoDevice_CreateVideoProcessorEnumerator(sys->d3dviddev, &processorDesc, &processorEnumerator);
-    if ( processorEnumerator == NULL )
-    {
-        msg_Dbg(p_filter, "Can't get a video processor for the video.");
-        goto error;
-    }
 
     UINT flags;
-#ifndef NDEBUG
-    D3D11_LogProcessorSupport(p_filter, processorEnumerator);
-#endif
     /* shortcut for the rendering output */
-    hr = ID3D11VideoProcessorEnumerator_CheckVideoProcessorFormat(processorEnumerator, srcFormat, &flags);
+    hr = ID3D11VideoProcessorEnumerator_CheckVideoProcessorFormat(sys->d3d_proc.procEnumerator, srcFormat, &flags);
     if (FAILED(hr) || !(flags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT))
     {
         msg_Dbg(p_filter, "processor format %s not supported for output", DxgiFormatToStr(srcFormat));
         goto error;
     }
-    hr = ID3D11VideoProcessorEnumerator_CheckVideoProcessorFormat(processorEnumerator, dstFormat, &flags);
+    hr = ID3D11VideoProcessorEnumerator_CheckVideoProcessorFormat(sys->d3d_proc.procEnumerator, dstFormat, &flags);
     if (FAILED(hr) || !(flags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT))
     {
         msg_Dbg(p_filter, "processor format %s not supported for input", DxgiFormatToStr(dstFormat));
@@ -136,44 +105,38 @@ static int SetupProcessor(filter_t *p_filter, ID3D11Device *d3ddevice,
     }
 
     D3D11_VIDEO_PROCESSOR_CAPS processorCaps;
-    hr = ID3D11VideoProcessorEnumerator_GetVideoProcessorCaps(processorEnumerator, &processorCaps);
+    hr = ID3D11VideoProcessorEnumerator_GetVideoProcessorCaps(sys->d3d_proc.procEnumerator, &processorCaps);
     for (UINT type = 0; type < processorCaps.RateConversionCapsCount; ++type)
     {
-        hr = ID3D11VideoDevice_CreateVideoProcessor(sys->d3dviddev,
-                                                    processorEnumerator, type, &sys->videoProcessor);
+        hr = ID3D11VideoDevice_CreateVideoProcessor(sys->d3d_proc.d3dviddev,
+                                                    sys->d3d_proc.procEnumerator, type, &sys->d3d_proc.videoProcessor);
         if (SUCCEEDED(hr))
         {
             D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC outDesc = {
                 .ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D,
             };
 
-            hr = ID3D11VideoDevice_CreateVideoProcessorOutputView(sys->d3dviddev,
+            hr = ID3D11VideoDevice_CreateVideoProcessorOutputView(sys->d3d_proc.d3dviddev,
                                                              sys->procOutResource,
-                                                             processorEnumerator,
+                                                             sys->d3d_proc.procEnumerator,
                                                              &outDesc,
                                                              &sys->processorOutput);
             if (FAILED(hr))
                 msg_Err(p_filter, "Failed to create the processor output. (hr=0x%lX)", hr);
             else
             {
-                sys->procEnumerator  = processorEnumerator;
                 return VLC_SUCCESS;
             }
         }
-        if (sys->videoProcessor)
+        if (sys->d3d_proc.videoProcessor)
         {
-            ID3D11VideoProcessor_Release(sys->videoProcessor);
-            sys->videoProcessor = NULL;
+            ID3D11VideoProcessor_Release(sys->d3d_proc.videoProcessor);
+            sys->d3d_proc.videoProcessor = NULL;
         }
     }
 
 error:
-    if (processorEnumerator)
-        ID3D11VideoProcessorEnumerator_Release(processorEnumerator);
-    if (sys->d3dvidctx)
-        ID3D11VideoContext_Release(sys->d3dvidctx);
-    if (sys->d3dviddev)
-        ID3D11VideoDevice_Release(sys->d3dviddev);
+    D3D11_ReleaseProcessor(&sys->d3d_proc);
     return VLC_EGENERIC;
 }
 #endif
@@ -232,7 +195,8 @@ static int assert_staging(filter_t *p_filter, picture_sys_t *p_sys)
                 hr = ID3D11Device_CreateTexture2D( p_device, &texDesc, NULL, &sys->procOutTexture);
                 if (SUCCEEDED(hr) && SUCCEEDED(hr = can_map(sys, p_sys->context)))
                 {
-                    if (SetupProcessor(p_filter, p_device, p_sys->context, srcFormat, new_fmt->formatTexture))
+                    d3d11_device_t d3d_dev = { .d3ddevice = p_device, .d3dcontext = p_sys->context };
+                    if (SetupProcessor(p_filter, &d3d_dev, srcFormat, new_fmt->formatTexture))
                     {
                         ID3D11Texture2D_Release(sys->procOutTexture);
                         ID3D11Texture2D_Release(sys->staging);
@@ -295,37 +259,19 @@ static void D3D11_YUY2(filter_t *p_filter, picture_t *src, picture_t *dst)
     ID3D11Resource *srcResource = p_sys->resource[KNOWN_DXGI_INDEX];
 
 #if CAN_PROCESSOR
-    if (sys->procEnumerator)
+    if (sys->d3d_proc.procEnumerator)
     {
         HRESULT hr;
-        if (!p_sys->processorInput)
-        {
-            D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inDesc = {
-                .FourCC = 0,
-                .ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D,
-                .Texture2D.MipSlice = 0,
-                .Texture2D.ArraySlice = viewDesc.Texture2D.ArraySlice,
-            };
+        assert(p_sys->slice_index == viewDesc.Texture2D.ArraySlice);
+        if (FAILED( D3D11_Assert_ProcessorInput(p_filter, &sys->d3d_proc, p_sys) ))
+            return;
 
-            hr = ID3D11VideoDevice_CreateVideoProcessorInputView(sys->d3dviddev,
-                                                                 p_sys->resource[KNOWN_DXGI_INDEX],
-                                                                 sys->procEnumerator,
-                                                                 &inDesc,
-                                                                 &p_sys->processorInput);
-            if (FAILED(hr))
-            {
-#ifndef NDEBUG
-                msg_Dbg(p_filter,"Failed to create processor input for slice %d. (hr=0x%lX)", p_sys->slice_index, hr);
-#endif
-                return;
-            }
-        }
         D3D11_VIDEO_PROCESSOR_STREAM stream = {
             .Enable = TRUE,
             .pInputSurface = p_sys->processorInput,
         };
 
-        hr = ID3D11VideoContext_VideoProcessorBlt(sys->d3dvidctx, sys->videoProcessor,
+        hr = ID3D11VideoContext_VideoProcessorBlt(sys->d3d_proc.d3dvidctx, sys->d3d_proc.videoProcessor,
                                                           sys->processorOutput,
                                                           0, 1, &stream);
         if (FAILED(hr))
@@ -437,37 +383,19 @@ static void D3D11_NV12(filter_t *p_filter, picture_t *src, picture_t *dst)
     UINT srcSlice = viewDesc.Texture2D.ArraySlice;
 
 #if CAN_PROCESSOR
-    if (sys->procEnumerator)
+    if (sys->d3d_proc.procEnumerator)
     {
         HRESULT hr;
-        if (!p_sys->processorInput)
-        {
-            D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inDesc = {
-                .FourCC = 0,
-                .ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D,
-                .Texture2D.MipSlice = 0,
-                .Texture2D.ArraySlice = viewDesc.Texture2D.ArraySlice,
-            };
+        assert(p_sys->slice_index == viewDesc.Texture2D.ArraySlice);
+        if (FAILED( D3D11_Assert_ProcessorInput(p_filter, &sys->d3d_proc, p_sys) ))
+            return;
 
-            hr = ID3D11VideoDevice_CreateVideoProcessorInputView(sys->d3dviddev,
-                                                                 p_sys->resource[KNOWN_DXGI_INDEX],
-                                                                 sys->procEnumerator,
-                                                                 &inDesc,
-                                                                 &p_sys->processorInput);
-            if (FAILED(hr))
-            {
-#ifndef NDEBUG
-                msg_Dbg(p_filter,"Failed to create processor input for slice %d. (hr=0x%lX)", p_sys->slice_index, hr);
-#endif
-                return;
-            }
-        }
         D3D11_VIDEO_PROCESSOR_STREAM stream = {
             .Enable = TRUE,
             .pInputSurface = p_sys->processorInput,
         };
 
-        hr = ID3D11VideoContext_VideoProcessorBlt(sys->d3dvidctx, sys->videoProcessor,
+        hr = ID3D11VideoContext_VideoProcessorBlt(sys->d3d_proc.d3dvidctx, sys->d3d_proc.videoProcessor,
                                                           sys->processorOutput,
                                                           0, 1, &stream);
         if (FAILED(hr))
@@ -597,8 +525,9 @@ static filter_t *CreateFilter( vlc_object_t *p_this, const es_format_t *p_fmt_in
     if (unlikely(p_filter == NULL))
         return NULL;
 
+    static const struct filter_video_callbacks cbs = { NewBuffer };
     p_filter->b_allow_fmt_out_change = false;
-    p_filter->owner.video.buffer_new = NewBuffer;
+    p_filter->owner.video = &cbs;
     p_filter->owner.sys = p_this;
 
     es_format_InitFromVideo( &p_filter->fmt_in,  &p_fmt_in->video );
@@ -755,7 +684,7 @@ int D3D11OpenConverter( vlc_object_t *obj )
     if (CopyInitCache(&p_sys->cache, p_filter->fmt_in.video.i_width * pixel_bytes))
         return VLC_ENOMEM;
 
-    if (D3D11_Create(p_filter, &p_sys->hd3d) != VLC_SUCCESS)
+    if (D3D11_Create(p_filter, &p_sys->hd3d, false) != VLC_SUCCESS)
     {
         msg_Warn(p_filter, "cannot load d3d11.dll, aborting");
         CopyCleanCache(&p_sys->cache);
@@ -866,7 +795,7 @@ int D3D11OpenCPUConverter( vlc_object_t *obj )
          goto done;
     }
 
-    if (D3D11_Create(p_filter, &p_sys->hd3d) != VLC_SUCCESS)
+    if (D3D11_Create(p_filter, &p_sys->hd3d, false) != VLC_SUCCESS)
     {
         msg_Warn(p_filter, "cannot load d3d11.dll, aborting");
         goto done;
@@ -899,14 +828,7 @@ void D3D11CloseConverter( vlc_object_t *obj )
     filter_t *p_filter = (filter_t *)obj;
     filter_sys_t *p_sys = p_filter->p_sys;
 #if CAN_PROCESSOR
-    if (p_sys->d3dviddev)
-        ID3D11VideoDevice_Release(p_sys->d3dviddev);
-    if (p_sys->d3dvidctx)
-        ID3D11VideoContext_Release(p_sys->d3dvidctx);
-    if (p_sys->procEnumerator)
-        ID3D11VideoProcessorEnumerator_Release(p_sys->procEnumerator);
-    if (p_sys->videoProcessor)
-        ID3D11VideoProcessor_Release(p_sys->videoProcessor);
+    D3D11_ReleaseProcessor( &p_sys->d3d_proc );
 #endif
     CopyCleanCache(&p_sys->cache);
     vlc_mutex_destroy(&p_sys->staging_lock);

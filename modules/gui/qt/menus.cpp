@@ -80,8 +80,7 @@ enum
 static QActionGroup *currentGroup;
 
 QMenu *VLCMenuBar::recentsMenu = NULL;
-QMenu *VLCMenuBar::rendererMenu = NULL;
-QActionGroup *VLCMenuBar::rendererGroup = NULL;
+RendererMenu *VLCMenuBar::rendererMenu = NULL;
 
 /**
  * @brief Add static entries to DP in menus
@@ -733,10 +732,10 @@ QMenu *VLCMenuBar::NavigMenu( intf_thread_t *p_intf, QMenu *menu )
 
     menu->addSeparator();
 
-    if ( !rendererMenu )
-        rendererMenu = RendererMenu( p_intf );
+    if ( !VLCMenuBar::rendererMenu )
+        VLCMenuBar::rendererMenu = new RendererMenu( menu, p_intf );
 
-    menu->addMenu( rendererMenu );
+    menu->addMenu( VLCMenuBar::rendererMenu );
     menu->addSeparator();
 
 
@@ -1239,17 +1238,18 @@ static bool IsMenuEmpty( const char *psz_var, vlc_object_t *p_object )
     if( !(var_Type( p_object, psz_var) & VLC_VAR_HASCHOICE) )
         return false;
 
-    vlc_value_t val;
-    var_Change( p_object, psz_var, VLC_VAR_CHOICESCOUNT, &val, NULL );
-    return val.i_int == 0 || val.i_int == 1;
+    size_t val;
+    var_Change( p_object, psz_var, VLC_VAR_CHOICESCOUNT, &val );
+    return val <= 1;
 }
 
-#define TEXT_OR_VAR qfue ( text.psz_string ? text.psz_string : psz_var )
+#define TEXT_OR_VAR qfue ( text ? text : psz_var )
 
 void VLCMenuBar::UpdateItem( QMenu *menu,
         const char *psz_var, vlc_object_t *p_object, bool b_submenu )
 {
-    vlc_value_t val, text;
+    vlc_value_t val;
+    char *text;
     int i_type;
 
     QAction *action = FindActionWithVar( menu, psz_var );
@@ -1299,11 +1299,8 @@ void VLCMenuBar::UpdateItem( QMenu *menu,
     }
 
     /* Get the descriptive name of the variable */
-    int i_ret = var_Change( p_object, psz_var, VLC_VAR_GETTEXT, &text, NULL );
-    if( i_ret != VLC_SUCCESS )
-    {
-        text.psz_string = NULL;
-    }
+    if( var_Change( p_object, psz_var, VLC_VAR_GETTEXT, &text ) )
+        text = NULL;
 
     if( !action )
     {
@@ -1333,7 +1330,7 @@ void VLCMenuBar::UpdateItem( QMenu *menu,
             action->setEnabled(
                 CreateChoicesMenu( menu, psz_var, p_object ) == 0 );
         }
-        FREENULL( text.psz_string );
+        free( text );
         return;
     }
     else
@@ -1354,7 +1351,7 @@ void VLCMenuBar::UpdateItem( QMenu *menu,
                     p_object, val, i_type, !val.b_bool );
             break;
     }
-    FREENULL( text.psz_string );
+    free( text );
 }
 
 #undef TEXT_OR_VAR
@@ -1376,8 +1373,11 @@ static bool CheckTitle( vlc_object_t *p_object, const char *psz_var )
 int VLCMenuBar::CreateChoicesMenu( QMenu *submenu, const char *psz_var,
                                    vlc_object_t *p_object )
 {
-    vlc_value_t val, val_list, text_list;
-    int i_type, i;
+    vlc_value_t val;
+    vlc_value_t *val_list;
+    char **text_list;
+    size_t count, i;
+    int i_type;
 
     /* Check the type of the object variable */
     i_type = var_Type( p_object, psz_var );
@@ -1400,16 +1400,16 @@ int VLCMenuBar::CreateChoicesMenu( QMenu *submenu, const char *psz_var,
     }
 
     if( var_Change( p_object, psz_var, VLC_VAR_GETCHOICES,
-                    &val_list, &text_list ) < 0 )
+                    &count, &val_list, &text_list ) < 0 )
     {
         return VLC_EGENERIC;
     }
 
-#define CURVAL val_list.p_list->p_values[i]
-#define CURTEXT text_list.p_list->p_values[i].psz_string
+#define CURVAL val_list[i]
+#define CURTEXT text_list[i]
 #define RADIO_OR_COMMAND  ( i_type & ( VLC_VAR_ISCOMMAND | VLC_VAR_HASCHOICE ) ) ? ITEM_RADIO : ITEM_NORMAL
 
-    for( i = 0; i < val_list.p_list->i_count; i++ )
+    for( i = 0; i < count; i++ )
     {
         vlc_value_t another_val;
         QString menutext;
@@ -1425,6 +1425,7 @@ int VLCMenuBar::CreateChoicesMenu( QMenu *submenu, const char *psz_var,
                         val.psz_string && !strcmp( val.psz_string, CURVAL.psz_string ) );
 
                 free( val.psz_string );
+                free(CURVAL.psz_string);
                 break;
 
             case VLC_VAR_INTEGER:
@@ -1449,11 +1450,13 @@ int VLCMenuBar::CreateChoicesMenu( QMenu *submenu, const char *psz_var,
             default:
                 break;
         }
+        free(CURTEXT);
     }
     currentGroup = NULL;
 
     /* clean up everything */
-    var_FreeList( &val_list, &text_list );
+    free(text_list);
+    free(val_list);
 
 #undef RADIO_OR_COMMAND
 #undef CURVAL
@@ -1625,34 +1628,4 @@ void VLCMenuBar::updateRecents( intf_thread_t *p_intf )
             recentsMenu->setEnabled( true );
         }
     }
-}
-
-QMenu *VLCMenuBar::RendererMenu(intf_thread_t *p_intf, QMenu *menu )
-{
-    QMenu *submenu = new QMenu( qtr("&Renderer"), menu );
-
-    rendererGroup = new QActionGroup(submenu);
-
-    QAction *action = new QAction( qtr("<Local>"), submenu );
-    action->setCheckable(true);
-    submenu->addAction( action );
-    rendererGroup->addAction(action);
-
-    char *psz_renderer = var_InheritString( THEPL, "sout" );
-    if ( psz_renderer == NULL )
-        action->setChecked( true );
-    else
-        free( psz_renderer );
-
-    submenu->addSeparator();
-
-    action = new QAction( qtr("Scanning..."), submenu );
-    action->setEnabled( false );
-    submenu->addAction( action );
-
-    CONNECT( submenu, aboutToShow(), ActionsManager::getInstance( p_intf ), StartRendererScan() );
-    CONNECT( submenu, aboutToHide(), ActionsManager::getInstance( p_intf ), RendererMenuCountdown() );
-    CONNECT( rendererGroup, triggered(QAction*), ActionsManager::getInstance( p_intf ), RendererSelected( QAction* ) );
-
-    return submenu;
 }

@@ -7,10 +7,6 @@ ifeq ($(call need_pkg,"harfbuzz"),)
 PKGS_FOUND += harfbuzz
 endif
 
-ifdef HAVE_DARWIN_OS
-HARFBUZZCONF += --with-coretext=yes
-endif
-
 $(TARBALLS)/harfbuzz-$(HARFBUZZ_VERSION).tar.bz2:
 	$(call download_pkg,$(HARFBUZZ_URL),harfbuzz)
 
@@ -20,8 +16,10 @@ harfbuzz: harfbuzz-$(HARFBUZZ_VERSION).tar.bz2 .sum-harfbuzz
 	$(UNPACK)
 	$(APPLY) $(SRC)/harfbuzz/harfbuzz-aarch64.patch
 	$(APPLY) $(SRC)/harfbuzz/harfbuzz-clang.patch
-	$(APPLY) $(SRC)/harfbuzz/0001-Skip-using-the-_BitScan-intrinsics-on-mingw.patch
 	$(APPLY) $(SRC)/harfbuzz/harfbuzz-fix-freetype-detect.patch
+	$(APPLY) $(SRC)/harfbuzz/harfbuzz-no-tests.patch
+	$(APPLY) $(SRC)/harfbuzz/harfbuzz-fix-coretext-detection.patch
+	$(APPLY) $(SRC)/harfbuzz/harfbuzz-create-pkgconfig-file.patch
 	$(MOVE)
 
 DEPS_harfbuzz = freetype2 $(DEPS_freetype2)

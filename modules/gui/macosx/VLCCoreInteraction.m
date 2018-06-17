@@ -1,7 +1,7 @@
 /*****************************************************************************
  * CoreInteraction.m: MacOS X interface module
  *****************************************************************************
- * Copyright (C) 2011-2015 Felix Paul Kühne
+ * Copyright (C) 2011-2018 Felix Paul Kühne
  * $Id$
  *
  * Authors: Felix Paul Kühne <fkuehne -at- videolan -dot- org>
@@ -114,7 +114,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
         [_remote setClickCountEnabledButtons: kRemoteButtonPlay];
         [_remote setDelegate: self];
 
-        var_AddCallback(p_intf->obj.libvlc, "intf-boss", BossCallback, (__bridge void *)self);
+        var_AddCallback(pl_Get(p_intf), "intf-boss", BossCallback, (__bridge void *)self);
     }
     return self;
 }
@@ -122,12 +122,19 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
 - (void)dealloc
 {
     intf_thread_t *p_intf = getIntf();
-    var_DelCallback(p_intf->obj.libvlc, "intf-boss", BossCallback, (__bridge void *)self);
+    var_DelCallback(pl_Get(p_intf), "intf-boss", BossCallback, (__bridge void *)self);
     [[NSNotificationCenter defaultCenter] removeObserver: self];
 }
 
 
 #pragma mark - Playback Controls
+
+- (void)play
+{
+    playlist_t *p_playlist = pl_Get(getIntf());
+
+    playlist_Play(p_playlist);
+}
 
 - (void)playOrPause
 {
@@ -241,7 +248,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
     playlist_Next(pl_Get(getIntf()));
 }
 
-- (int)durationOfCurrentPlaylistItem
+- (NSInteger)durationOfCurrentPlaylistItem
 {
     intf_thread_t *p_intf = getIntf();
     if (!p_intf)
@@ -255,7 +262,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
     input_Control(p_input, INPUT_GET_LENGTH, &i_duration);
     vlc_object_release(p_input);
 
-    return (int)(i_duration / 1000000);
+    return (i_duration / 1000000);
 }
 
 - (NSURL*)URLOfCurrentPlaylistItem
@@ -350,7 +357,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
     if (!p_input)
         return;
 
-    int i_interval = var_InheritInteger( p_input, p_value );
+    int64_t i_interval = var_InheritInteger( p_input, p_value );
     if (i_interval > 0) {
         mtime_t val = CLOCK_FREQ * i_interval;
         if (!b_value)
@@ -532,6 +539,15 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
     }
 }
 
+- (void)jumpToTime:(mtime_t)time
+{
+    input_thread_t * p_input = pl_CurrentInput(getIntf());
+    if (p_input) {
+        var_SetInteger(p_input, "time", time);
+        vlc_object_release(p_input);
+    }
+}
+
 - (void)volumeUp
 {
     intf_thread_t *p_intf = getIntf();
@@ -579,7 +595,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
 
     float volume = playlist_VolumeGet(pl_Get(p_intf));
 
-    return lroundf(volume * AOUT_VOLUME_DEFAULT);
+    return (int)lroundf(volume * AOUT_VOLUME_DEFAULT);
 }
 
 - (void)setVolume: (int)i_value
@@ -678,7 +694,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
         vlc_object_release(p_vout);
     } else { // e.g. lion fullscreen toggle
         BOOL b_fs = var_ToggleBool(pl_Get(p_intf), "fullscreen");
-        [[[VLCMain sharedInstance] voutController] setFullscreen:b_fs forWindow:nil withAnimation:YES];
+        [[[VLCMain sharedInstance] voutProvider] setFullscreen:b_fs forWindow:nil withAnimation:YES];
     }
 }
 

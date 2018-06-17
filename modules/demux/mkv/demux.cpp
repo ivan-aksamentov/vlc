@@ -454,7 +454,7 @@ bool demux_sys_t::AnalyseAllSegmentsFound( demux_t *p_demux, matroska_stream_c *
 {
     int i_upper_lvl = 0;
     EbmlElement *p_l0;
-    bool b_keep_stream = false, b_keep_segment = false;
+    bool b_keep_stream = false;
 
     /* verify the EBML Header... it shouldn't be bigger than 1kB */
     p_l0 = p_stream1->estream.FindNextID(EBML_INFO(EbmlHead), 1024);
@@ -510,9 +510,8 @@ bool demux_sys_t::AnalyseAllSegmentsFound( demux_t *p_demux, matroska_stream_c *
 
             p_segment1->Preload();
 
-            b_keep_segment = (FindSegment( *p_segment1->p_segment_uid ) == NULL);
-
-            if ( b_keep_segment || !p_segment1->p_segment_uid )
+            if ( !p_segment1->p_segment_uid ||
+                 FindSegment( *p_segment1->p_segment_uid ) == NULL)
             {
                 opened_segments.push_back( p_segment1 );
                 b_keep_stream = true;

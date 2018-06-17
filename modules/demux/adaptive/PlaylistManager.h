@@ -57,7 +57,7 @@ namespace adaptive
             bool    start();
             void    stop();
 
-            AbstractStream::buffering_status bufferize(mtime_t, unsigned, unsigned);
+            AbstractStream::buffering_status bufferize(mtime_t, mtime_t, mtime_t);
             AbstractStream::status dequeue(mtime_t, mtime_t *);
             void drain();
 
@@ -72,7 +72,7 @@ namespace adaptive
         protected:
             /* Demux calls */
             virtual int doControl(int, va_list);
-            virtual int doDemux(int64_t);
+            virtual int doDemux(mtime_t);
 
             virtual bool    setPosition(mtime_t);
             virtual mtime_t getDuration() const;
