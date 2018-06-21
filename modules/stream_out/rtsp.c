@@ -69,7 +69,7 @@ struct rtsp_stream_t
     int             sessionc;
     rtsp_session_t **sessionv;
 
-    mtime_t         timeout;
+    unsigned        timeout;
     vlc_timer_t     timer;
 };
 
@@ -1132,6 +1132,7 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
         }
 
         case HTTPD_MSG_GETPARAMETER:
+        {
             if( query->i_body > 0 )
             {
                 answer->i_status = 451;
@@ -1146,6 +1147,7 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
                 RtspClientAlive(ses);
             vlc_mutex_unlock( &rtsp->lock );
             break;
+        }
 
         case HTTPD_MSG_TEARDOWN:
         {
@@ -1193,7 +1195,7 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
     if( psz_session )
     {
         if (rtsp->timeout > 0)
-            httpd_MsgAdd( answer, "Session", "%s;timeout=%d", psz_session,
+            httpd_MsgAdd( answer, "Session", "%s;timeout=%u", psz_session,
                                                               rtsp->timeout );
         else
             httpd_MsgAdd( answer, "Session", "%s", psz_session );

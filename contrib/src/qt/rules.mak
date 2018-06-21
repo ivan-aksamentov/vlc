@@ -22,8 +22,13 @@ $(TARBALLS)/qt-$(QT_VERSION).tar.xz:
 qt: qt-$(QT_VERSION).tar.xz .sum-qt
 	$(UNPACK)
 	mv qtbase-everywhere-src-$(QT_VERSION) qt-$(QT_VERSION)
+ifdef HAVE_WIN32
 	$(APPLY) $(SRC)/qt/0001-Windows-QPA-prefer-lower-value-when-rounding-fractio.patch
 	$(APPLY) $(SRC)/qt/0002-Windows-QPA-Disable-systray-notification-sounds.patch
+ifndef HAVE_WIN64
+	$(APPLY) $(SRC)/qt/0001-disable-qt_random_cpu.patch
+endif
+endif
 	$(MOVE)
 
 ifdef HAVE_MACOSX
@@ -67,7 +72,7 @@ QT_CONFIG += -release
 	# Fix .pc files to remove debug version (d)
 	cd $(PREFIX)/lib/pkgconfig; for i in Qt5Core.pc Qt5Gui.pc Qt5Widgets.pc; do sed -i.orig -e 's/d\.a/.a/g' -e 's/d $$/ /' $$i; done
 	# Fix Qt5Gui.pc file to include qwindows (QWindowsIntegrationPlugin) and platform support libraries
-	cd $(PREFIX)/lib/pkgconfig; sed -i.orig -e 's/ -lQt5Gui/ -lqwindows -lQt5ThemeSupport -lQt5FontDatabaseSupport -lQt5EventDispatcherSupport -lQt5WindowsUIAutomationSupport -lqtfreetype -lQt5Gui/g' Qt5Gui.pc
+	cd $(PREFIX)/lib/pkgconfig; sed -i.orig -e 's/ -lQt5Gui/ -lqwindows -ldwmapi -lQt5ThemeSupport -lQt5FontDatabaseSupport -lQt5EventDispatcherSupport -lQt5WindowsUIAutomationSupport -lqtfreetype -lQt5Gui/g' Qt5Gui.pc
 ifdef HAVE_CROSS_COMPILE
 	# Building Qt build tools for Xcompilation
 	cd $</include/QtCore; ln -sf $(QT_VERSION)/QtCore/private
