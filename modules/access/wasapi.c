@@ -223,7 +223,7 @@ static int vlc_FromWave(const WAVEFORMATEX *restrict wf,
 }
 
 static es_out_id_t *CreateES(demux_t *demux, IAudioClient *client, bool loop,
-                             mtime_t caching, size_t *restrict frame_size)
+                             vlc_tick_t caching, size_t *restrict frame_size)
 {
     es_format_t fmt;
     WAVEFORMATEX *pwf;
@@ -273,8 +273,8 @@ typedef struct
     es_out_id_t *es;
 
     size_t frame_size;
-    mtime_t caching;
-    mtime_t start_time;
+    vlc_tick_t caching;
+    vlc_tick_t start_time;
 
     HANDLE events[2];
     union {
@@ -318,14 +318,14 @@ static unsigned __stdcall Thread(void *data)
         UINT32 frames;
         DWORD flags;
         UINT64 qpc;
-        mtime_t pts;
+        vlc_tick_t pts;
 
         hr = IAudioCaptureClient_GetBuffer(capture, &data, &frames, &flags,
                                            NULL, &qpc);
         if (hr != S_OK)
             continue;
 
-        pts = mdate() - ((GetQPC() - qpc) / 10);
+        pts = vlc_tick_now() - ((GetQPC() - qpc) / 10);
 
         es_out_SetPCR(demux->out, pts);
 
@@ -356,7 +356,7 @@ static int Control(demux_t *demux, int query, va_list ap)
     switch (query)
     {
         case DEMUX_GET_TIME:
-            *(va_arg(ap, int64_t *)) = mdate() - sys->start_time;
+            *(va_arg(ap, int64_t *)) = vlc_tick_now() - sys->start_time;
             break;
 
         case DEMUX_GET_PTS_DELAY:
@@ -397,7 +397,7 @@ static int Open(vlc_object_t *obj)
     sys->client = NULL;
     sys->es = NULL;
     sys->caching = INT64_C(1000) * var_InheritInteger(obj, "live-caching");
-    sys->start_time = mdate();
+    sys->start_time = vlc_tick_now();
     for (unsigned i = 0; i < 2; i++)
         sys->events[i] = NULL;
 

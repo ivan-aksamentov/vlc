@@ -205,7 +205,7 @@ static void aout_StopResampling (audio_output_t *aout)
     aout_FiltersAdjustResampling (owner->filters, 0);
 }
 
-static void aout_DecSilence (audio_output_t *aout, mtime_t length, mtime_t pts)
+static void aout_DecSilence (audio_output_t *aout, vlc_tick_t length, vlc_tick_t pts)
 {
     aout_owner_t *owner = aout_owner (aout);
     const audio_sample_format_t *fmt = &owner->mixer_format;
@@ -225,11 +225,11 @@ static void aout_DecSilence (audio_output_t *aout, mtime_t length, mtime_t pts)
     aout->play(aout, block, pts);
 }
 
-static void aout_DecSynchronize(audio_output_t *aout, mtime_t dec_pts)
+static void aout_DecSynchronize(audio_output_t *aout, vlc_tick_t dec_pts)
 {
     aout_owner_t *owner = aout_owner (aout);
     const float rate = owner->sync.rate;
-    mtime_t drift;
+    vlc_tick_t drift;
 
     /**
      * Depending on the drift between the actual and intended playback times,
@@ -240,16 +240,16 @@ static void aout_DecSynchronize(audio_output_t *aout, mtime_t dec_pts)
      * The audio output plugin is responsible for estimating its actual
      * playback time, or rather the estimated time when the next sample will
      * be played. (The actual playback time is always the current time, that is
-     * to say mdate(). It is not an useful statistic.)
+     * to say vlc_tick_now(). It is not an useful statistic.)
      *
      * Most audio output plugins can estimate the delay until playback of
      * the next sample to be written to the buffer, or equally the time until
      * all samples in the buffer will have been played. Then:
-     *    pts = mdate() + delay
+     *    pts = vlc_tick_now() + delay
      */
     if (aout->time_get(aout, &drift) != 0)
         return; /* nothing can be done if timing is unknown */
-    drift += mdate () - dec_pts;
+    drift += vlc_tick_now () - dec_pts;
 
     /* Late audio output.
      * This can happen due to insufficient caching, scheduling jitter
@@ -275,7 +275,7 @@ static void aout_DecSynchronize(audio_output_t *aout, mtime_t dec_pts)
         /* Now the output might be too early... Recheck. */
         if (aout->time_get(aout, &drift) != 0)
             return; /* nothing can be done if timing is unknown */
-        drift += mdate () - dec_pts;
+        drift += vlc_tick_now () - dec_pts;
     }
 
     /* Early audio output.
@@ -405,7 +405,7 @@ void aout_DecGetResetStats(audio_output_t *aout, unsigned *restrict lost,
                                        memory_order_relaxed);
 }
 
-void aout_DecChangePause (audio_output_t *aout, bool paused, mtime_t date)
+void aout_DecChangePause (audio_output_t *aout, bool paused, vlc_tick_t date)
 {
     aout_owner_t *owner = aout_owner (aout);
 

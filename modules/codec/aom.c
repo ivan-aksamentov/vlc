@@ -161,13 +161,13 @@ static int Decode(decoder_t *dec, block_t *block)
     }
 
     /* Associate packet PTS with decoded frame */
-    mtime_t *pkt_pts = malloc(sizeof(*pkt_pts));
+    vlc_tick_t *pkt_pts = malloc(sizeof(*pkt_pts));
     if (!pkt_pts) {
         block_Release(block);
         return VLCDEC_SUCCESS;
     }
 
-    *pkt_pts = block->i_pts;
+    *pkt_pts = (block->i_pts != VLC_TS_INVALID) ? block->i_pts : block->i_dts;
 
     aom_codec_err_t err;
     err = aom_codec_decode(ctx, block->p_buffer, block->i_buffer, pkt_pts);
@@ -189,7 +189,7 @@ static int Decode(decoder_t *dec, block_t *block)
 
     /* fetches back the PTS */
     pkt_pts = img->user_priv;
-    mtime_t pts = *pkt_pts;
+    vlc_tick_t pts = *pkt_pts;
     free(pkt_pts);
 
     dec->fmt_out.i_codec = FindVlcChroma(img);
@@ -201,8 +201,8 @@ static int Decode(decoder_t *dec, block_t *block)
     video_format_t *v = &dec->fmt_out.video;
 
     if (img->d_w != v->i_visible_width || img->d_h != v->i_visible_height) {
-        v->i_visible_width = img->d_w;
-        v->i_visible_height = img->d_h;
+        v->i_visible_width = dec->fmt_out.video.i_width = img->d_w;
+        v->i_visible_height = dec->fmt_out.video.i_height = img->d_h;
     }
 
     if( !dec->fmt_out.video.i_sar_num || !dec->fmt_out.video.i_sar_den )
@@ -229,6 +229,10 @@ static int Decode(decoder_t *dec, block_t *block)
         default:
             break;
     }
+
+    dec->fmt_out.video.projection_mode = dec->fmt_in.video.projection_mode;
+    dec->fmt_out.video.multiview_mode = dec->fmt_in.video.multiview_mode;
+    dec->fmt_out.video.pose = dec->fmt_in.video.pose;
 
     if (decoder_UpdateVideoFormat(dec))
         return VLCDEC_SUCCESS;
@@ -296,6 +300,11 @@ static int OpenDecoder(vlc_object_t *p_this)
     dec->fmt_out.video.i_width = dec->fmt_in.video.i_width;
     dec->fmt_out.video.i_height = dec->fmt_in.video.i_height;
     dec->fmt_out.i_codec = VLC_CODEC_I420;
+
+    if (dec->fmt_in.video.i_sar_num > 0 && dec->fmt_in.video.i_sar_den > 0) {
+        dec->fmt_out.video.i_sar_num = dec->fmt_in.video.i_sar_num;
+        dec->fmt_out.video.i_sar_den = dec->fmt_in.video.i_sar_den;
+    }
 
     return VLC_SUCCESS;
 }

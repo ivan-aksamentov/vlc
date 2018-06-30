@@ -94,7 +94,7 @@ struct spu_private_t {
     filter_chain_t *filter_chain;
 
     /* */
-    mtime_t             last_sort_date;
+    vlc_tick_t          last_sort_date;
     vout_thread_t       *vout;
 };
 
@@ -251,7 +251,7 @@ static filter_t *SpuRenderCreateAndLoadScale(vlc_object_t *object,
 static void SpuRenderText(spu_t *spu, bool *rerender_text,
                           subpicture_region_t *region,
                           const vlc_fourcc_t *chroma_list,
-                          mtime_t elapsed_time)
+                          vlc_tick_t elapsed_time)
 {
     filter_t *text = spu->p->text;
 
@@ -525,10 +525,10 @@ static int SubpictureCmp(const void *s0, const void *s1)
  * more difficult to guess if a subpicture has to be rendered or not.
  *****************************************************************************/
 static void SpuSelectSubpictures(spu_t *spu,
-                                 unsigned int *subpicture_count,
+                                 size_t *subpicture_count,
                                  subpicture_t **subpicture_array,
-                                 mtime_t render_subtitle_date,
-                                 mtime_t render_osd_date,
+                                 vlc_tick_t render_subtitle_date,
+                                 vlc_tick_t render_osd_date,
                                  bool ignore_osd)
 {
     spu_private_t *sys = spu->p;
@@ -558,11 +558,11 @@ static void SpuSelectSubpictures(spu_t *spu,
     for (int i = 0; i < channel_count; i++) {
         subpicture_t *available_subpic[VOUT_MAX_SUBPICTURES];
         bool         is_available_late[VOUT_MAX_SUBPICTURES];
-        int          available_count = 0;
+        size_t       available_count = 0;
 
-        mtime_t      start_date = render_subtitle_date;
-        mtime_t      ephemer_subtitle_date = 0;
-        mtime_t      ephemer_osd_date = 0;
+        vlc_tick_t   start_date = render_subtitle_date;
+        vlc_tick_t   ephemer_subtitle_date = 0;
+        vlc_tick_t   ephemer_osd_date = 0;
         int64_t      ephemer_subtitle_order = INT64_MIN;
         int64_t      ephemer_system_order = INT64_MIN;
 
@@ -583,14 +583,14 @@ static void SpuSelectSubpictures(spu_t *spu,
                (ignore_osd && !current->b_subtitle))
                 continue;
 
-            const mtime_t render_date = current->b_subtitle ? render_subtitle_date : render_osd_date;
+            const vlc_tick_t render_date = current->b_subtitle ? render_subtitle_date : render_osd_date;
             if (render_date &&
                 render_date < current->i_start) {
                 /* Too early, come back next monday */
                 continue;
             }
 
-            mtime_t *ephemer_date_ptr  = current->b_subtitle ? &ephemer_subtitle_date  : &ephemer_osd_date;
+            vlc_tick_t *ephemer_date_ptr  = current->b_subtitle ? &ephemer_subtitle_date  : &ephemer_osd_date;
             int64_t *ephemer_order_ptr = current->b_subtitle ? &ephemer_subtitle_order : &ephemer_system_order;
             if (current->i_start >= *ephemer_date_ptr) {
                 *ephemer_date_ptr = current->i_start;
@@ -621,12 +621,12 @@ static void SpuSelectSubpictures(spu_t *spu,
             start_date = INT64_MAX;
 
         /* Select pictures to be displayed */
-        for (int index = 0; index < available_count; index++) {
+        for (size_t index = 0; index < available_count; index++) {
             subpicture_t *current = available_subpic[index];
             bool is_late = is_available_late[index];
 
-            const mtime_t stop_date = current->b_subtitle ? __MAX(start_date, sys->last_sort_date) : render_osd_date;
-            const mtime_t ephemer_date  = current->b_subtitle ? ephemer_subtitle_date  : ephemer_osd_date;
+            const vlc_tick_t stop_date = current->b_subtitle ? __MAX(start_date, sys->last_sort_date) : render_osd_date;
+            const vlc_tick_t ephemer_date  = current->b_subtitle ? ephemer_subtitle_date  : ephemer_osd_date;
             const int64_t ephemer_order = current->b_subtitle ? ephemer_subtitle_order : ephemer_system_order;
 
             /* Destroy late and obsolete ephemer subpictures */
@@ -661,7 +661,7 @@ static void SpuRenderRegion(spu_t *spu,
                             const vlc_fourcc_t *chroma_list,
                             const video_format_t *fmt,
                             const spu_area_t *subtitle_area, int subtitle_area_count,
-                            mtime_t render_date)
+                            vlc_tick_t render_date)
 {
     spu_private_t *sys = spu->p;
 
@@ -963,7 +963,7 @@ static void SpuRenderRegion(spu_t *spu,
         dst->p_picture = picture_Hold(region_picture);
         int fade_alpha = 255;
         if (subpic->b_fade) {
-            mtime_t fade_start = subpic->i_start + 3 * (subpic->i_stop - subpic->i_start) / 4;
+            vlc_tick_t fade_start = subpic->i_start + 3 * (subpic->i_stop - subpic->i_start) / 4;
 
             if (fade_start <= render_date && fade_start < subpic->i_stop)
                 fade_alpha = 255 * (subpic->i_stop - render_date) /
@@ -995,13 +995,13 @@ exit:
  * This function renders all sub picture units in the list.
  */
 static subpicture_t *SpuRenderSubpictures(spu_t *spu,
-                                          unsigned int i_subpicture,
+                                          size_t i_subpicture,
                                           subpicture_t **pp_subpicture,
                                           const vlc_fourcc_t *chroma_list,
                                           const video_format_t *fmt_dst,
                                           const video_format_t *fmt_src,
-                                          mtime_t render_subtitle_date,
-                                          mtime_t render_osd_date)
+                                          vlc_tick_t render_subtitle_date,
+                                          vlc_tick_t render_osd_date)
 {
     spu_private_t *sys = spu->p;
 
@@ -1523,8 +1523,8 @@ subpicture_t *spu_Render(spu_t *spu,
                          const vlc_fourcc_t *chroma_list,
                          const video_format_t *fmt_dst,
                          const video_format_t *fmt_src,
-                         mtime_t render_subtitle_date,
-                         mtime_t render_osd_date,
+                         vlc_tick_t render_subtitle_date,
+                         vlc_tick_t render_osd_date,
                          bool ignore_osd)
 {
     spu_private_t *sys = spu->p;
@@ -1579,19 +1579,19 @@ subpicture_t *spu_Render(spu_t *spu,
 
     vlc_mutex_lock(&sys->lock);
 
-    unsigned int subpicture_count;
+    size_t subpicture_count;
     subpicture_t *subpicture_array[VOUT_MAX_SUBPICTURES];
 
     /* Get an array of subpictures to render */
     SpuSelectSubpictures(spu, &subpicture_count, subpicture_array,
                          render_subtitle_date, render_osd_date, ignore_osd);
-    if (subpicture_count <= 0) {
+    if (subpicture_count == 0) {
         vlc_mutex_unlock(&sys->lock);
         return NULL;
     }
 
     /* Updates the subpictures */
-    for (unsigned i = 0; i < subpicture_count; i++) {
+    for (size_t i = 0; i < subpicture_count; i++) {
         subpicture_t *subpic = subpicture_array[i];
         subpicture_Update(subpic,
                           fmt_src, fmt_dst,
@@ -1615,7 +1615,7 @@ subpicture_t *spu_Render(spu_t *spu,
     return render;
 }
 
-void spu_OffsetSubtitleDate(spu_t *spu, mtime_t duration)
+void spu_OffsetSubtitleDate(spu_t *spu, vlc_tick_t duration)
 {
     spu_private_t *sys = spu->p;
 

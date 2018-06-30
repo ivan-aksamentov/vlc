@@ -72,7 +72,7 @@ struct event_thread_t
     HCURSOR cursor_empty;
     unsigned button_pressed;
     int64_t hide_timeout;
-    mtime_t last_moved;
+    vlc_tick_t last_moved;
 
     /* Gestures */
     win32_gesture_sys_t *p_gesture;
@@ -133,7 +133,7 @@ static void CALLBACK HideMouse(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwT
 static void UpdateCursorMoved( event_thread_t *p_event )
 {
     UpdateCursor( p_event, true );
-    p_event->last_moved = mdate();
+    p_event->last_moved = vlc_tick_now();
     if( p_event->hwnd )
         SetTimer( p_event->hwnd, (UINT_PTR)p_event, p_event->hide_timeout, HideMouse );
 }

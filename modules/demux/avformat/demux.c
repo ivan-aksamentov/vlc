@@ -55,7 +55,7 @@
 struct avformat_track_s
 {
     es_out_id_t *p_es;
-    mtime_t i_pcr;
+    vlc_tick_t i_pcr;
 };
 
 /*****************************************************************************
@@ -69,7 +69,7 @@ typedef struct
     struct avformat_track_s *tracks;
     unsigned i_tracks;
 
-    mtime_t         i_pcr;
+    vlc_tick_t      i_pcr;
 
     unsigned    i_ssa_order;
 
@@ -873,14 +873,14 @@ static int Demux( demux_t *p_demux )
     if( p_frame->i_dts != VLC_TS_INVALID && p_track->p_es != NULL )
         p_track->i_pcr = p_frame->i_dts;
 
-    mtime_t i_ts_max = INT64_MIN;
+    vlc_tick_t i_ts_max = INT64_MIN;
     for( unsigned i = 0; i < p_sys->i_tracks; i++ )
     {
         if( p_sys->tracks[i].p_es != NULL )
             i_ts_max = __MAX( i_ts_max, p_sys->tracks[i].i_pcr );
     }
 
-    mtime_t i_ts_min = INT64_MAX;
+    vlc_tick_t i_ts_min = INT64_MAX;
     for( unsigned i = 0; i < p_sys->i_tracks; i++ )
     {
         if( p_sys->tracks[i].p_es != NULL &&
@@ -926,23 +926,39 @@ static void UpdateSeekPoint( demux_t *p_demux, int64_t i_time )
     }
 }
 
-static void ResetTime( demux_t *p_demux, mtime_t i_time )
+static void ResetTime( demux_t *p_demux, int64_t i_time )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
+    vlc_tick_t t;
 
     if( p_sys->ic->start_time == (int64_t)AV_NOPTS_VALUE || i_time < 0 )
-        i_time = VLC_TS_INVALID;
-    else if( i_time == 0 )
-        i_time = 1;
+    {
+        t = VLC_TS_INVALID;
+    }
+    else
+    {
+        if( CLOCK_FREQ == AV_TIME_BASE )
+        {
+            t = i_time;
+        }
+        else
+        {
+            lldiv_t q = lldiv( i_time, AV_TIME_BASE );
+            t = q.quot * CLOCK_FREQ + q.rem * CLOCK_FREQ / AV_TIME_BASE;
+        }
 
-    p_sys->i_pcr = i_time;
+        if( t == VLC_TS_INVALID )
+            t = VLC_TS_0;
+    }
+
+    p_sys->i_pcr = t;
     for( unsigned i = 0; i < p_sys->i_tracks; i++ )
         p_sys->tracks[i].i_pcr = VLC_TS_INVALID;
 
-    if( i_time != VLC_TS_INVALID )
+    if( t != VLC_TS_INVALID )
     {
-        es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, i_time );
-        UpdateSeekPoint( p_demux, i_time );
+        es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, t );
+        UpdateSeekPoint( p_demux, t );
     }
 }
 
@@ -1013,7 +1029,9 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_SET_POSITION:
+        {
             f = va_arg( args, double );
+            bool precise = va_arg( args, int );
             i64 = p_sys->ic->duration * f + i_start_time;
 
             msg_Warn( p_demux, "DEMUX_SET_POSITION: %"PRId64, i64 );
@@ -1034,9 +1052,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             }
             else
             {
-                ResetTime( p_demux, i64 - i_start_time );
+                if( precise )
+                    ResetTime( p_demux, i64 - i_start_time );
+                else
+                    ResetTime( p_demux, -1 );
             }
             return VLC_SUCCESS;
+        }
 
         case DEMUX_GET_LENGTH:
             pi64 = va_arg( args, int64_t * );
@@ -1054,6 +1076,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         case DEMUX_SET_TIME:
         {
             i64 = va_arg( args, int64_t );
+            bool precise = va_arg( args, int );
             i64 = i64 * AV_TIME_BASE / CLOCK_FREQ + i_start_time;
 
             msg_Warn( p_demux, "DEMUX_SET_TIME: %"PRId64, i64 );
@@ -1062,7 +1085,10 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             {
                 return VLC_EGENERIC;
             }
-            ResetTime( p_demux, i64 - i_start_time );
+            if( precise )
+                ResetTime( p_demux, i64 - i_start_time );
+            else
+                ResetTime( p_demux, -1 );
             return VLC_SUCCESS;
         }
 

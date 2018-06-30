@@ -70,7 +70,7 @@ typedef struct audioscrobbler_song_t
     int         i_l;                /**< track length     */
     char        *psz_m;             /**< musicbrainz id   */
     time_t      date;               /**< date since epoch */
-    mtime_t     i_start;            /**< playing start    */
+    vlc_tick_t  i_start;            /**< playing start    */
 } audioscrobbler_song_t;
 
 struct intf_sys_t
@@ -94,8 +94,8 @@ struct intf_sys_t
     /* data about song currently playing */
     audioscrobbler_song_t   p_current_song;     /**< song being played      */
 
-    mtime_t                 time_pause;         /**< time when vlc paused   */
-    mtime_t                 time_total_pauses;  /**< total time in pause    */
+    vlc_tick_t              time_pause;         /**< time when vlc paused   */
+    vlc_tick_t              time_total_pauses;  /**< total time in pause    */
 
     bool                    b_submit_nowp;      /**< do we have to submit ? */
 
@@ -225,7 +225,7 @@ static void AddToQueue (intf_thread_t *p_this)
         goto end;
 
     /* wait for the user to listen enough before submitting */
-    played_time = mdate() - p_sys->p_current_song.i_start -
+    played_time = vlc_tick_now() - p_sys->p_current_song.i_start -
                             p_sys->time_total_pauses;
     played_time /= CLOCK_FREQ; /* µs → s */
 
@@ -327,10 +327,10 @@ static int PlayingChange(vlc_object_t *p_this, const char *psz_var,
     if (state >= END_S)
         AddToQueue(p_intf);
     else if (state == PAUSE_S)
-        p_sys->time_pause = mdate();
+        p_sys->time_pause = vlc_tick_now();
     else if (p_sys->time_pause > 0 && state == PLAYING_S)
     {
-        p_sys->time_total_pauses += (mdate() - p_sys->time_pause);
+        p_sys->time_total_pauses += (vlc_tick_now() - p_sys->time_pause);
         p_sys->time_pause = 0;
     }
 
@@ -374,7 +374,7 @@ static int ItemChange(vlc_object_t *p_this, const char *psz_var,
 
     p_sys->time_total_pauses = 0;
     time(&p_sys->p_current_song.date);        /* to be sent to last.fm */
-    p_sys->p_current_song.i_start = mdate();    /* only used locally */
+    p_sys->p_current_song.i_start = vlc_tick_now();    /* only used locally */
 
     p_sys->p_input = vlc_object_hold(p_input);
     var_AddCallback(p_input, "intf-event", PlayingChange, p_intf);
@@ -646,7 +646,7 @@ proto:
     return VLC_EGENERIC;
 }
 
-static void HandleInterval(mtime_t *next, unsigned int *i_interval)
+static void HandleInterval(vlc_tick_t *next, unsigned int *i_interval)
 {
     if (*i_interval == 0)
     {
@@ -660,7 +660,7 @@ static void HandleInterval(mtime_t *next, unsigned int *i_interval)
         if (*i_interval > 120)
             *i_interval = 120;
     }
-    *next = mdate() + (*i_interval * CLOCK_FREQ * 60);
+    *next = vlc_tick_now() + (*i_interval * CLOCK_FREQ * 60);
 }
 
 /*****************************************************************************
@@ -675,7 +675,7 @@ static void *Run(void *data)
     bool                    b_nowp_submission_ongoing = false;
 
     /* data about audioscrobbler session */
-    mtime_t                 next_exchange = 0; /**< when can we send data  */
+    vlc_tick_t              next_exchange = 0; /**< when can we send data  */
     unsigned int            i_interval = 0;     /**< waiting interval (secs)*/
 
     intf_sys_t *p_sys = p_intf->p_sys;
@@ -684,7 +684,7 @@ static void *Run(void *data)
     for (;;)
     {
         vlc_restorecancel(canc);
-        mwait(next_exchange);
+        vlc_tick_wait(next_exchange);
 
         vlc_mutex_lock(&p_sys->lock);
         mutex_cleanup_push(&p_sys->lock);

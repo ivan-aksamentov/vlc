@@ -76,14 +76,14 @@ vlc_module_end ()
     void *rawAudioData;
     UInt32 numberOfSamples;
     date_t date;
-    mtime_t currentPts;
-    mtime_t previousPts;
+    vlc_tick_t currentPts;
+    vlc_tick_t previousPts;
 }
 - (id)initWithDemux:(demux_t *)p_demux;
 - (void)outputAudioSampleBuffer:(QTSampleBuffer *)sampleBuffer fromConnection:(QTCaptureConnection *)connection;
 - (BOOL)checkCurrentAudioBuffer;
 - (void)freeAudioMem;
-- (mtime_t)getCurrentPts;
+- (vlc_tick_t)getCurrentPts;
 - (void *)getCurrentAudioBufferData;
 - (UInt32)getCurrentTotalDataSize;
 - (UInt32)getNumberOfSamples;
@@ -184,10 +184,10 @@ vlc_module_end ()
     FREENULL(rawAudioData);
 }
 
-- (mtime_t)getCurrentPts
+- (vlc_tick_t)getCurrentPts
 {
     /* FIXME: can this getter be minimized? */
-    mtime_t pts;
+    vlc_tick_t pts;
 
     if(!currentAudioBuffer || currentPts == previousPts)
         return 0;
@@ -517,7 +517,7 @@ static int Demux(demux_t *p_demux)
             block_Release(p_blocka);
 
             // Nothing to transfer yet, just forget
-            msleep(VLC_HARD_MIN_SLEEP);
+            vlc_tick_sleep(VLC_HARD_MIN_SLEEP);
             return 1;
         }
 

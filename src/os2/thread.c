@@ -395,11 +395,11 @@ void vlc_cond_wait (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex)
 }
 
 int vlc_cond_timedwait (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex,
-                        mtime_t deadline)
+                        vlc_tick_t deadline)
 {
     ULONG ulTimeout;
 
-    mtime_t total = mdate();
+    vlc_tick_t total = vlc_tick_now();
     total = (deadline - total) / 1000;
     if( total < 0 )
         total = 0;
@@ -413,7 +413,7 @@ int vlc_cond_timedwait_daytime (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex,
                                 time_t deadline)
 {
     ULONG ulTimeout;
-    mtime_t total;
+    vlc_tick_t total;
     struct timeval tv;
 
     gettimeofday (&tv, NULL);
@@ -898,7 +898,7 @@ int vlc_poll_os2( struct pollfd *fds, unsigned nfds, int timeout )
 #define Q2LL( q )   ( *( long long * )&( q ))
 
 /*** Clock ***/
-mtime_t mdate (void)
+vlc_tick_t vlc_tick_now (void)
 {
     /* We don't need the real date, just the value of a high precision timer */
     QWORD counter;
@@ -913,13 +913,13 @@ mtime_t mdate (void)
     return (d.quot * CLOCK_FREQ) + ((d.rem * CLOCK_FREQ) / freq);
 }
 
-#undef mwait
-void mwait (mtime_t deadline)
+#undef vlc_tick_wait
+void vlc_tick_wait (vlc_tick_t deadline)
 {
-    mtime_t delay;
+    vlc_tick_t delay;
 
     vlc_testcancel();
-    while ((delay = (deadline - mdate())) > 0)
+    while ((delay = (deadline - vlc_tick_now())) > 0)
     {
         delay /= 1000;
         if (unlikely(delay > 0x7fffffff))
@@ -929,10 +929,10 @@ void mwait (mtime_t deadline)
     }
 }
 
-#undef msleep
-void msleep (mtime_t delay)
+#undef vlc_tick_sleep
+void vlc_tick_sleep (vlc_tick_t delay)
 {
-    mwait (mdate () + delay);
+    vlc_tick_wait (vlc_tick_now () + delay);
 }
 
 /*** Timers ***/
@@ -1002,7 +1002,7 @@ void vlc_timer_destroy (vlc_timer_t timer)
 }
 
 void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
-                         mtime_t value, mtime_t interval)
+                         vlc_tick_t value, vlc_tick_t interval)
 {
     if (timer->htimer != NULLHANDLE)
     {
@@ -1015,7 +1015,7 @@ void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
         return; /* Disarm */
 
     if (absolute)
-        value -= mdate ();
+        value -= vlc_tick_now ();
     value = (value + 999) / 1000;
     interval = (interval + 999) / 1000;
 

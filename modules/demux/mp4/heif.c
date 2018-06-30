@@ -38,9 +38,9 @@ struct heif_private_t
 {
     MP4_Box_t *p_root;
     es_out_id_t *id;
-    mtime_t i_pcr;
-    mtime_t i_end_display_time;
-    mtime_t i_image_duration;
+    vlc_tick_t i_pcr;
+    vlc_tick_t i_end_display_time;
+    vlc_tick_t i_image_duration;
     bool b_seekpoint_changed;
     uint32_t i_seekpoint;
     input_title_t *p_title;
@@ -221,9 +221,9 @@ static int DemuxHEIF( demux_t *p_demux )
     {
         bool b_empty;
         es_out_Control( p_demux->out, ES_OUT_GET_EMPTY, &b_empty );
-        if( !b_empty || mdate() <= p_sys->i_end_display_time )
+        if( !b_empty || vlc_tick_now() <= p_sys->i_end_display_time )
         {
-            msleep( 40 * 1000 );
+            vlc_tick_sleep( 40 * 1000 );
             return VLC_DEMUXER_SUCCESS;
         }
         p_sys->i_end_display_time = 0;
@@ -423,7 +423,7 @@ static int DemuxHEIF( demux_t *p_demux )
 
     p_block->i_flags |= BLOCK_FLAG_END_OF_SEQUENCE;
 
-    p_sys->i_end_display_time = mdate() + p_block->i_length;
+    p_sys->i_end_display_time = vlc_tick_now() + p_block->i_length;
     p_sys->b_seekpoint_changed = true;
 
     p_sys->i_pcr = p_block->i_dts + p_block->i_length;

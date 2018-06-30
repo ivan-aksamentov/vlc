@@ -72,16 +72,30 @@ typedef struct
     double f_fps;
 
     /* */
-    mtime_t i_pts_delay;
+    vlc_tick_t i_pts_delay;
 
     bool       b_eof;   /* eof of demuxer */
 
 } input_source_t;
 
+typedef union
+{
+    vlc_value_t val;
+    vlc_viewpoint_t viewpoint;
+    struct {
+        bool b_fast_seek;
+        vlc_tick_t i_val;
+    } time;
+    struct {
+        bool b_fast_seek;
+        float f_val;
+    } pos;
+} input_control_param_t;
+
 typedef struct
 {
     int         i_type;
-    vlc_value_t val;
+    input_control_param_t param;
 } input_control_t;
 
 /** Private input fields */
@@ -103,10 +117,9 @@ typedef struct input_thread_private_t
     int         i_rate;
 
     /* Playtime configuration and state */
-    mtime_t     i_start;    /* :start-time,0 by default */
-    mtime_t     i_stop;     /* :stop-time, 0 if none */
-    mtime_t     i_time;     /* Current time */
-    bool        b_fast_seek;/* :input-fast-seek */
+    vlc_tick_t  i_start;    /* :start-time,0 by default */
+    vlc_tick_t  i_stop;     /* :stop-time, 0 if none */
+    vlc_tick_t  i_time;     /* Current time */
 
     /* Output */
     bool            b_out_pace_control; /* XXX Move it ot es_sout ? */
@@ -221,10 +234,23 @@ enum input_control_e
 
 /* Internal helpers */
 
+void input_ControlPush( input_thread_t *, int, input_control_param_t * );
+
 /* XXX for string value you have to allocate it before calling
- * input_ControlPush
+ * input_ControlPushHelper
  */
-void input_ControlPush( input_thread_t *, int i_type, vlc_value_t * );
+static inline void input_ControlPushHelper( input_thread_t *p_input, int i_type, vlc_value_t *val )
+{
+    if( val != NULL )
+    {
+        input_control_param_t param = { .val = *val };
+        input_ControlPush( p_input, i_type, &param );
+    }
+    else
+    {
+        input_ControlPush( p_input, i_type, NULL );
+    }
+}
 
 bool input_Stopped( input_thread_t * );
 
@@ -269,8 +295,8 @@ typedef struct input_rate_t
     uintmax_t value;
     struct
     {
-        uintmax_t value;
-        mtime_t   date;
+        uintmax_t  value;
+        vlc_tick_t date;
     } samples[2];
 } input_rate_t;
 

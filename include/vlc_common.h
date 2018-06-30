@@ -277,18 +277,6 @@
  * Basic types definitions
  *****************************************************************************/
 /**
- * High precision date or time interval
- *
- * Store a high precision date or time interval. The maximum precision is the
- * microsecond, and a 64 bits integer is used to avoid overflows (maximum
- * time interval is then 292271 years, which should be long enough for any
- * video). Dates are stored as microseconds since a common date (usually the
- * epoch). Note that date and time intervals can be manipulated using regular
- * arithmetic operators, and that no special functions are required.
- */
-typedef int64_t mtime_t;
-
-/**
  * The vlc_fourcc_t type.
  *
  * See http://www.webartz.com/fourcc/ for a very detailed list.
@@ -511,7 +499,7 @@ typedef int ( * vlc_list_callback_t ) ( vlc_object_t *,      /* variable's objec
 #   include <os2.h>
 #endif
 
-#include "vlc_mtime.h"
+#include "vlc_tick.h"
 #include "vlc_threads.h"
 
 /**

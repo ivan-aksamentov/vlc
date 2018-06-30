@@ -66,10 +66,10 @@ static void *vlc_demux_chained_Thread(void *data)
     demux_Control(demux, DEMUX_SET_GROUP_ALL);
 
     /* Main loop */
-    mtime_t next_update = 0;
+    vlc_tick_t next_update = 0;
 
     do
-        if (demux_TestAndClearFlags(demux, UINT_MAX) || mdate() >= next_update)
+        if (demux_TestAndClearFlags(demux, UINT_MAX) || vlc_tick_now() >= next_update)
         {
             double newpos;
             int64_t newlen, newtime;
@@ -87,7 +87,7 @@ static void *vlc_demux_chained_Thread(void *data)
             dc->stats.time = newtime;
             vlc_mutex_unlock(&dc->lock);
 
-            next_update = mdate() + (CLOCK_FREQ / 4);
+            next_update = vlc_tick_now() + (CLOCK_FREQ / 4);
         }
     while (demux_Demux(demux) > 0);
 

@@ -203,7 +203,7 @@ typedef struct decklink_sys_t
     BMDTimeValue frameduration;
 
     /* XXX: workaround card clock drift */
-    mtime_t offset;
+    vlc_tick_t offset;
 
     /* !With LOCK */
 
@@ -302,7 +302,7 @@ static decklink_sys_t *HoldDLSys(vlc_object_t *obj, int i_cat)
             {
                 vlc_mutex_unlock(&sys_lock);
                 msg_Info(obj, "Waiting for previous vout module to exit");
-                msleep(CLOCK_FREQ / 10);
+                vlc_tick_sleep(CLOCK_FREQ / 10);
                 vlc_mutex_lock(&sys_lock);
             }
         }
@@ -723,7 +723,7 @@ static int OpenDecklink(vout_display_t *vd, decklink_sys_t *sys)
 
     /* start */
     result = sys->p_output->StartScheduledPlayback(
-        (mdate() * sys->timescale) / CLOCK_FREQ, sys->timescale, 1.0);
+        (vlc_tick_now() * sys->timescale) / CLOCK_FREQ, sys->timescale, 1.0);
     CHECK("Could not start playback");
 
     p_config->Release();
@@ -890,10 +890,10 @@ static void send_AFD(uint8_t afdcode, uint8_t ar, uint8_t *buf)
 }
 
 static void PrepareVideo(vout_display_t *vd, picture_t *picture, subpicture_t *,
-                         mtime_t date)
+                         vlc_tick_t date)
 {
     decklink_sys_t *sys = (decklink_sys_t *) vd->sys;
-    mtime_t now = mdate();
+    vlc_tick_t now = vlc_tick_now();
 
     if (!picture)
         return;
@@ -993,7 +993,7 @@ static void PrepareVideo(vout_display_t *vd, picture_t *picture, subpicture_t *,
         goto end;
     }
 
-    now = mdate() - sys->offset;
+    now = vlc_tick_now() - sys->offset;
 
     BMDTimeValue decklink_now;
     double speed;
@@ -1094,12 +1094,12 @@ static void Flush (audio_output_t *aout, bool drain)
     if (drain) {
         uint32_t samples;
         sys->p_output->GetBufferedAudioSampleFrameCount(&samples);
-        msleep(CLOCK_FREQ * samples / sys->i_rate);
+        vlc_tick_sleep(CLOCK_FREQ * samples / sys->i_rate);
     } else if (sys->p_output->FlushBufferedAudioSamples() == E_FAIL)
         msg_Err(aout, "Flush failed");
 }
 
-static int TimeGet(audio_output_t *, mtime_t* restrict)
+static int TimeGet(audio_output_t *, vlc_tick_t* restrict)
 {
     /* synchronization is handled by the card */
     return -1;
@@ -1124,7 +1124,7 @@ static int Start(audio_output_t *aout, audio_sample_format_t *restrict fmt)
     return VLC_SUCCESS;
 }
 
-static void PlayAudio(audio_output_t *aout, block_t *audio, mtime_t systempts)
+static void PlayAudio(audio_output_t *aout, block_t *audio, vlc_tick_t systempts)
 {
     decklink_sys_t *sys = (decklink_sys_t *) aout->sys;
     vlc_mutex_lock(&sys->lock);

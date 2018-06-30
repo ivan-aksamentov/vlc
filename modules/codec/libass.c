@@ -74,7 +74,7 @@ static void Flush( decoder_t * );
 /* */
 typedef struct
 {
-    mtime_t        i_max_stop;
+    vlc_tick_t     i_max_stop;
 
     /* The following fields of decoder_sys_t are shared between decoder and spu units */
     vlc_mutex_t    lock;
@@ -95,11 +95,11 @@ static void DecSysHold( decoder_sys_t *p_sys );
 static int SubpictureValidate( subpicture_t *,
                                bool, const video_format_t *,
                                bool, const video_format_t *,
-                               mtime_t );
+                               vlc_tick_t );
 static void SubpictureUpdate( subpicture_t *,
                               const video_format_t *,
                               const video_format_t *,
-                              mtime_t );
+                              vlc_tick_t );
 static void SubpictureDestroy( subpicture_t * );
 
 typedef struct
@@ -107,7 +107,7 @@ typedef struct
     decoder_sys_t *p_dec_sys;
     void          *p_subs_data;
     int           i_subs_len;
-    mtime_t       i_pts;
+    vlc_tick_t    i_pts;
 
     ASS_Image     *p_img;
 } libass_spu_updater_sys_t;
@@ -416,7 +416,7 @@ static int DecodeBlock( decoder_t *p_dec, block_t *p_block )
 static int SubpictureValidate( subpicture_t *p_subpic,
                                bool b_fmt_src, const video_format_t *p_fmt_src,
                                bool b_fmt_dst, const video_format_t *p_fmt_dst,
-                               mtime_t i_ts )
+                               vlc_tick_t i_ts )
 {
     libass_spu_updater_sys_t *p_spusys = p_subpic->updater.p_sys;
     decoder_sys_t *p_sys = p_spusys->p_dec_sys;
@@ -438,7 +438,7 @@ static int SubpictureValidate( subpicture_t *p_subpic,
     }
 
     /* */
-    const mtime_t i_stream_date = p_spusys->i_pts + (i_ts - p_subpic->i_start);
+    const vlc_tick_t i_stream_date = p_spusys->i_pts + (i_ts - p_subpic->i_start);
     int i_changed;
     ASS_Image *p_img = ass_render_frame( p_sys->p_renderer, p_sys->p_track,
                                          i_stream_date/1000, &i_changed );
@@ -458,7 +458,7 @@ static int SubpictureValidate( subpicture_t *p_subpic,
 static void SubpictureUpdate( subpicture_t *p_subpic,
                               const video_format_t *p_fmt_src,
                               const video_format_t *p_fmt_dst,
-                              mtime_t i_ts )
+                              vlc_tick_t i_ts )
 {
     VLC_UNUSED( p_fmt_src ); VLC_UNUSED( p_fmt_dst ); VLC_UNUSED( i_ts );
 
@@ -561,7 +561,7 @@ static int BuildRegions( rectangle_t *p_region, int i_max_region, ASS_Image *p_i
     int i_count;
 
 #ifdef DEBUG_REGION
-    int64_t i_ck_start = mdate();
+    int64_t i_ck_start = vlc_tick_now();
 #endif
 
     for( p_tmp = p_img_list, i_count = 0; p_tmp != NULL; p_tmp = p_tmp->next )
@@ -674,7 +674,7 @@ static int BuildRegions( rectangle_t *p_region, int i_max_region, ASS_Image *p_i
         p_region[n] = region[n];
 
 #ifdef DEBUG_REGION
-    int64_t i_ck_time = mdate() - i_ck_start;
+    int64_t i_ck_time = vlc_tick_now() - i_ck_start;
     msg_Err( p_spu, "ASS: %d objects merged into %d region in %d micros", i_count, i_region, (int)(i_ck_time) );
 #endif
 

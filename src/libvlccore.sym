@@ -205,6 +205,8 @@ input_resource_ResetAout
 input_Start
 input_Stop
 input_vaControl
+input_SetTime
+input_SetPosition
 vlc_readdir_helper_init
 vlc_readdir_helper_finish
 vlc_readdir_helper_additem
@@ -236,7 +238,7 @@ vlc_uri_encode
 vlc_uri_compose
 vlc_uri_resolve
 vlc_uri_fixup
-mdate
+vlc_tick_now
 module_config_free
 module_config_get
 module_exists
@@ -271,8 +273,8 @@ vlc_obj_malloc
 vlc_obj_calloc
 vlc_obj_strdup
 vlc_obj_free
-msleep
-mwait
+vlc_tick_sleep
+vlc_tick_wait
 net_Accept
 net_AcceptSingle
 net_Connect

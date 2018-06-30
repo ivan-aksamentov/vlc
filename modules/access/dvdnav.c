@@ -162,7 +162,7 @@ typedef struct
     unsigned      updates;
 
     /* length of program group chain */
-    mtime_t     i_pgc_length;
+    vlc_tick_t  i_pgc_length;
     int         i_vobu_index;
     int         i_vobu_flush;
 } demux_sys_t;
@@ -871,7 +871,7 @@ static int Demux( demux_t *p_demux )
 
             if( event->length != 0xff && p_sys->still.b_created )
             {
-                mtime_t delay = event->length * CLOCK_FREQ;
+                vlc_tick_t delay = event->length * CLOCK_FREQ;
                 vlc_timer_schedule( p_sys->still.timer, false, delay, 0 );
             }
 
@@ -884,7 +884,7 @@ static int Demux( demux_t *p_demux )
             DemuxForceStill( p_demux );
             p_sys->b_reset_pcr = true;
         }
-        msleep( 40000 );
+        vlc_tick_sleep( 40000 );
         break;
     }
 
@@ -1109,7 +1109,7 @@ static int Demux( demux_t *p_demux )
         es_out_Control( p_demux->out, ES_OUT_GET_EMPTY, &b_empty );
         if( !b_empty )
         {
-            msleep( 40*1000 );
+            vlc_tick_sleep( 40*1000 );
         }
         else
         {

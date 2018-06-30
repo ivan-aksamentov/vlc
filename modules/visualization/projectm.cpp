@@ -347,7 +347,7 @@ static void *Thread( void *p_data )
     /* */
     for( ;; )
     {
-        const mtime_t i_deadline = mdate() + CLOCK_FREQ / 50; /* 50 fps max */
+        const vlc_tick_t i_deadline = vlc_tick_now() + CLOCK_FREQ / 50; /* 50 fps max */
 
         /* Manage the events */
         unsigned width, height;
@@ -373,7 +373,7 @@ static void *Thread( void *p_data )
         p_projectm->renderFrame();
 
         /* */
-        mwait( i_deadline );
+        vlc_tick_wait( i_deadline );
 
         vlc_gl_Swap( gl );
     }

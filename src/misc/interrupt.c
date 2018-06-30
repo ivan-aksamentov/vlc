@@ -225,11 +225,11 @@ static void vlc_mwait_i11e_cleanup(void *opaque)
     vlc_cond_destroy(cond);
 }
 
-int vlc_mwait_i11e(mtime_t deadline)
+int vlc_mwait_i11e(vlc_tick_t deadline)
 {
     vlc_interrupt_t *ctx = vlc_interrupt_var;
     if (ctx == NULL)
-        return mwait(deadline), 0;
+        return vlc_tick_wait(deadline), 0;
 
     vlc_cond_t wait;
     vlc_cond_init(&wait);

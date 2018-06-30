@@ -237,7 +237,7 @@ static int Open (vlc_object_t *obj)
     if (!p_sys->rate)
         goto error;
 
-    mtime_t interval = (float)CLOCK_FREQ / p_sys->rate;
+    vlc_tick_t interval = (float)CLOCK_FREQ / p_sys->rate;
     if (!interval)
         goto error;
 
@@ -502,7 +502,7 @@ noshm:
     /* Send block - zero copy */
     if (sys->es != NULL)
     {
-        block->i_pts = block->i_dts = mdate ();
+        block->i_pts = block->i_dts = vlc_tick_now ();
 
         es_out_SetPCR(demux->out, block->i_pts);
         es_out_Send (demux->out, sys->es, block);

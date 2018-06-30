@@ -73,8 +73,8 @@ vlc_module_end ()
 
     CVImageBufferRef    currentImageBuffer;
 
-    mtime_t             currentPts;
-    mtime_t             previousPts;
+    vlc_tick_t          currentPts;
+    vlc_tick_t          previousPts;
     size_t              bytesPerRow;
 
     long                timeScale;
@@ -87,9 +87,9 @@ vlc_module_end ()
 - (int)width;
 - (int)height;
 - (void)getVideoDimensions:(CMSampleBufferRef)sampleBuffer;
-- (mtime_t)currentPts;
+- (vlc_tick_t)currentPts;
 - (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection;
-- (mtime_t)copyCurrentFrameToBuffer:(void *)buffer;
+- (vlc_tick_t)copyCurrentFrameToBuffer:(void *)buffer;
 @end
 
 @implementation VLCAVDecompressedVideoOutput : AVCaptureVideoDataOutput
@@ -152,9 +152,9 @@ vlc_module_end ()
     }
 }
 
--(mtime_t)currentPts
+-(vlc_tick_t)currentPts
 {
-    mtime_t pts;
+    vlc_tick_t pts;
 
     if ( !currentImageBuffer || currentPts == previousPts )
         return 0;
@@ -181,7 +181,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         @synchronized (self) {
             imageBufferToRelease = currentImageBuffer;
             currentImageBuffer = videoFrame;
-            currentPts = (mtime_t)presentationtimestamp.value;
+            currentPts = (vlc_tick_t)presentationtimestamp.value;
             timeScale = (long)presentationtimestamp.timescale;
         }
         
@@ -189,10 +189,10 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     }
 }
 
-- (mtime_t)copyCurrentFrameToBuffer:(void *)buffer
+- (vlc_tick_t)copyCurrentFrameToBuffer:(void *)buffer
 {
     CVImageBufferRef imageBuffer;
-    mtime_t pts;
+    vlc_tick_t pts;
 
     void *pixels;
 
@@ -408,7 +408,7 @@ static int Demux(demux_t *p_demux)
             {
                 /* Nothing to display yet, just forget */
                 block_Release(p_block);
-                msleep(VLC_HARD_MIN_SLEEP);
+                vlc_tick_sleep(VLC_HARD_MIN_SLEEP);
                 return 1;
             }
             else if ( !p_sys->b_es_setup )
@@ -456,7 +456,7 @@ static int Control(demux_t *p_demux, int i_query, va_list args)
 
         case DEMUX_GET_TIME:
             pi64 = va_arg(args, int64_t *);
-            *pi64 = mdate();
+            *pi64 = vlc_tick_now();
             return VLC_SUCCESS;
 
         default:

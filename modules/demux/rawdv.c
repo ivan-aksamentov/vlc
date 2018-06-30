@@ -108,7 +108,7 @@ typedef struct
     int    i_bitrate;
 
     /* program clock reference (in units of 90kHz) */
-    mtime_t i_pcr;
+    vlc_tick_t i_pcr;
     bool b_hurry_up;
 } demux_sys_t;
 
@@ -259,7 +259,7 @@ static int Demux( demux_t *p_demux )
     if( p_sys->b_hurry_up )
     {
          /* 3 frames */
-        p_sys->i_pcr = mdate() + (p_sys->i_dsf ? 120000 : 90000);
+        p_sys->i_pcr = vlc_tick_now() + (p_sys->i_dsf ? 120000 : 90000);
     }
 
     /* Call the pace control */

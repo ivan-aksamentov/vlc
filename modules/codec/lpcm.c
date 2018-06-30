@@ -455,6 +455,7 @@ static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
             p_dec->fmt_out.i_codec = VLC_CODEC_S32N;
             p_dec->fmt_out.audio.i_bitspersample = 32;
         }
+        aout_FormatPrepare(&p_dec->fmt_out.audio);
 
         /* */
         block_t *p_aout_buffer;
@@ -660,9 +661,9 @@ static block_t *EncodeFrames( encoder_t *p_enc, block_t *p_aout_buf )
         i_bytes_consumed += i_consume_bytes;
 
         /* We need to find i_length by means of next_pts due to possible roundoff errors. */
-        mtime_t this_pts = p_aout_buf->i_pts +
+        vlc_tick_t this_pts = p_aout_buf->i_pts +
             (i * p_sys->i_frame_samples + i_start_offset) * CLOCK_FREQ / p_sys->i_rate;
-        mtime_t next_pts = p_aout_buf->i_pts +
+        vlc_tick_t next_pts = p_aout_buf->i_pts +
             ((i + 1) * p_sys->i_frame_samples + i_start_offset) * CLOCK_FREQ / p_sys->i_rate;
 
         p_block->i_pts = p_block->i_dts = this_pts;

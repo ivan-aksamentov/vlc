@@ -1131,11 +1131,11 @@ static void* live_thread( void* p )
         }
     }
 
-    mtime_t last_dl_start_time;
+    vlc_tick_t last_dl_start_time;
 
     while( ! sys->closed )
     {
-        last_dl_start_time = mdate();
+        last_dl_start_time = vlc_tick_now();
         stream_t* download_stream = vlc_stream_NewURL( p_this, abst_url );
         if( ! download_stream )
         {
@@ -1167,7 +1167,7 @@ static void* live_thread( void* p )
             vlc_stream_Delete( download_stream );
         }
 
-        mwait( last_dl_start_time + ( ((int64_t)hds_stream->fragment_runs[hds_stream->fragment_run_count-1].fragment_duration) * 1000000LL) / ((int64_t)hds_stream->afrt_timescale) );
+        vlc_tick_wait( last_dl_start_time + ( ((int64_t)hds_stream->fragment_runs[hds_stream->fragment_run_count-1].fragment_duration) * 1000000LL) / ((int64_t)hds_stream->afrt_timescale) );
 
 
     }

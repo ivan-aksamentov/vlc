@@ -107,11 +107,11 @@ static ssize_t Write   ( sout_access_out_t *, block_t * );
 static int Control( sout_access_out_t *, int, va_list );
 
 static void* ThreadWrite( void * );
-static block_t *NewUDPPacket( sout_access_out_t *, mtime_t );
+static block_t *NewUDPPacket( sout_access_out_t *, vlc_tick_t );
 
 typedef struct
 {
-    mtime_t       i_caching;
+    vlc_tick_t    i_caching;
     int           i_handle;
     bool          b_mtu_warning;
     size_t        i_mtu;
@@ -277,7 +277,7 @@ static ssize_t Write( sout_access_out_t *p_access, block_t *p_buffer )
     {
         block_t *p_next;
         int i_packets = 0;
-        mtime_t now = mdate();
+        vlc_tick_t now = vlc_tick_now();
 
         if( !p_sys->b_mtu_warning && p_buffer->i_buffer > p_sys->i_mtu )
         {
@@ -333,7 +333,7 @@ static ssize_t Write( sout_access_out_t *p_access, block_t *p_buffer )
                 if( p_sys->p_buffer->i_dts + p_sys->i_caching < now )
                 {
                     msg_Dbg( p_access, "late packet for udp input (%"PRId64 ")",
-                             mdate() - p_sys->p_buffer->i_dts
+                             vlc_tick_now() - p_sys->p_buffer->i_dts
                               - p_sys->i_caching );
                 }
                 block_FifoPut( p_sys->p_fifo, p_sys->p_buffer );
@@ -352,7 +352,7 @@ static ssize_t Write( sout_access_out_t *p_access, block_t *p_buffer )
 /*****************************************************************************
  * NewUDPPacket: allocate a new UDP packet of size p_sys->i_mtu
  *****************************************************************************/
-static block_t *NewUDPPacket( sout_access_out_t *p_access, mtime_t i_dts)
+static block_t *NewUDPPacket( sout_access_out_t *p_access, vlc_tick_t i_dts)
 {
     sout_access_out_sys_t *p_sys = p_access->p_sys;
     block_t *p_buffer;
@@ -387,7 +387,7 @@ static void* ThreadWrite( void *data )
 {
     sout_access_out_t *p_access = data;
     sout_access_out_sys_t *p_sys = p_access->p_sys;
-    mtime_t i_date_last = -1;
+    vlc_tick_t i_date_last = -1;
     const unsigned i_group = var_GetInteger( p_access,
                                              SOUT_CFG_PREFIX "group" );
     int i_to_send = i_group;
@@ -396,7 +396,7 @@ static void* ThreadWrite( void *data )
     for (;;)
     {
         block_t *p_pk = block_FifoGet( p_sys->p_fifo );
-        mtime_t       i_date, i_sent;
+        vlc_tick_t    i_date, i_sent;
 
         i_date = p_sys->i_caching + p_pk->i_dts;
         if( i_date_last > 0 )
@@ -425,7 +425,7 @@ static void* ThreadWrite( void *data )
         i_to_send--;
         if( !i_to_send || (p_pk->i_flags & BLOCK_FLAG_CLOCK) )
         {
-            mwait( i_date );
+            vlc_tick_wait( i_date );
             i_to_send = i_group;
         }
         if ( send( p_sys->i_handle, p_pk->p_buffer, p_pk->i_buffer, 0 ) == -1 )
@@ -439,7 +439,7 @@ static void* ThreadWrite( void *data )
         }
 
 #if 1
-        i_sent = mdate();
+        i_sent = vlc_tick_now();
         if ( i_sent > i_date + 20000 )
         {
             msg_Dbg( p_access, "packet has been sent too late (%"PRId64 ")",

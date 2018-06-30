@@ -63,7 +63,7 @@ void vlc_timer_destroy (vlc_timer_t timer)
 }
 
 void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
-                         mtime_t value, mtime_t interval)
+                         vlc_tick_t value, vlc_tick_t interval)
 {
     if (timer->handle != INVALID_HANDLE_VALUE)
     {
@@ -75,7 +75,7 @@ void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
 
     if (absolute)
     {
-        value -= mdate ();
+        value -= vlc_tick_now ();
         if (value < 0)
             value = 0;
     }

@@ -177,7 +177,7 @@ typedef struct
     bool                b_menu;
     bool                b_menu_open;
     bool                b_popup_available;
-    mtime_t             i_still_end_time;
+    vlc_tick_t          i_still_end_time;
 
     vlc_mutex_t         bdj_overlay_lock; /* used to lock BD-J overlay open/close while overlays are being sent to vout */
 
@@ -414,7 +414,7 @@ static void startBackground(demux_t *p_demux)
     }
 
     // XXX TODO: what would be correct timestamp ???
-    p_block->i_dts = p_block->i_pts = mdate() + CLOCK_FREQ/25;
+    p_block->i_dts = p_block->i_pts = vlc_tick_now() + CLOCK_FREQ/25;
 
     uint8_t *p = p_block->p_buffer;
     memset(p, 0, fmt.video.i_width * fmt.video.i_height);
@@ -1159,7 +1159,7 @@ static void updater_unlock_overlay(bluray_spu_updater_sys_t *p_upd_sys)
 static int subpictureUpdaterValidate(subpicture_t *p_subpic,
                                       bool b_fmt_src, const video_format_t *p_fmt_src,
                                       bool b_fmt_dst, const video_format_t *p_fmt_dst,
-                                      mtime_t i_ts)
+                                      vlc_tick_t i_ts)
 {
     VLC_UNUSED(b_fmt_src);
     VLC_UNUSED(b_fmt_dst);
@@ -1184,7 +1184,7 @@ static int subpictureUpdaterValidate(subpicture_t *p_subpic,
 static void subpictureUpdaterUpdate(subpicture_t *p_subpic,
                                     const video_format_t *p_fmt_src,
                                     const video_format_t *p_fmt_dst,
-                                    mtime_t i_ts)
+                                    vlc_tick_t i_ts)
 {
     VLC_UNUSED(p_fmt_src);
     VLC_UNUSED(p_fmt_dst);
@@ -1634,7 +1634,7 @@ static void bluraySendOverlayToVout(demux_t *p_demux, bluray_overlay_t *p_ov)
         return;
     }
 
-    p_pic->i_start = p_pic->i_stop = mdate();
+    p_pic->i_start = p_pic->i_stop = vlc_tick_now();
     p_pic->i_channel = vout_RegisterSubpictureChannel(p_sys->p_vout);
     p_ov->i_channel = p_pic->i_channel;
 
@@ -2189,7 +2189,7 @@ static void blurayStillImage( demux_t *p_demux, unsigned i_timeout )
     demux_sys_t *p_sys = p_demux->p_sys;
 
     /* time period elapsed ? */
-    if (p_sys->i_still_end_time > 0 && p_sys->i_still_end_time <= mdate()) {
+    if (p_sys->i_still_end_time > 0 && p_sys->i_still_end_time <= vlc_tick_now()) {
         msg_Dbg(p_demux, "Still image end");
         bd_read_skip_still(p_sys->bluray);
 
@@ -2201,7 +2201,7 @@ static void blurayStillImage( demux_t *p_demux, unsigned i_timeout )
     if (!p_sys->i_still_end_time) {
         if (i_timeout) {
             msg_Dbg(p_demux, "Still image (%d seconds)", i_timeout);
-            p_sys->i_still_end_time = mdate() + i_timeout * CLOCK_FREQ;
+            p_sys->i_still_end_time = vlc_tick_now() + i_timeout * CLOCK_FREQ;
         } else {
             msg_Dbg(p_demux, "Still image (infinite)");
             p_sys->i_still_end_time = -1;
@@ -2216,7 +2216,7 @@ static void blurayStillImage( demux_t *p_demux, unsigned i_timeout )
     }
 
     /* avoid busy loops (read returns no data) */
-    msleep( 40000 );
+    vlc_tick_sleep( 40000 );
 }
 
 static void blurayStreamSelect(demux_t *p_demux, uint32_t i_type, uint32_t i_id)
@@ -2400,7 +2400,7 @@ static void blurayHandleEvent(demux_t *p_demux, const BD_EVENT *e)
     case BD_EVENT_IDLE:
         /* nothing to do (ex. BD-J is preparing menus, waiting user input or running animation) */
         /* avoid busy loop (bd_read() returns no data) */
-        msleep( 40000 );
+        vlc_tick_sleep( 40000 );
         break;
 
     default:

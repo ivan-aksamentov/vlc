@@ -109,18 +109,18 @@ typedef struct
         jobject p_obj; /* AudioTimestamp ref */
         jlong i_frame_us;
         jlong i_frame_pos;
-        mtime_t i_play_time; /* time when play was called */
-        mtime_t i_last_time;
+        vlc_tick_t i_play_time; /* time when play was called */
+        vlc_tick_t i_last_time;
     } timestamp;
 
     /* Used by AudioTrack_GetSmoothPositionUs */
     struct {
         uint32_t i_idx;
         uint32_t i_count;
-        mtime_t p_us[SMOOTHPOS_SAMPLE_COUNT];
-        mtime_t i_us;
-        mtime_t i_last_time;
-        mtime_t i_latency_us;
+        vlc_tick_t p_us[SMOOTHPOS_SAMPLE_COUNT];
+        vlc_tick_t i_us;
+        vlc_tick_t i_last_time;
+        vlc_tick_t i_latency_us;
     } smoothpos;
 
     uint32_t i_max_audiotrack_samples;
@@ -499,7 +499,7 @@ check_exception( JNIEnv *env, audio_output_t *p_aout,
 
 #define JNI_AUDIOTIMESTAMP_GET_LONG( field ) JNI_CALL( GetLongField, p_sys->timestamp.p_obj, jfields.AudioTimestamp.field )
 
-static inline mtime_t
+static inline vlc_tick_t
 frames_to_us( aout_sys_t *p_sys, uint64_t i_nb_frames )
 {
     return  i_nb_frames * CLOCK_FREQ / p_sys->fmt.i_rate;
@@ -577,7 +577,7 @@ AudioTrack_ResetPositions( JNIEnv *env, audio_output_t *p_aout )
     aout_sys_t *p_sys = p_aout->sys;
     VLC_UNUSED( env );
 
-    p_sys->timestamp.i_play_time = mdate();
+    p_sys->timestamp.i_play_time = vlc_tick_now();
     p_sys->timestamp.i_last_time = 0;
     p_sys->timestamp.i_frame_us = 0;
     p_sys->timestamp.i_frame_pos = 0;
@@ -608,12 +608,12 @@ AudioTrack_Reset( JNIEnv *env, audio_output_t *p_aout )
  * This function smooth out the AudioTrack position since it has a very bad
  * precision (+/- 20ms on old devices).
  */
-static mtime_t
+static vlc_tick_t
 AudioTrack_GetSmoothPositionUs( JNIEnv *env, audio_output_t *p_aout )
 {
     aout_sys_t *p_sys = p_aout->sys;
     uint64_t i_audiotrack_us;
-    mtime_t i_now = mdate();
+    vlc_tick_t i_now = vlc_tick_now();
 
     /* Fetch an AudioTrack position every SMOOTHPOS_INTERVAL_US (30ms) */
     if( i_now - p_sys->smoothpos.i_last_time >= SMOOTHPOS_INTERVAL_US )
@@ -652,16 +652,16 @@ AudioTrack_GetSmoothPositionUs( JNIEnv *env, audio_output_t *p_aout )
         return 0;
 }
 
-static mtime_t
+static vlc_tick_t
 AudioTrack_GetTimestampPositionUs( JNIEnv *env, audio_output_t *p_aout )
 {
     aout_sys_t *p_sys = p_aout->sys;
-    mtime_t i_now;
+    vlc_tick_t i_now;
 
     if( !p_sys->timestamp.p_obj )
         return 0;
 
-    i_now = mdate();
+    i_now = vlc_tick_now();
 
     /* Android doc:
      * getTimestamp: Poll for a timestamp on demand.
@@ -712,10 +712,10 @@ AudioTrack_GetTimestampPositionUs( JNIEnv *env, audio_output_t *p_aout )
 }
 
 static int
-TimeGet( audio_output_t *p_aout, mtime_t *restrict p_delay )
+TimeGet( audio_output_t *p_aout, vlc_tick_t *restrict p_delay )
 {
     aout_sys_t *p_sys = p_aout->sys;
-    mtime_t i_audiotrack_us;
+    vlc_tick_t i_audiotrack_us;
     JNIEnv *env;
 
     if( p_sys->b_passthrough )
@@ -734,14 +734,14 @@ TimeGet( audio_output_t *p_aout, mtime_t *restrict p_delay )
 /* Debug log for both delays */
 #if 0
 {
-    mtime_t i_written_us = FRAMES_TO_US( p_sys->i_samples_written );
-    mtime_t i_ts_us = AudioTrack_GetTimestampPositionUs( env, p_aout );
-    mtime_t i_smooth_us = 0;
+    vlc_tick_t i_written_us = FRAMES_TO_US( p_sys->i_samples_written );
+    vlc_tick_t i_ts_us = AudioTrack_GetTimestampPositionUs( env, p_aout );
+    vlc_tick_t i_smooth_us = 0;
 
     if( i_ts_us > 0 )
         i_smooth_us = AudioTrack_GetSmoothPositionUs(env, p_aout );
     else if ( p_sys->smoothpos.i_us != 0 )
-        i_smooth_us = p_sys->smoothpos.i_us + mdate()
+        i_smooth_us = p_sys->smoothpos.i_us + vlc_tick_now()
             - p_sys->smoothpos.i_latency_us;
 
     msg_Err( p_aout, "TimeGet: TimeStamp: %lld, Smooth: %lld (latency: %lld)",
@@ -754,7 +754,7 @@ TimeGet( audio_output_t *p_aout, mtime_t *restrict p_delay )
     if( i_audiotrack_us > 0 )
     {
         /* AudioTrack delay */
-        mtime_t i_delay = FRAMES_TO_US( p_sys->i_samples_written )
+        vlc_tick_t i_delay = FRAMES_TO_US( p_sys->i_samples_written )
                         - i_audiotrack_us;
         if( i_delay >= 0 )
         {
@@ -1631,8 +1631,8 @@ AudioTrack_Thread( void *p_data )
     audio_output_t *p_aout = p_data;
     aout_sys_t *p_sys = p_aout->sys;
     JNIEnv *env = GET_ENV();
-    mtime_t i_play_deadline = 0;
-    mtime_t i_last_time_blocked = 0;
+    vlc_tick_t i_play_deadline = 0;
+    vlc_tick_t i_last_time_blocked = 0;
 
     if( !env )
         return NULL;
@@ -1647,7 +1647,7 @@ AudioTrack_Thread( void *p_data )
         vlc_mutex_lock( &p_sys->lock );
 
         /* Wait for free space in Audiotrack internal buffer */
-        if( i_play_deadline != 0 && mdate() < i_play_deadline )
+        if( i_play_deadline != 0 && vlc_tick_now() < i_play_deadline )
         {
             /* Don't wake up the thread when there is new data since we are
              * waiting for more space */
@@ -1685,7 +1685,7 @@ AudioTrack_Thread( void *p_data )
          * Android 4.4.2 if we send frames too quickly. To fix this issue,
          * force the writing of the buffer after a certain delay. */
         if( i_last_time_blocked != 0 )
-            b_forced = mdate() - i_last_time_blocked >
+            b_forced = vlc_tick_now() - i_last_time_blocked >
                        FRAMES_TO_US( p_sys->i_max_audiotrack_samples ) * 2;
         else
             b_forced = false;
@@ -1703,11 +1703,11 @@ AudioTrack_Thread( void *p_data )
                 if( i_ret != 0 )
                     i_last_time_blocked = 0;
                 else if( i_last_time_blocked == 0 )
-                    i_last_time_blocked = mdate();
+                    i_last_time_blocked = vlc_tick_now();
             }
 
             if( i_ret == 0 )
-                i_play_deadline = mdate() + __MAX( 10000, FRAMES_TO_US(
+                i_play_deadline = vlc_tick_now() + __MAX( 10000, FRAMES_TO_US(
                                   p_sys->i_max_audiotrack_samples / 5 ) );
             else
                 p_sys->circular.i_read += i_ret;
@@ -1727,7 +1727,7 @@ AudioTrack_Thread( void *p_data )
 }
 
 static void
-Play( audio_output_t *p_aout, block_t *p_buffer, mtime_t i_date )
+Play( audio_output_t *p_aout, block_t *p_buffer, vlc_tick_t i_date )
 {
     JNIEnv *env = NULL;
     size_t i_buffer_offset = 0;
@@ -1807,7 +1807,7 @@ bailout:
 }
 
 static void
-Pause( audio_output_t *p_aout, bool b_pause, mtime_t i_date )
+Pause( audio_output_t *p_aout, bool b_pause, vlc_tick_t i_date )
 {
     aout_sys_t *p_sys = p_aout->sys;
     JNIEnv *env;
