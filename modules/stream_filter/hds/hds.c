@@ -1167,7 +1167,7 @@ static void* live_thread( void* p )
             vlc_stream_Delete( download_stream );
         }
 
-        vlc_tick_wait( last_dl_start_time + ( ((int64_t)hds_stream->fragment_runs[hds_stream->fragment_run_count-1].fragment_duration) * 1000000LL) / ((int64_t)hds_stream->afrt_timescale) );
+        vlc_tick_wait( last_dl_start_time + (CLOCK_FREQ * hds_stream->fragment_runs[hds_stream->fragment_run_count-1].fragment_duration) / hds_stream->afrt_timescale);
 
 
     }
@@ -1893,8 +1893,8 @@ static int Control( stream_t *s, int i_query, va_list args )
             *(va_arg( args, bool * )) = true;
             break;
         case STREAM_GET_PTS_DELAY:
-            *va_arg (args, int64_t *) = INT64_C(1000) *
-                var_InheritInteger(s, "network-caching");
+            *va_arg (args, vlc_tick_t *) = VLC_TICK_FROM_MS(
+                var_InheritInteger(s, "network-caching") );
              break;
         case STREAM_GET_SIZE:
             *(va_arg (args, uint64_t *)) = get_stream_size(s);

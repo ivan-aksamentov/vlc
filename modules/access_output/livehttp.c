@@ -181,7 +181,6 @@ typedef struct
     char *psz_keyfile;
     vlc_tick_t i_keyfile_modification;
     vlc_tick_t i_opendts;
-    vlc_tick_t i_dts_offset;
     vlc_tick_t  i_seglenm;
     uint32_t i_segment;
     size_t  i_seglen;
@@ -235,7 +234,7 @@ static int Open( vlc_object_t *p_this )
     /* Try to get within asked segment length */
     p_sys->i_seglen = var_GetInteger( p_access, SOUT_CFG_PREFIX "seglen" );
 
-    p_sys->i_seglenm = CLOCK_FREQ * p_sys->i_seglen;
+    p_sys->i_seglenm = vlc_tick_from_sec( p_sys->i_seglen );
     p_sys->full_segments = NULL;
     p_sys->full_segments_end = &p_sys->full_segments;
 
@@ -254,8 +253,7 @@ static int Open( vlc_object_t *p_this )
     vlc_array_init( &p_sys->segments_t );
 
     p_sys->stuffing_size = 0;
-    p_sys->i_opendts = VLC_TS_INVALID;
-    p_sys->i_dts_offset  = 0;
+    p_sys->i_opendts = VLC_TICK_INVALID;
 
     p_sys->psz_indexPath = NULL;
     psz_idx = var_GetNonEmptyString( p_access, SOUT_CFG_PREFIX "index" );
@@ -947,11 +945,13 @@ static ssize_t writeSegment( sout_access_out_t *p_access )
     msg_Dbg( p_access, "Writing all full segments" );
 
     block_t *output = p_sys->full_segments;
-    vlc_tick_t output_last_length = 0;
-    if( output )
-        output_last_length = output->i_length;
+    vlc_tick_t output_last_length;
     if( *p_sys->full_segments_end )
         output_last_length = (*p_sys->full_segments_end)->i_length;
+    else if( output )
+        output_last_length = output->i_length;
+    else
+        output_last_length = 0;
     p_sys->full_segments = NULL;
     p_sys->full_segments_end = &p_sys->full_segments;
 
@@ -998,9 +998,8 @@ static ssize_t writeSegment( sout_access_out_t *p_access )
            return -1;
         }
 
-        p_sys->f_seglen =
-            (float)(output_last_length +
-                    output->i_dts - p_sys->i_opendts) / CLOCK_FREQ;
+        p_sys->f_seglen = secf_from_vlc_tick(output_last_length +
+                                    output->i_dts - p_sys->i_opendts);
 
         if ( (size_t)val >= output->i_buffer )
         {

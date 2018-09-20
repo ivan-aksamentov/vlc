@@ -207,7 +207,7 @@ static int Control(demux_t *demux, int query, va_list ap)
 
             if (pa_stream_get_time(sys->stream, &us) < 0)
                 return VLC_EGENERIC;
-            *(va_arg(ap, int64_t *)) = us;
+            *(va_arg(ap, vlc_tick_t *)) = us * 10000000LL / CLOCK_FREQ;
             break;
         }
 
@@ -215,7 +215,7 @@ static int Control(demux_t *demux, int query, va_list ap)
         //case DEMUX_GET_META TODO
 
         case DEMUX_GET_PTS_DELAY:
-            *(va_arg(ap, int64_t *)) = sys->caching;
+            *(va_arg(ap, vlc_tick_t *)) = sys->caching;
             break;
 
         case DEMUX_HAS_UNSUPPORTED_META:
@@ -269,7 +269,7 @@ static int Open(vlc_object_t *obj)
     sys->stream = NULL;
     sys->es = NULL;
     sys->discontinuity = false;
-    sys->caching = INT64_C(1000) * var_InheritInteger(obj, "live-caching");
+    sys->caching = VLC_TICK_FROM_MS( var_InheritInteger(obj, "live-caching") );
     demux->p_sys = sys;
 
     /* Stream parameters */

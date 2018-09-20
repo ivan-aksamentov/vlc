@@ -32,6 +32,7 @@
 #include <libvlc.h>
 #include <vlc_codec.h>
 #include <vlc_meta.h>
+#include <vlc_input.h>
 #include <vlc_url.h>
 #include <vlc_modules.h>
 #include <vlc_strings.h>
@@ -178,7 +179,7 @@ static int demux_Probe(void *func, va_list ap)
     return probe(VLC_OBJECT(demux));
 }
 
-demux_t *demux_NewAdvanced( vlc_object_t *p_obj, input_thread_t *p_parent_input,
+demux_t *demux_NewAdvanced( vlc_object_t *p_obj, input_thread_t *p_input,
                             const char *psz_demux, const char *url,
                             stream_t *s, es_out_t *out, bool b_preparsing )
 {
@@ -202,7 +203,7 @@ demux_t *demux_NewAdvanced( vlc_object_t *p_obj, input_thread_t *p_parent_input,
         }
     }
 
-    p_demux->p_input = p_parent_input;
+    p_demux->p_input_item = p_input ? input_GetItem(p_input) : NULL;
     p_demux->psz_name = strdup( psz_demux );
     if (unlikely(p_demux->psz_name == NULL))
         goto error;
@@ -274,7 +275,7 @@ int demux_vaControlHelper( stream_t *s,
 {
     int64_t i_tell;
     double  f, *pf;
-    int64_t i64, *pi64;
+    vlc_tick_t i64;
 
     if( i_end < 0 )    i_end   = stream_Size( s );
     if( i_start < 0 )  i_start = 0;
@@ -309,19 +310,17 @@ int demux_vaControlHelper( stream_t *s,
             return vlc_stream_vaControl( s, i_query, args );
 
         case DEMUX_GET_LENGTH:
-            pi64 = (int64_t*)va_arg( args, int64_t * );
             if( i_bitrate > 0 && i_end > i_start )
             {
-                *pi64 = INT64_C(8000000) * (i_end - i_start) / i_bitrate;
+                *va_arg( args, vlc_tick_t * ) = INT64_C(8000000) * (i_end - i_start) / i_bitrate;
                 return VLC_SUCCESS;
             }
             return VLC_EGENERIC;
 
         case DEMUX_GET_TIME:
-            pi64 = (int64_t*)va_arg( args, int64_t * );
             if( i_bitrate > 0 && i_tell >= i_start )
             {
-                *pi64 = INT64_C(8000000) * (i_tell - i_start) / i_bitrate;
+                *va_arg( args, vlc_tick_t * ) = INT64_C(8000000) * (i_tell - i_start) / i_bitrate;
                 return VLC_SUCCESS;
             }
             return VLC_EGENERIC;
@@ -352,7 +351,7 @@ int demux_vaControlHelper( stream_t *s,
             return VLC_EGENERIC;
 
         case DEMUX_SET_TIME:
-            i64 = (int64_t)va_arg( args, int64_t );
+            i64 = va_arg( args, vlc_tick_t );
             if( i_bitrate > 0 && i64 >= 0 )
             {
                 int64_t i_block = i64 * i_bitrate / INT64_C(8000000) / i_align;
@@ -485,7 +484,7 @@ static demux_t *demux_FilterNew( demux_t *p_next, const char *p_name )
 
     priv = vlc_stream_Private(p_demux);
     p_demux->p_next       = p_next;
-    p_demux->p_input      = NULL;
+    p_demux->p_input_item = NULL;
     p_demux->p_sys        = NULL;
     p_demux->psz_name     = NULL;
     p_demux->psz_url      = NULL;

@@ -195,7 +195,7 @@ static int vlclua_playlist_add_common(lua_State *L, bool play)
         {
             /* Play or Enqueue (preparse) */
             /* FIXME: playlist_AddInput() can fail */
-            playlist_AddInput(playlist, item, play, true);
+            playlist_AddInput(playlist, item, play);
             input_item_Release(item);
             count++;
         }
@@ -250,7 +250,7 @@ static void push_playlist_item( lua_State *L, playlist_item_t *p_item )
         if( p_input->i_duration < 0 )
             lua_pushnumber( L, -1 );
         else
-            lua_pushnumber( L, ((double)p_input->i_duration)*1e-6 );
+            lua_pushnumber( L, secf_from_vlc_tick(p_input->i_duration) );
         lua_setfield( L, -2, "duration" );
         lua_pushinteger( L, p_item->i_nb_played );
         lua_setfield( L, -2, "nb_played" );
@@ -291,9 +291,6 @@ static int vlclua_playlist_get( lua_State *L )
         if( !strcasecmp( psz_what, "normal" )
          || !strcasecmp( psz_what, "playlist" ) )
             p_item = p_playlist->p_playing;
-        else if( !strcasecmp( psz_what, "ml" )
-              || !strcasecmp( psz_what, "media library" ) )
-            p_item = p_playlist->p_media_library;
         else if( !strcasecmp( psz_what, "root" ) )
             p_item = &p_playlist->root;
         else

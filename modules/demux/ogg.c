@@ -281,7 +281,7 @@ static vlc_tick_t Ogg_GetLastDTS( demux_t * p_demux )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
 
-    vlc_tick_t i_dts = VLC_TS_INVALID;
+    vlc_tick_t i_dts = VLC_TICK_INVALID;
     for( int i_stream = 0; i_stream < p_sys->i_streams; i_stream++ )
     {
         logical_stream_t *p_stream = p_sys->pp_stream[i_stream];
@@ -300,7 +300,7 @@ static vlc_tick_t Ogg_GeneratePCR( demux_t * p_demux, bool b_drain )
     /* We will consider the lowest PCR among tracks, because the audio core badly
      * handles PCR rewind (mute)
      */
-    vlc_tick_t i_pcr_candidate = VLC_TS_INVALID;
+    vlc_tick_t i_pcr_candidate = VLC_TICK_INVALID;
     for( int i_stream = 0; i_stream < p_sys->i_streams; i_stream++ )
     {
         logical_stream_t *p_stream = p_sys->pp_stream[i_stream];
@@ -308,12 +308,12 @@ static vlc_tick_t Ogg_GeneratePCR( demux_t * p_demux, bool b_drain )
             continue;
         if( p_stream->fmt.i_codec == VLC_CODEC_OGGSPOTS )
             continue;
-        if( p_stream->i_pcr == VLC_TS_INVALID )
+        if( p_stream->i_pcr == VLC_TICK_INVALID )
             continue;
         if ( (!b_drain && p_stream->b_finished) || p_stream->b_initializing )
             continue;
-        if( i_pcr_candidate == VLC_TS_INVALID ||
-            p_stream->i_pcr <= i_pcr_candidate )
+        if( i_pcr_candidate == VLC_TICK_INVALID ||
+            p_stream->i_pcr < i_pcr_candidate )
         {
             i_pcr_candidate = p_stream->i_pcr;
         }
@@ -328,10 +328,10 @@ static void Ogg_OutputQueues( demux_t *p_demux, bool b_drain )
     vlc_tick_t i_pcr;
 
     /* Generate First PCR */
-    if( p_sys->i_pcr == VLC_TS_INVALID )
+    if( p_sys->i_pcr == VLC_TICK_INVALID )
     {
         i_pcr = Ogg_GeneratePCR( p_demux, b_drain );
-        if( i_pcr != VLC_TS_INVALID && i_pcr != p_sys->i_pcr )
+        if( i_pcr != VLC_TICK_INVALID && i_pcr != p_sys->i_pcr )
         {
             p_sys->i_pcr = i_pcr;
             if( likely( !p_sys->b_slave ) )
@@ -339,7 +339,7 @@ static void Ogg_OutputQueues( demux_t *p_demux, bool b_drain )
         }
     }
 
-    if( p_sys->i_pcr != VLC_TS_INVALID )
+    if( p_sys->i_pcr != VLC_TICK_INVALID )
     {
         bool b_continue;
         do
@@ -355,7 +355,7 @@ static void Ogg_OutputQueues( demux_t *p_demux, bool b_drain )
 
             /* Generate Current PCR */
             i_pcr = Ogg_GeneratePCR( p_demux, b_drain );
-            if( i_pcr != VLC_TS_INVALID && i_pcr != p_sys->i_pcr )
+            if( i_pcr != VLC_TICK_INVALID && i_pcr != p_sys->i_pcr )
             {
                 p_sys->i_pcr = i_pcr;
                 if( likely( !p_sys->b_slave ) )
@@ -408,13 +408,13 @@ static int Demux( demux_t * p_demux )
             Ogg_EndOfStream( p_demux );
             p_sys->b_chained_boundary = true;
 
-            if( i_lastdts != VLC_TS_INVALID )
+            if( i_lastdts != VLC_TICK_INVALID )
             {
-                p_sys->i_nzpcr_offset = i_lastdts - VLC_TS_0;
+                p_sys->i_nzpcr_offset = i_lastdts - VLC_TICK_0;
                 if( likely( !p_sys->b_slave ) )
                     es_out_SetPCR( p_demux->out, i_lastdts );
             }
-            p_sys->i_pcr = VLC_TS_INVALID;
+            p_sys->i_pcr = VLC_TICK_INVALID;
         }
 
         if( Ogg_BeginningOfStream( p_demux ) != VLC_SUCCESS )
@@ -501,8 +501,8 @@ static int Demux( demux_t * p_demux )
             {
                 msg_Err( p_demux, "Broken Ogg stream (serialno) mismatch" );
                 Ogg_ResetStream( p_stream );
-                if( p_stream->i_pcr != VLC_TS_INVALID )
-                    p_sys->i_nzpcr_offset = p_stream->i_pcr - VLC_TS_0;
+                if( p_stream->i_pcr != VLC_TICK_INVALID )
+                    p_sys->i_nzpcr_offset = p_stream->i_pcr - VLC_TICK_0;
                 ogg_stream_reset_serialno( &p_stream->os, ogg_page_serialno( &p_sys->current_page ) );
             }
 
@@ -614,9 +614,9 @@ static void Ogg_ResetStream( logical_stream_t *p_stream )
 #endif
     /* we'll trash all the data until we find the next pcr */
     p_stream->b_reinit = true;
-    p_stream->i_pcr = VLC_TS_INVALID;
+    p_stream->i_pcr = VLC_TICK_INVALID;
     p_stream->i_next_block_flags = 0;
-    date_Set( &p_stream->dts, VLC_TS_INVALID );
+    date_Set( &p_stream->dts, VLC_TICK_INVALID );
     ogg_stream_reset( &p_stream->os );
     block_ChainRelease( p_stream->queue.p_blocks );
     p_stream->queue.p_blocks = NULL;
@@ -632,7 +632,7 @@ static void Ogg_PreparePostSeek( demux_sys_t *p_sys )
     }
 
     ogg_sync_reset( &p_sys->oy );
-    p_sys->i_pcr = VLC_TS_INVALID;
+    p_sys->i_pcr = VLC_TICK_INVALID;
 }
 
 static logical_stream_t * Ogg_GetSelectedStream( demux_t *p_demux )
@@ -671,9 +671,10 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys  = p_demux->p_sys;
     vlc_meta_t *p_meta;
-    int64_t *pi64, i64;
+    vlc_tick_t i64;
     double *pf, f;
     bool *pb_bool, b, acc;
+    logical_stream_t *p_stream;
 
     switch( i_query )
     {
@@ -696,34 +697,35 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         case DEMUX_GET_TIME:
-            if( p_sys->i_pcr != VLC_TS_INVALID || p_sys->b_slave )
+            if( p_sys->i_pcr != VLC_TICK_INVALID || p_sys->b_slave )
             {
-                pi64 = va_arg( args, int64_t * );
-                *pi64 = p_sys->i_pcr;
+                *va_arg( args, vlc_tick_t * ) = p_sys->i_pcr;
                 return VLC_SUCCESS;
             }
             return VLC_EGENERIC;
 
         case DEMUX_SET_TIME:
-            i64 = va_arg( args, int64_t );
+        {
+            i64 = va_arg( args, vlc_tick_t );
             acc = va_arg( args, int );
-            logical_stream_t *p_stream = Ogg_GetSelectedStream( p_demux );
+            p_stream = Ogg_GetSelectedStream( p_demux );
             if ( !p_stream )
             {
                 msg_Err( p_demux, "No selected seekable stream found" );
                 return VLC_EGENERIC;
             }
             vlc_stream_Control( p_demux->s, STREAM_CAN_FASTSEEK, &b );
-            if ( Oggseek_BlindSeektoAbsoluteTime( p_demux, p_stream, VLC_TS_0 + i64, b ) )
+            if ( Oggseek_BlindSeektoAbsoluteTime( p_demux, p_stream, VLC_TICK_0 + i64, b ) )
             {
                 Ogg_PreparePostSeek( p_sys );
                 if( acc )
                     es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME,
-                                    VLC_TS_0 + i64 );
+                                    VLC_TICK_0 + i64 );
                 return VLC_SUCCESS;
             }
             else
                 return VLC_EGENERIC;
+        }
 
         case DEMUX_GET_ATTACHMENTS:
         {
@@ -745,15 +747,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_GET_POSITION:
             pf = va_arg( args, double * );
-            if( p_sys->i_length > 0 && p_sys->i_pcr != VLC_TS_INVALID )
+            if( p_sys->i_length > 0 && p_sys->i_pcr != VLC_TICK_INVALID )
             {
                 *pf =  (double) p_sys->i_pcr /
                        (double) ( p_sys->i_length * CLOCK_FREQ );
             }
             else if( stream_Size( p_demux->s ) > 0 )
             {
-                i64 = vlc_stream_Tell( p_demux->s );
-                *pf = (double) i64 / stream_Size( p_demux->s );
+                *pf = (double) vlc_stream_Tell( p_demux->s ) / stream_Size( p_demux->s );
             }
             else *pf = 0.0;
             return VLC_SUCCESS;
@@ -786,13 +787,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             }
 
             assert( p_sys->i_length > 0 );
-            i64 = CLOCK_FREQ * p_sys->i_length * f;
+            i64 = vlc_tick_from_sec( f * p_sys->i_length );
             Ogg_PreparePostSeek( p_sys );
-            if ( Oggseek_SeektoAbsolutetime( p_demux, p_stream, VLC_TS_0 + i64 ) >= 0 )
+            if ( Oggseek_SeektoAbsolutetime( p_demux, p_stream, VLC_TICK_0 + i64 ) >= 0 )
             {
                 if( acc )
                     es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME,
-                                    VLC_TS_0 + i64 );
+                                    VLC_TICK_0 + i64 );
                 return VLC_SUCCESS;
             }
 
@@ -802,8 +803,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             if ( p_sys->i_length < 0 )
                 return demux_vaControlHelper( p_demux->s, 0, -1, p_sys->i_bitrate,
                                               1, i_query, args );
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = p_sys->i_length * 1000000;
+            *va_arg( args, vlc_tick_t * ) = vlc_tick_from_sec(p_sys->i_length);
             return VLC_SUCCESS;
 
         case DEMUX_GET_TITLE_INFO:
@@ -859,11 +859,11 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             }
 
             vlc_stream_Control( p_demux->s, STREAM_CAN_FASTSEEK, &b );
-            if ( Oggseek_BlindSeektoAbsoluteTime( p_demux, p_stream, VLC_TS_0 + i64, b ) )
+            if ( Oggseek_BlindSeektoAbsoluteTime( p_demux, p_stream, VLC_TICK_0 + i64, b ) )
             {
                 Ogg_PreparePostSeek( p_sys );
                 es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME,
-                                VLC_TS_0 + i64 );
+                                VLC_TICK_0 + i64 );
                 p_sys->updates |= INPUT_UPDATE_SEEKPOINT;
                 p_sys->cur_seekpoint = i_seekpoint;
                 return VLC_SUCCESS;
@@ -926,8 +926,8 @@ static void Ogg_SetNextFrame( demux_t *p_demux, logical_stream_t *p_stream,
     if( Ogg_GranuleIsValid( p_stream, i_granule ) )
     {
         vlc_tick_t i_endtime = Ogg_GranuleToTime( p_stream, i_granule, false, false );
-        assert( !p_stream->b_contiguous || i_endtime != VLC_TS_INVALID );
-        if( i_endtime != VLC_TS_INVALID )
+        assert( !p_stream->b_contiguous || i_endtime != VLC_TICK_INVALID );
+        if( i_endtime != VLC_TICK_INVALID )
         {
             date_Set( &p_stream->dts, i_endtime );
             return;
@@ -935,7 +935,7 @@ static void Ogg_SetNextFrame( demux_t *p_demux, logical_stream_t *p_stream,
     }
 
     /* Do Interpolation if can't compute directly from granule */
-    if( date_Get( &p_stream->dts ) != VLC_TS_INVALID )
+    if( date_Get( &p_stream->dts ) != VLC_TICK_INVALID )
     {
         if( p_stream->fmt.i_cat == VIDEO_ES )
         {
@@ -984,7 +984,7 @@ static void Ogg_SetNextFrame( demux_t *p_demux, logical_stream_t *p_stream,
 
 static vlc_tick_t Ogg_FixupOutputQueue( demux_t *p_demux, logical_stream_t *p_stream )
 {
-    vlc_tick_t i_enddts = VLC_TS_INVALID;
+    vlc_tick_t i_enddts = VLC_TICK_INVALID;
 
 #ifdef HAVE_LIBVORBIS
     long i_prev_blocksize = 0;
@@ -995,7 +995,7 @@ static vlc_tick_t Ogg_FixupOutputQueue( demux_t *p_demux, logical_stream_t *p_st
     unsigned i_total_samples = 0;
     for( block_t *p_block = p_stream->queue.p_blocks; p_block; p_block = p_block->p_next )
     {
-        if( p_block->i_dts != VLC_TS_INVALID )
+        if( p_block->i_dts != VLC_TICK_INVALID )
         {
             i_enddts = p_block->i_dts;
             break;
@@ -1044,14 +1044,14 @@ static vlc_tick_t Ogg_FixupOutputQueue( demux_t *p_demux, logical_stream_t *p_st
     }
 
     // PASS 2
-    if( i_enddts != VLC_TS_INVALID )
+    if( i_enddts != VLC_TICK_INVALID )
     {
         date_t d = p_stream->dts;
         date_Set( &d, i_enddts );
         i_enddts = date_Decrement( &d, i_total_samples );
         for( block_t *p_block = p_stream->queue.p_blocks; p_block; p_block = p_block->p_next )
         {
-            if( p_block->i_dts != VLC_TS_INVALID )
+            if( p_block->i_dts != VLC_TICK_INVALID )
                 break;
             if( p_block->i_flags & BLOCK_FLAG_HEADER )
                 continue;
@@ -1076,7 +1076,7 @@ static void Ogg_QueueBlocks( demux_t *p_demux, logical_stream_t *p_stream, block
 
     block_ChainLastAppend( &p_stream->queue.pp_append, p_block );
 
-    if( p_stream->i_pcr == VLC_TS_INVALID && p_block->i_dts != VLC_TS_INVALID )
+    if( p_stream->i_pcr == VLC_TICK_INVALID && p_block->i_dts != VLC_TICK_INVALID )
     {
         /* fixup queue */
         p_stream->i_pcr = Ogg_FixupOutputQueue( p_demux, p_stream );
@@ -1096,7 +1096,7 @@ static void Ogg_SendQueuedBlock( demux_t *p_demux, logical_stream_t *p_stream )
         p_stream->queue.p_blocks = p_queued->p_next;
         p_queued->p_next = NULL;
 
-        if( p_queued->i_dts == VLC_TS_INVALID )
+        if( p_queued->i_dts == VLC_TICK_INVALID )
             p_queued->i_dts = p_queued->i_pts;
 
         if( p_queued->i_flags & BLOCK_FLAG_HEADER )
@@ -1138,7 +1138,7 @@ static void Ogg_SendQueuedBlock( demux_t *p_demux, logical_stream_t *p_stream )
                              p_queued->i_pts, p_stream->i_pcr, p_sys->i_pcr,
                              p_queued->i_nb_samples, i_toskip ); );
 
-        assert( p_sys->i_pcr != VLC_TS_INVALID );
+        assert( p_sys->i_pcr != VLC_TICK_INVALID );
 
         if( p_stream->p_es )
             es_out_Send( p_demux->out, p_stream->p_es, p_queued );
@@ -1339,7 +1339,7 @@ static void Ogg_DecodePacket( demux_t *p_demux,
 
     vlc_tick_t i_dts = Ogg_GranuleToTime( p_stream, p_oggpacket->granulepos, true, false );
     vlc_tick_t i_expected_dts = date_Get( &p_stream->dts ); /* Interpolated or previous end time */
-    if( i_dts == VLC_TS_INVALID )
+    if( i_dts == VLC_TICK_INVALID )
         i_dts = i_expected_dts;
     else
         date_Set( &p_stream->dts, i_dts );
@@ -1356,7 +1356,7 @@ static void Ogg_DecodePacket( demux_t *p_demux,
         if( !b_header && !p_stream->b_initializing )
         {
             vlc_tick_t i_pcr = date_Get( &p_stream->dts );
-            if( i_pcr != VLC_TS_INVALID )
+            if( i_pcr != VLC_TICK_INVALID )
                 p_stream->i_pcr = p_sys->i_nzpcr_offset + i_pcr;
         }
         return;
@@ -1366,14 +1366,14 @@ static void Ogg_DecodePacket( demux_t *p_demux,
         return;
 
     /* Set effective timestamp */
-    if( i_dts != VLC_TS_INVALID )
+    if( i_dts != VLC_TICK_INVALID )
         p_block->i_dts = p_sys->i_nzpcr_offset + i_dts;
 
     /* Vorbis and Opus can trim the end of a stream using granule positions. */
     if( p_oggpacket->e_o_s )
     {
         vlc_tick_t i_endtime = Ogg_GranuleToTime( p_stream, p_oggpacket->granulepos, false, false );
-        if( i_endtime != VLC_TS_INVALID && i_expected_dts != VLC_TS_INVALID )
+        if( i_endtime != VLC_TICK_INVALID && i_expected_dts != VLC_TICK_INVALID )
         {
                 p_block->i_length = i_endtime - i_expected_dts;
                 p_block->i_flags |= BLOCK_FLAG_END_OF_SEQUENCE;
@@ -2169,7 +2169,7 @@ static int Ogg_BeginningOfStream( demux_t *p_demux )
         else
             p_ogg->i_bitrate += p_stream->fmt.i_bitrate;
 
-        p_stream->i_pcr = VLC_TS_INVALID;
+        p_stream->i_pcr = VLC_TICK_INVALID;
         p_stream->b_reinit = false;
     }
 
@@ -2240,8 +2240,8 @@ static void Ogg_LogicalStreamInit( logical_stream_t *p_stream )
     memset( p_stream, 0, sizeof(logical_stream_t) );
     es_format_Init( &p_stream->fmt, UNKNOWN_ES, 0 );
     es_format_Init( &p_stream->fmt_old, UNKNOWN_ES, 0 );
-    p_stream->i_pcr = VLC_TS_INVALID;
-    date_Set( &p_stream->dts, VLC_TS_INVALID );
+    p_stream->i_pcr = VLC_TICK_INVALID;
+    date_Set( &p_stream->dts, VLC_TICK_INVALID );
     p_stream->b_initializing = true;
     p_stream->b_contiguous = true; /* default */
     p_stream->queue.pp_append = &p_stream->queue.p_blocks;
@@ -3249,10 +3249,10 @@ bool Ogg_GetBoundsUsingSkeletonIndex( logical_stream_t *p_stream, vlc_tick_t i_t
                                       int64_t *pi_lower, int64_t *pi_upper )
 {
     if ( !p_stream || !p_stream->p_skel || !p_stream->p_skel->p_index ||
-         i_time == VLC_TS_INVALID )
+         i_time == VLC_TICK_INVALID )
         return false;
 
-    i_time -= VLC_TS_0;
+    i_time -= VLC_TICK_0;
 
     /* Validate range */
     if ( i_time < p_stream->p_skel->i_indexfirstnum
@@ -3265,7 +3265,7 @@ bool Ogg_GetBoundsUsingSkeletonIndex( logical_stream_t *p_stream, vlc_tick_t i_t
     struct
     {
         int64_t i_pos;
-        int64_t i_time;
+        vlc_tick_t i_time;
     } current = { 0, 0 }, prev = { -1, -1 };
 
     uint64_t i_keypoints_found = 0;

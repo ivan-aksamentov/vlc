@@ -185,16 +185,13 @@ static int VolumeUpdated(vlc_object_t *p_this, const char *psz_var,
     int i_root_id = [_rootItem plItemId];
     if (i_root_id == p_playlist->p_playing->i_id)
         return ROOT_TYPE_PLAYLIST;
-    if (p_playlist->p_media_library && i_root_id == p_playlist->p_media_library->i_id)
-        return ROOT_TYPE_MEDIALIBRARY;
 
     return ROOT_TYPE_OTHER;
 }
 
 - (BOOL)editAllowed
 {
-    return [self currentRootType] == ROOT_TYPE_MEDIALIBRARY ||
-    [self currentRootType] == ROOT_TYPE_PLAYLIST;
+    return [self currentRootType] == ROOT_TYPE_PLAYLIST;
 }
 
 - (void)deleteSelectedItem
@@ -209,16 +206,16 @@ static int VolumeUpdated(vlc_object_t *p_this, const char *psz_var,
         _retainedRowSelection = 0;
 
     [selectedIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL *stop) {
-        VLCPLItem *item = [_outlineView itemAtRow: idx];
+        VLCPLItem *item = [self->_outlineView itemAtRow: idx];
         if (!item)
             return;
 
         // model deletion is done via callback
-        PL_LOCK;
-        playlist_item_t *p_root = playlist_ItemGetById(p_playlist, [item plItemId]);
+        playlist_Lock( self->p_playlist );
+        playlist_item_t *p_root = playlist_ItemGetById(self->p_playlist, [item plItemId]);
         if( p_root != NULL )
-            playlist_NodeDelete(p_playlist, p_root);
-        PL_UNLOCK;
+            playlist_NodeDelete(self->p_playlist, p_root);
+        playlist_Unlock( self->p_playlist );
     }];
 }
 
@@ -527,7 +524,7 @@ static int VolumeUpdated(vlc_object_t *p_this, const char *psz_var,
         char psz_duration[MSTRTIME_MAX_SIZE];
         vlc_tick_t dur = input_item_GetDuration(p_input);
         if (dur != -1) {
-            secstotimestr(psz_duration, (int)(dur/1000000));
+            secstotimestr(psz_duration, SEC_FROM_VLC_TICK(dur));
             o_value = toNSStr(psz_duration);
         }
         else
@@ -716,14 +713,19 @@ static int VolumeUpdated(vlc_object_t *p_this, const char *psz_var,
         PL_UNLOCK;
         free(pp_items);
 
+        // FIXME: Fix below code to avoid rebuilding the whole model
         // rebuild our model
-        NSUInteger filteredItemsCount = [o_filteredItems count];
-        for(int i = 0; i < filteredItemsCount; ++i) {
-            VLCPLItem *o_item = [o_filteredItems objectAtIndex:i];
-            NSLog(@"delete child from parent %p", [o_item parent]);
-            [[o_item parent] deleteChild:o_item];
-            [targetItem addChild:o_item atPos:(int)index + i];
-        }
+//        NSUInteger filteredItemsCount = [o_filteredItems count];
+//        for(int i = 0; i < filteredItemsCount; ++i) {
+//            VLCPLItem *o_item = [o_filteredItems objectAtIndex:i];
+//            NSLog(@"delete child from parent %p", [o_item parent]);
+//            [[o_item parent] deleteChild:o_item];
+//            [targetItem addChild:o_item atPos:(int)index + i];
+//        }
+
+        PL_LOCK;
+        [self rebuildVLCPLItem:_rootItem];
+        PL_UNLOCK;
 
         [_outlineView reloadData];
 

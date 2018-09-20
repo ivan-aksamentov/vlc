@@ -246,7 +246,26 @@
  * If the branch is reached in a non-debug build, this macro is equivalent to
  * \ref unreachable and the behaviour is undefined.
  */
-#define vlc_assert_unreachable() (assert(!"unreachable"), unreachable())
+#define vlc_assert_unreachable() (vlc_assert(!"unreachable"), unreachable())
+
+/**
+ * Run-time assertion
+ *
+ * This macro performs a run-time assertion if C assertions are enabled
+ * and the following preprocessor symbol is defined:
+ * @verbatim __LIBVLC__ @endverbatim
+ * That restriction ensures that assertions in public header files are not
+ * unwittingly <i>leaked</i> to externally-compiled plug-ins
+ * including those header files.
+ *
+ * Within the LibVLC code base, this is exactly the same as assert(), which can
+ * and probably should be used directly instead.
+ */
+#ifdef __LIBVLC__
+# define vlc_assert(pred) assert(pred)
+#else
+# define vlc_assert(pred) ((void)0)
+#endif
 
 /* Linkage */
 #ifdef __cplusplus
@@ -353,6 +372,7 @@ typedef struct video_format_t video_format_t;
 typedef struct subs_format_t subs_format_t;
 typedef struct es_format_t es_format_t;
 typedef struct video_palette_t video_palette_t;
+typedef struct vlc_es_id_t vlc_es_id_t;
 
 /* Audio */
 typedef struct audio_output audio_output_t;
@@ -652,7 +672,7 @@ VLC_INT_FUNC(popcount)
     _Generic((x), \
         unsigned char: (vlc_clz(x) - (sizeof (unsigned) - 1) * 8), \
         unsigned short: (vlc_clz(x) \
-		- (sizeof (unsigned) - sizeof (unsigned short)) * 8), \
+        - (sizeof (unsigned) - sizeof (unsigned short)) * 8), \
         unsigned: vlc_clz(x), \
         unsigned long: vlc_clzl(x), \
         unsigned long long: vlc_clzll(x))
@@ -1133,14 +1153,6 @@ static inline void *xrealloc(void *ptr, size_t len)
     if (unlikely(nptr == NULL && len > 0))
         abort();
     return nptr;
-}
-
-static inline void *xcalloc(size_t n, size_t size)
-{
-    void *ptr = calloc(n, size);
-    if (unlikely(ptr == NULL && (n > 0 || size > 0)))
-        abort ();
-    return ptr;
 }
 
 static inline char *xstrdup (const char *str)

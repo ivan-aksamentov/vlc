@@ -130,7 +130,7 @@ struct decoder_synchro_t
     unsigned int    pi_meaningful[4];            /* number of durations read */
 
     /* render_time filled by SynchroChoose() */
-    int             i_render_time;
+    vlc_tick_t      i_render_time;
 
     /* stream context */
     int             i_nb_ref;                /* Number of reference pictures */
@@ -150,8 +150,8 @@ struct decoder_synchro_t
 };
 
 /* Error margins */
-#define DELTA                   ((CLOCK_FREQ * 3) / 40)
-#define MAX_VALID_TAU           ((CLOCK_FREQ * 3) / 10)
+#define DELTA                   VLC_TICK_FROM_MS(75)  /* 3s/40 */
+#define MAX_VALID_TAU           VLC_TICK_FROM_MS(300)
 
 #define DEFAULT_NB_P            5
 #define DEFAULT_NB_B            1
@@ -177,7 +177,7 @@ decoder_synchro_t * decoder_SynchroInit( decoder_t *p_dec, int i_frame_rate )
     p_synchro->i_nb_ref = 0;
     p_synchro->i_trash_nb_ref = p_synchro->i_dec_nb_ref = 0;
     p_synchro->current_pts = 1,
-    p_synchro->backward_pts = 0;
+    p_synchro->backward_pts = VLC_TICK_INVALID;
     p_synchro->i_current_period = p_synchro->i_backward_period = 0;
     p_synchro->i_trashed_pic = p_synchro->i_not_chosen_pic =
         p_synchro->i_pic = 0;
@@ -208,7 +208,7 @@ void decoder_SynchroReset( decoder_synchro_t * p_synchro )
  * decoder_SynchroChoose : Decide whether we will decode a picture or not
  *****************************************************************************/
 bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
-                               int i_render_time, bool b_low_delay )
+                               vlc_tick_t i_render_time, bool b_low_delay )
 {
 #define TAU_PRIME( coding_type )    (p_synchro->p_tau[(coding_type)] \
                                     + (p_synchro->p_tau[(coding_type)] >> 1) \
@@ -236,7 +236,7 @@ bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
         {
             pts = decoder_GetDisplayDate( p_synchro->p_dec, S.current_pts );
         }
-        else if( S.backward_pts )
+        else if( S.backward_pts != VLC_TICK_INVALID )
         {
             pts = decoder_GetDisplayDate( p_synchro->p_dec, S.backward_pts );
         }
@@ -258,7 +258,7 @@ bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
         {
             b_decode = (pts - now) > (TAU_PRIME(I_CODING_TYPE) + DELTA);
         }
-        if( pts == VLC_TS_INVALID )
+        if( pts == VLC_TICK_INVALID )
             b_decode = 1;
 
         if( !b_decode && !p_synchro->b_quiet )
@@ -273,7 +273,7 @@ bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
         {
             pts = decoder_GetDisplayDate( p_synchro->p_dec, S.current_pts );
         }
-        else if( S.backward_pts )
+        else if( S.backward_pts != VLC_TICK_INVALID )
         {
             pts = decoder_GetDisplayDate( p_synchro->p_dec, S.backward_pts );
         }
@@ -309,7 +309,7 @@ bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
         {
             b_decode = 0;
         }
-        if( p_synchro->i_nb_ref >= 1 && pts == VLC_TS_INVALID )
+        if( p_synchro->i_nb_ref >= 1 && pts == VLC_TICK_INVALID )
             b_decode = 1;
         break;
 
@@ -328,7 +328,7 @@ bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
         {
             b_decode = 0;
         }
-        if( p_synchro->i_nb_ref >= 2 && pts == VLC_TS_INVALID )
+        if( p_synchro->i_nb_ref >= 2 && pts == VLC_TICK_INVALID )
             b_decode = 1;
         break;
     }
@@ -497,7 +497,7 @@ void decoder_SynchroNewPicture( decoder_synchro_t * p_synchro, int i_coding_type
          * progressive_frame. */
         p_synchro->i_current_period = i_repeat_field;
 
-        if( next_pts )
+        if( next_pts != VLC_TICK_INVALID )
         {
             if( (next_pts - p_synchro->current_pts
                     > PTS_THRESHOLD
@@ -517,9 +517,9 @@ void decoder_SynchroNewPicture( decoder_synchro_t * p_synchro, int i_coding_type
         p_synchro->i_current_period = p_synchro->i_backward_period;
         p_synchro->i_backward_period = i_repeat_field;
 
-        if( p_synchro->backward_pts )
+        if( p_synchro->backward_pts != VLC_TICK_INVALID )
         {
-            if( next_dts &&
+            if( next_dts != VLC_TICK_INVALID &&
                 (next_dts - p_synchro->backward_pts
                     > PTS_THRESHOLD
                   || p_synchro->backward_pts - next_dts
@@ -540,9 +540,9 @@ void decoder_SynchroNewPicture( decoder_synchro_t * p_synchro, int i_coding_type
                               - p_synchro->backward_pts );
             }
             p_synchro->current_pts = p_synchro->backward_pts;
-            p_synchro->backward_pts = 0;
+            p_synchro->backward_pts = VLC_TICK_INVALID;
         }
-        else if( next_dts )
+        else if( next_dts != VLC_TICK_INVALID )
         {
             if( (next_dts - p_synchro->current_pts
                     > PTS_THRESHOLD
@@ -555,14 +555,12 @@ void decoder_SynchroNewPicture( decoder_synchro_t * p_synchro, int i_coding_type
             }
             /* By definition of a DTS. */
             p_synchro->current_pts = next_dts;
-            next_dts = 0;
         }
 
-        if( next_pts )
+        if( next_pts != VLC_TICK_INVALID )
         {
             /* Store the PTS for the next time we have to date an I picture. */
             p_synchro->backward_pts = next_pts;
-            next_pts = 0;
         }
     }
 #undef PTS_THRESHOLD
@@ -578,11 +576,11 @@ void decoder_SynchroNewPicture( decoder_synchro_t * p_synchro, int i_coding_type
                       now - p_synchro->current_pts - DEFAULT_PTS_DELAY );
         p_synchro->current_pts = now + DEFAULT_PTS_DELAY;
     }
-    if( p_synchro->backward_pts
+    if( p_synchro->backward_pts != VLC_TICK_INVALID
          && p_synchro->backward_pts + DEFAULT_PTS_DELAY < now )
     {
         /* The same. */
-        p_synchro->backward_pts = 0;
+        p_synchro->backward_pts = VLC_TICK_INVALID;
     }
 #endif
 

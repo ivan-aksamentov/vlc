@@ -41,6 +41,7 @@ pluginsinclude_HEADERS = \
 	../include/vlc_config_cat.h \
 	../include/vlc_configuration.h \
 	../include/vlc_cpu.h \
+	../include/vlc_cxx_helpers.hpp \
 	../include/vlc_dialog.h \
 	../include/vlc_demux.h \
 	../include/vlc_epg.h \
@@ -212,23 +213,23 @@ libvlccore_la_SOURCES = \
 	interface/dialog.c \
 	interface/interface.c \
 	playlist/playlist_internal.h \
-	playlist/art.c \
-	playlist/art.h \
 	playlist/aout.c \
 	playlist/thread.c \
 	playlist/control.c \
 	playlist/engine.c \
-	playlist/fetcher.c \
-	playlist/fetcher.h \
 	playlist/sort.c \
 	playlist/loadsave.c \
-	playlist/preparser.c \
-	playlist/preparser.h \
 	playlist/tree.c \
 	playlist/item.c \
 	playlist/search.c \
 	playlist/services_discovery.c \
 	playlist/renderer.c \
+	preparser/art.c \
+	preparser/art.h \
+	preparser/fetcher.c \
+	preparser/fetcher.h \
+	preparser/preparser.c \
+	preparser/preparser.h \
 	input/item.c \
 	input/access.c \
 	clock/clock_internal.c \
@@ -239,7 +240,6 @@ libvlccore_la_SOURCES = \
 	input/demux_chained.c \
 	input/es_out.c \
 	input/es_out_timeshift.c \
-	input/event.c \
 	input/input.c \
 	input/info.h \
 	input/meta.c \
@@ -356,7 +356,8 @@ libvlccore_la_SOURCES = \
 	misc/fingerprinter.c \
 	misc/text_style.c \
 	misc/subpicture.c \
-	misc/subpicture.h
+	misc/subpicture.h \
+	misc/medialibrary.c
 libvlccore_la_LIBADD = $(LIBS_libvlccore) \
 	../compat/libcompat.la \
 	$(LTLIBINTL) $(LTLIBICONV) \
@@ -419,9 +420,12 @@ if HAVE_DARWIN
 libvlccore_la_SOURCES += \
 	darwin/dirs.c \
 	darwin/error.c \
-	darwin/netconf.c \
 	darwin/specific.c \
 	darwin/thread.c
+
+libvlccore_objc_la_SOURCES = \
+	darwin/netconf.m
+noinst_LTLIBRARIES = libvlccore_objc.la
 else
 libvlccore_la_SOURCES += \
 	posix/dirs.c \
@@ -485,7 +489,11 @@ if HAVE_DBUS
 libvlccore_la_LIBADD += $(DBUS_LIBS)
 endif
 if HAVE_DARWIN
-libvlccore_la_LDFLAGS += -Xlinker -install_name -Xlinker @rpath/libvlccore.dylib
+$(libvlccore_la_OBJECTS): libvlccore_objc.la
+libvlccore_objc_la_OBJCFLAGS = $(AM_OBJCFLAGS) -fobjc-arc
+libvlccore_objc_la_LDFLAGS = -static
+libvlccore_la_LIBADD += libvlccore_objc.la
+libvlccore_la_LDFLAGS +=  -Wl,-framework,Foundation -Xlinker -install_name -Xlinker @rpath/libvlccore.dylib
 endif
 
 libvlc_win32_rc.$(OBJEXT): libvlc_win32_rc.rc $(top_srcdir)/extras/package/win32/libvlc.dll.manifest
@@ -521,7 +529,8 @@ check_PROGRAMS = \
 	test_utf8 \
 	test_xmlent \
 	test_headers \
-	test_mrl_helpers
+	test_mrl_helpers \
+	test_arrays
 
 TESTS = $(check_PROGRAMS) check_symbols
 
@@ -543,6 +552,7 @@ test_utf8_SOURCES = test/utf8.c
 test_xmlent_SOURCES = test/xmlent.c
 test_headers_SOURCES = test/headers.c
 test_mrl_helpers_SOURCES = test/mrl_helpers.c
+test_arrays_SOURCES = test/arrays.c
 
 AM_LDFLAGS = -no-install
 LDADD = libvlccore.la \

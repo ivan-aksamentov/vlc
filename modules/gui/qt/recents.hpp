@@ -40,14 +40,12 @@ class Open
 public:
     static int openMRL( intf_thread_t*,
                         const QString &,
-                        bool b_start = true,
-                        bool b_playlist = true);
+                        bool b_start = true);
 
     static int openMRLwithOptions( intf_thread_t*,
                                    const QString &,
                                    QStringList *options,
                                    bool b_start = true,
-                                   bool b_playlist = true,
                                    const char* title = NULL);
 };
 
@@ -61,8 +59,8 @@ public:
     QStringList recentList();
     QSignalMapper *signalMapper;
 
-    int time( const QString &mrl );
-    void setTime( const QString &mrl, const int64_t time );
+    vlc_tick_t time( const QString &mrl );
+    void setTime( const QString &mrl, const vlc_tick_t time );
 
 private:
     RecentsMRL( intf_thread_t* _p_intf );

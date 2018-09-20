@@ -137,7 +137,7 @@ void Close_Extension( vlc_object_t *p_this )
     extension_t *p_ext = NULL;
 
     /* Free extensions' memory */
-    FOREACH_ARRAY( p_ext, p_mgr->extensions )
+    ARRAY_FOREACH( p_ext, p_mgr->extensions )
     {
         if( !p_ext )
             break;
@@ -186,7 +186,6 @@ void Close_Extension( vlc_object_t *p_this )
         free( p_ext->p_sys );
         free( p_ext );
     }
-    FOREACH_END()
 
     vlc_mutex_destroy( &p_mgr->lock );
 
@@ -854,6 +853,7 @@ static lua_State* GetLuaState( extensions_manager_t *p_mgr,
         luaopen_xml( L );
         luaopen_vlcio( L );
         luaopen_errno( L );
+        luaopen_rand( L );
 #if defined(_WIN32) && !VLC_WINSTORE_APP
         luaopen_win( L );
 #endif
@@ -1097,7 +1097,8 @@ int vlclua_extension_keep_alive( lua_State *L )
         vlc_dialog_release( p_ext->p_sys->p_mgr, p_ext->p_sys->p_progress_id );
         p_ext->p_sys->p_progress_id = NULL;
     }
-    vlc_timer_schedule( p_ext->p_sys->timer, false, WATCH_TIMER_PERIOD, 0 );
+    vlc_timer_schedule( p_ext->p_sys->timer, false, WATCH_TIMER_PERIOD,
+                        VLC_TIMER_FIRE_ONCE );
     vlc_mutex_unlock( &p_ext->p_sys->command_lock );
 
     return 1;
@@ -1201,7 +1202,8 @@ static void WatchTimerCallback( void *data )
             vlc_mutex_unlock( &p_ext->p_sys->command_lock );
             return;
         }
-        vlc_timer_schedule( p_ext->p_sys->timer, false, 100000, 0 );
+        vlc_timer_schedule( p_ext->p_sys->timer, false, VLC_TICK_FROM_MS(100),
+                            VLC_TIMER_FIRE_ONCE );
     }
     else
     {
@@ -1213,7 +1215,8 @@ static void WatchTimerCallback( void *data )
             vlc_mutex_unlock( &p_ext->p_sys->command_lock );
             return;
         }
-        vlc_timer_schedule( p_ext->p_sys->timer, false, 100000, 0 );
+        vlc_timer_schedule( p_ext->p_sys->timer, false, VLC_TICK_FROM_MS(100),
+                            VLC_TIMER_FIRE_ONCE );
     }
     vlc_mutex_unlock( &p_ext->p_sys->command_lock );
 }

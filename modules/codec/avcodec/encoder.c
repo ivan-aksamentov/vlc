@@ -48,13 +48,11 @@
 #include "avcodec.h"
 #include "avcommon.h"
 
-#if LIBAVUTIL_VERSION_CHECK( 52,2,6,0,0 )
-# include <libavutil/channel_layout.h>
-#endif
+#include <libavutil/channel_layout.h>
 
-#define HURRY_UP_GUARD1 (450000)
-#define HURRY_UP_GUARD2 (300000)
-#define HURRY_UP_GUARD3 (100000)
+#define HURRY_UP_GUARD1 VLC_TICK_FROM_MS(450)
+#define HURRY_UP_GUARD2 VLC_TICK_FROM_MS(300)
+#define HURRY_UP_GUARD3 VLC_TICK_FROM_MS(100)
 
 #define MAX_FRAME_DELAY (FF_MAX_B_FRAMES + 2)
 
@@ -730,7 +728,6 @@ int InitVideoEnc( vlc_object_t *p_this )
         p_context->time_base.num = 1;
         p_context->time_base.den = p_context->sample_rate;
         p_context->channels      = p_enc->fmt_out.audio.i_channels;
-#if LIBAVUTIL_VERSION_CHECK( 52, 2, 6, 0, 0)
         p_context->channel_layout = channel_mask[p_context->channels][1];
 
         /* Setup Channel ordering for multichannel audio
@@ -780,7 +777,6 @@ int InitVideoEnc( vlc_object_t *p_this )
         p_sys->i_channels_to_reorder =
             aout_CheckChannelReorder( NULL, pi_order_dst, order_mask,
                                       p_sys->pi_reorder_layout );
-#endif
 
         if ( p_enc->fmt_out.i_codec == VLC_CODEC_MP4A )
         {
@@ -1069,6 +1065,11 @@ static void vlc_av_packet_Release(block_t *block)
     free(b);
 }
 
+static const struct vlc_block_callbacks vlc_av_packet_cbs =
+{
+    vlc_av_packet_Release,
+};
+
 static block_t *vlc_av_packet_Wrap(AVPacket *packet, vlc_tick_t i_length, AVCodecContext *context )
 {
     if ( packet->data == NULL &&
@@ -1083,14 +1084,14 @@ static block_t *vlc_av_packet_Wrap(AVPacket *packet, vlc_tick_t i_length, AVCode
 
     block_t *p_block = &b->self;
 
-    block_Init( p_block, packet->data, packet->size );
+    block_Init( p_block, &vlc_av_packet_cbs, packet->data, packet->size );
     p_block->i_nb_samples = 0;
-    p_block->pf_release = vlc_av_packet_Release;
+    p_block->cbs = &vlc_av_packet_cbs;
     b->packet = *packet;
 
     p_block->i_length = i_length;
-    p_block->i_pts = packet->pts;
-    p_block->i_dts = packet->dts;
+    p_block->i_pts = FROM_AV_TS(packet->pts);
+    p_block->i_dts = FROM_AV_TS(packet->dts);
     if( unlikely( packet->flags & AV_PKT_FLAG_CORRUPT ) )
         p_block->i_flags |= BLOCK_FLAG_CORRUPTED;
     if( packet->flags & AV_PKT_FLAG_KEY )
@@ -1105,7 +1106,7 @@ static void check_hurry_up( encoder_sys_t *p_sys, AVFrame *frame, encoder_t *p_e
 {
     vlc_tick_t current_date = vlc_tick_now();
 
-    if ( current_date + HURRY_UP_GUARD3 > frame->pts )
+    if ( current_date + HURRY_UP_GUARD3 > FROM_AV_TS(frame->pts) )
     {
         p_sys->p_context->mb_decision = FF_MB_DECISION_SIMPLE;
         p_sys->p_context->trellis = 0;
@@ -1115,7 +1116,7 @@ static void check_hurry_up( encoder_sys_t *p_sys, AVFrame *frame, encoder_t *p_e
     {
         p_sys->p_context->mb_decision = p_sys->i_hq;
 
-        if ( current_date + HURRY_UP_GUARD2 > frame->pts )
+        if ( current_date + HURRY_UP_GUARD2 > FROM_AV_TS(frame->pts) )
         {
             p_sys->p_context->trellis = 0;
             msg_Dbg( p_enc, "hurry up mode 2" );
@@ -1126,7 +1127,7 @@ static void check_hurry_up( encoder_sys_t *p_sys, AVFrame *frame, encoder_t *p_e
         }
     }
 
-    if ( current_date + HURRY_UP_GUARD1 > frame->pts )
+    if ( current_date + HURRY_UP_GUARD1 > FROM_AV_TS(frame->pts) )
     {
         frame->pict_type = AV_PICTURE_TYPE_P;
         /* msg_Dbg( p_enc, "hurry up mode 1 %lld", current_date + HURRY_UP_GUARD1 - frame.pts ); */
@@ -1197,7 +1198,7 @@ static block_t *EncodeVideo( encoder_t *p_enc, picture_t *p_pict )
         /* Set the pts of the frame being encoded
          * avcodec likes pts to be in time_base units
          * frame number */
-        if( likely( p_pict->date != VLC_TS_INVALID ) )
+        if( likely( p_pict->date != VLC_TICK_INVALID ) )
             frame->pts = p_pict->date * p_sys->p_context->time_base.den /
                           CLOCK_FREQ / p_sys->p_context->time_base.num;
         else
@@ -1206,15 +1207,15 @@ static block_t *EncodeVideo( encoder_t *p_enc, picture_t *p_pict )
         if ( p_sys->b_hurry_up && frame->pts != AV_NOPTS_VALUE )
             check_hurry_up( p_sys, frame, p_enc );
 
-        if ( ( frame->pts != AV_NOPTS_VALUE ) && ( frame->pts != VLC_TS_INVALID ) )
+        if ( ( frame->pts != AV_NOPTS_VALUE ) && ( frame->pts != VLC_TICK_INVALID ) )
         {
-            if ( p_sys->i_last_pts == frame->pts )
+            if ( p_sys->i_last_pts == FROM_AV_TS(frame->pts) )
             {
                 msg_Warn( p_enc, "almost fed libavcodec with two frames with "
                           "the same PTS (%"PRId64 ")", frame->pts );
                 return NULL;
             }
-            else if ( p_sys->i_last_pts > frame->pts )
+            else if ( p_sys->i_last_pts > FROM_AV_TS(frame->pts) )
             {
                 msg_Warn( p_enc, "almost fed libavcodec with a frame in the "
                          "past (current: %"PRId64 ", last: %"PRId64")",
@@ -1222,7 +1223,7 @@ static block_t *EncodeVideo( encoder_t *p_enc, picture_t *p_pict )
                 return NULL;
             }
             else
-                p_sys->i_last_pts = frame->pts;
+                p_sys->i_last_pts = FROM_AV_TS(frame->pts);
         }
 
         frame->quality = p_sys->i_quality;
@@ -1265,10 +1266,10 @@ static block_t *handle_delay_buffer( encoder_t *p_enc, encoder_sys_t *p_sys, uns
     p_sys->frame->format     = p_sys->p_context->sample_fmt;
     p_sys->frame->nb_samples = leftover_samples + p_sys->i_samples_delay;
 
-    if( likely( date_Get( &p_sys->buffer_date ) != VLC_TS_INVALID) )
+    if( likely( date_Get( &p_sys->buffer_date ) != VLC_TICK_INVALID) )
     {
         /* Convert to AV timing */
-        p_sys->frame->pts = date_Get( &p_sys->buffer_date ) - VLC_TS_0;
+        p_sys->frame->pts = date_Get( &p_sys->buffer_date ) - VLC_TICK_0;
         p_sys->frame->pts = p_sys->frame->pts * p_sys->p_context->time_base.den /
                             CLOCK_FREQ / p_sys->p_context->time_base.num;
         date_Increment( &p_sys->buffer_date, p_sys->frame->nb_samples );
@@ -1337,7 +1338,7 @@ static block_t *EncodeAudio( encoder_t *p_enc, block_t *p_aout_buf )
     //Calculate how many bytes we would need from current buffer to fill frame
     size_t leftover_samples = __MAX(0,__MIN((ssize_t)i_samples_left, (ssize_t)(p_sys->i_frame_size - p_sys->i_samples_delay)));
 
-    if( p_aout_buf && ( p_aout_buf->i_pts != VLC_TS_INVALID ) )
+    if( p_aout_buf && ( p_aout_buf->i_pts != VLC_TICK_INVALID ) )
     {
         date_Set( &p_sys->buffer_date, p_aout_buf->i_pts );
         /* take back amount we have leftover from previous buffer*/
@@ -1393,10 +1394,10 @@ static block_t *EncodeAudio( encoder_t *p_enc, block_t *p_aout_buf )
         else
             p_sys->frame->nb_samples = p_sys->i_frame_size;
         p_sys->frame->format     = p_sys->p_context->sample_fmt;
-        if( likely(date_Get( &p_sys->buffer_date ) != VLC_TS_INVALID) )
+        if( likely(date_Get( &p_sys->buffer_date ) != VLC_TICK_INVALID) )
         {
             /* Convert to AV timing */
-            p_sys->frame->pts = date_Get( &p_sys->buffer_date ) - VLC_TS_0;
+            p_sys->frame->pts = date_Get( &p_sys->buffer_date ) - VLC_TICK_0;
             p_sys->frame->pts = p_sys->frame->pts * p_sys->p_context->time_base.den /
                                 CLOCK_FREQ / p_sys->p_context->time_base.num;
         }
@@ -1429,7 +1430,7 @@ static block_t *EncodeAudio( encoder_t *p_enc, block_t *p_aout_buf )
         p_aout_buf->p_buffer     += in_bytes;
         p_aout_buf->i_buffer     -= in_bytes;
         p_aout_buf->i_nb_samples -= p_sys->frame->nb_samples;
-        if( likely(date_Get( &p_sys->buffer_date ) != VLC_TS_INVALID) )
+        if( likely(date_Get( &p_sys->buffer_date ) != VLC_TICK_INVALID) )
             date_Increment( &p_sys->buffer_date, p_sys->frame->nb_samples );
 
         p_block = encode_avframe( p_enc, p_sys, p_sys->frame );

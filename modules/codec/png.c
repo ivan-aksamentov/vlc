@@ -125,6 +125,8 @@ static int OpenDecoder( vlc_object_t *p_this )
 
     /* Set output properties */
     p_dec->fmt_out.i_codec = VLC_CODEC_RGBA;
+    p_dec->fmt_out.video.transfer = TRANSFER_FUNC_SRGB;
+    p_dec->fmt_out.video.b_color_range_full = true;
 
     /* Set callbacks */
     p_dec->pf_decode = DecodeBlock;
@@ -304,7 +306,7 @@ static int DecodeBlock( decoder_t *p_dec, block_t *p_block )
     png_destroy_read_struct( &p_png, &p_info, &p_end_info );
     free( p_row_pointers );
 
-    p_pic->date = p_block->i_pts != VLC_TS_INVALID ? p_block->i_pts : p_block->i_dts;
+    p_pic->date = p_block->i_pts != VLC_TICK_INVALID ? p_block->i_pts : p_block->i_dts;
 
     block_Release( p_block );
     decoder_QueueVideo( p_dec, p_pic );

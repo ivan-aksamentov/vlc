@@ -36,9 +36,9 @@
 #include "../video_output/android/utils.h"
 
 #define SMOOTHPOS_SAMPLE_COUNT 10
-#define SMOOTHPOS_INTERVAL_US INT64_C(30000) // 30ms
+#define SMOOTHPOS_INTERVAL_US VLC_TICK_FROM_MS(30) // 30ms
 
-#define AUDIOTIMESTAMP_INTERVAL_US (CLOCK_FREQ/2) // 500ms
+#define AUDIOTIMESTAMP_INTERVAL_US VLC_TICK_FROM_MS(500) // 500ms
 
 static int  Open( vlc_object_t * );
 static void Close( vlc_object_t * );
@@ -107,7 +107,7 @@ typedef struct
     /* Used by AudioTrack_GetTimestampPositionUs */
     struct {
         jobject p_obj; /* AudioTimestamp ref */
-        jlong i_frame_us;
+        vlc_tick_t i_frame_us;
         jlong i_frame_pos;
         vlc_tick_t i_play_time; /* time when play was called */
         vlc_tick_t i_last_time;
@@ -686,7 +686,7 @@ AudioTrack_GetTimestampPositionUs( JNIEnv *env, audio_output_t *p_aout )
 
         if( JNI_AT_CALL_BOOL( getTimestamp, p_sys->timestamp.p_obj ) )
         {
-            p_sys->timestamp.i_frame_us = JNI_AUDIOTIMESTAMP_GET_LONG( nanoTime ) / 1000;
+            p_sys->timestamp.i_frame_us = VLC_TICK_FROM_NS(JNI_AUDIOTIMESTAMP_GET_LONG( nanoTime ));
             p_sys->timestamp.i_frame_pos = JNI_AUDIOTIMESTAMP_GET_LONG( framePosition );
         }
         else
@@ -702,9 +702,9 @@ AudioTrack_GetTimestampPositionUs( JNIEnv *env, audio_output_t *p_aout )
     if( p_sys->timestamp.i_frame_us != 0 && p_sys->timestamp.i_frame_pos != 0
      && p_sys->timestamp.i_frame_us > p_sys->timestamp.i_play_time
      && i_now > p_sys->timestamp.i_frame_us
-     && ( i_now - p_sys->timestamp.i_frame_us ) <= INT64_C(10000000) )
+     && ( i_now - p_sys->timestamp.i_frame_us ) <= VLC_TICK_FROM_SEC(10) )
     {
-        jlong i_time_diff = i_now - p_sys->timestamp.i_frame_us;
+        vlc_tick_t i_time_diff = i_now - p_sys->timestamp.i_frame_us;
         jlong i_frames_diff = i_time_diff * p_sys->fmt.i_rate / CLOCK_FREQ;
         return FRAMES_TO_US( p_sys->timestamp.i_frame_pos + i_frames_diff );
     } else

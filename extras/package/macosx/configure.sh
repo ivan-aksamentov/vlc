@@ -25,7 +25,6 @@ OPTIONS="
         --enable-shout
         --enable-ncurses
         --enable-twolame
-        --enable-realrtsp
         --enable-libass
         --enable-macosx-qtkit
         --enable-macosx-avfoundation
@@ -41,4 +40,4 @@ OPTIONS="
 export CFLAGS
 export LDFLAGS
 
-sh "$(dirname $0)"/../../../configure ${OPTIONS} $*
+sh "$(dirname $0)"/../../../configure ${OPTIONS} "$@"

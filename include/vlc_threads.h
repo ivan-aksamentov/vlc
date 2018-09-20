@@ -864,8 +864,8 @@ VLC_API void vlc_tick_wait(vlc_tick_t deadline);
  */
 VLC_API void vlc_tick_sleep(vlc_tick_t delay);
 
-#define VLC_HARD_MIN_SLEEP  (CLOCK_FREQ/100) /* 10 milliseconds = 1 tick at 100Hz */
-#define VLC_SOFT_MIN_SLEEP  (9*CLOCK_FREQ)   /* 9 seconds */
+#define VLC_HARD_MIN_SLEEP  VLC_TICK_FROM_MS(10)   /* 10 milliseconds = 1 tick at 100Hz */
+#define VLC_SOFT_MIN_SLEEP  VLC_TICK_FROM_SEC(9)   /* 9 seconds */
 
 #if defined (__GNUC__) && !defined (__clang__)
 /* Linux has 100, 250, 300 or 1000Hz
@@ -948,6 +948,9 @@ VLC_USED;
  */
 VLC_API void vlc_timer_destroy(vlc_timer_t timer);
 
+#define VLC_TIMER_DISARM    (0)
+#define VLC_TIMER_FIRE_ONCE (0)
+
 /**
  * Arms or disarms an initialized timer.
  *
@@ -968,6 +971,16 @@ VLC_API void vlc_timer_destroy(vlc_timer_t timer);
  */
 VLC_API void vlc_timer_schedule(vlc_timer_t timer, bool absolute,
                                 vlc_tick_t value, vlc_tick_t interval);
+
+static inline void vlc_timer_disarm(vlc_timer_t timer)
+{
+    vlc_timer_schedule( timer, false, VLC_TIMER_DISARM, 0 );
+}
+
+static inline void vlc_timer_schedule_asap(vlc_timer_t timer, vlc_tick_t interval)
+{
+    vlc_timer_schedule(timer, false, 1, interval);
+}
 
 /**
  * Fetches and resets the overrun counter for a timer.
@@ -1086,6 +1099,7 @@ class vlc_mutex_locker
             vlc_mutex_unlock (lock);
         }
 };
+
 #endif
 
 enum
@@ -1094,7 +1108,6 @@ enum
    VLC_GCRYPT_MUTEX,
    VLC_XLIB_MUTEX,
    VLC_MOSAIC_MUTEX,
-   VLC_HIGHLIGHT_MUTEX,
 #ifdef _WIN32
    VLC_MTA_MUTEX,
 #endif

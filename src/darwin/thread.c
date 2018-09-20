@@ -55,14 +55,6 @@ static pthread_once_t vlc_clock_once = PTHREAD_ONCE_INIT;
 #define vlc_clock_setup() \
     pthread_once(&vlc_clock_once, vlc_clock_setup_once)
 
-static struct timespec mtime_to_ts (vlc_tick_t date)
-{
-    lldiv_t d = lldiv (date, CLOCK_FREQ);
-    struct timespec ts = { d.quot, d.rem * (1000000000 / CLOCK_FREQ) };
-
-    return ts;
-}
-
 /* Print a backtrace to the standard error for debugging purpose. */
 void vlc_trace (const char *fn, const char *file, unsigned line)
 {
@@ -259,7 +251,7 @@ int vlc_cond_timedwait (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex,
     if (deadline < 0)
         deadline = 0;
 
-    struct timespec ts = mtime_to_ts(deadline);
+    struct timespec ts = timespec_from_vlc_tick(deadline);
     int val = pthread_cond_timedwait_relative_np(p_condvar, p_mutex, &ts);
     if (val != ETIMEDOUT)
         VLC_THREAD_ASSERT ("timed-waiting on condition");
@@ -285,7 +277,7 @@ int vlc_cond_timedwait_daytime (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex,
      * time deadline is passed, even if the real time is adjusted in between.
      * This is not fulfilled, as described above.
      */
-    struct timespec ts = mtime_to_ts(deadline);
+    struct timespec ts = { deadline, 0 };
     int val = pthread_cond_timedwait(p_condvar, p_mutex, &ts);
 
     if (val != ETIMEDOUT)
@@ -547,7 +539,7 @@ void vlc_tick_wait (vlc_tick_t deadline)
 #undef vlc_tick_sleep
 void vlc_tick_sleep (vlc_tick_t delay)
 {
-    struct timespec ts = mtime_to_ts (delay);
+    struct timespec ts = timespec_from_vlc_tick (delay);
 
     /* nanosleep uses mach_absolute_time and mach_wait_until internally,
        but also handles kernel errors. Thus we use just this. */

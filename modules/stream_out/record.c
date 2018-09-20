@@ -145,13 +145,13 @@ static int Open( vlc_object_t *p_this )
         }
     }
 
-    p_sys->i_date_start = -1;
+    p_sys->i_date_start = VLC_TICK_INVALID;
     p_sys->i_size = 0;
 #ifdef OPTIMIZE_MEMORY
-    p_sys->i_max_wait = 5*CLOCK_FREQ; /* 5s */
+    p_sys->i_max_wait = VLC_TICK_FROM_SEC(5);
     p_sys->i_max_size = 1*1024*1024; /* 1 MiB */
 #else
-    p_sys->i_max_wait = 30*CLOCK_FREQ; /* 30s */
+    p_sys->i_max_wait = VLC_TICK_FROM_SEC(30);
     p_sys->i_max_size = 20*1024*1024; /* 20 MiB */
 #endif
     p_sys->b_drop = false;
@@ -233,14 +233,14 @@ static int Send( sout_stream_t *p_stream, void *id, block_t *p_buffer )
 {
     sout_stream_sys_t *p_sys = p_stream->p_sys;
 
-    if( p_sys->i_date_start < 0 )
+    if( p_sys->i_date_start == VLC_TICK_INVALID )
         p_sys->i_date_start = vlc_tick_now();
     if( !p_sys->p_out &&
         ( vlc_tick_now() - p_sys->i_date_start > p_sys->i_max_wait ||
           p_sys->i_size > p_sys->i_max_size ) )
     {
         msg_Dbg( p_stream, "Starting recording, waited %ds and %dbyte",
-                 (int)((vlc_tick_now() - p_sys->i_date_start)/CLOCK_FREQ), (int)p_sys->i_size );
+                 (int)SEC_FROM_VLC_TICK(vlc_tick_now() - p_sys->i_date_start), (int)p_sys->i_size );
         OutputStart( p_stream );
     }
 
@@ -370,6 +370,16 @@ error:
     free( psz_output );
     return -1;
 
+}
+
+static vlc_tick_t BlockTick( const block_t *p_block )
+{
+    if( unlikely(!p_block) )
+        return VLC_TICK_INVALID;
+    else if( likely(p_block->i_dts != VLC_TICK_INVALID) )
+        return p_block->i_dts;
+    else
+        return p_block->i_pts;
 }
 
 static void OutputStart( sout_stream_t *p_stream )
@@ -513,7 +523,7 @@ static void OutputStart( sout_stream_t *p_stream )
             continue;
 
         const block_t *p_block = id->p_first;
-        vlc_tick_t i_dts = p_block->i_dts;
+        vlc_tick_t i_dts = BlockTick( p_block );
 
         if( i_dts > i_highest_head_dts &&
            ( id->fmt.i_cat == AUDIO_ES || id->fmt.i_cat == VIDEO_ES ) )
@@ -525,7 +535,7 @@ static void OutputStart( sout_stream_t *p_stream )
         {
             if( p_block->i_flags & BLOCK_FLAG_TYPE_I )
             {
-                i_dts = p_block->i_dts;
+                i_dts = BlockTick( p_block );
                 break;
             }
         }
@@ -538,10 +548,12 @@ static void OutputStart( sout_stream_t *p_stream )
         p_sys->i_dts_start = i_highest_head_dts;
 
     sout_stream_id_sys_t *p_cand;
+    vlc_tick_t canddts;
     do
     {
         /* dequeue candidate */
         p_cand = NULL;
+        canddts = VLC_TICK_INVALID;
 
         /* Send buffered data in dts order */
         for( int i = 0; i < p_sys->i_id; i++ )
@@ -551,8 +563,27 @@ static void OutputStart( sout_stream_t *p_stream )
             if( !id->id || id->p_first == NULL )
                 continue;
 
-            if( p_cand == NULL || id->p_first->i_dts < p_cand->p_first->i_dts )
+            block_t *p_id_block;
+            vlc_tick_t id_dts = VLC_TICK_INVALID;
+            for( p_id_block = id->p_first; p_id_block; p_id_block = p_id_block->p_next )
+            {
+                id_dts = BlockTick( p_id_block );
+                if( id_dts != VLC_TICK_INVALID )
+                    break;
+            }
+
+            if( id_dts == VLC_TICK_INVALID )
+            {
                 p_cand = id;
+                canddts = VLC_TICK_INVALID;
+                break;
+            }
+
+            if( p_cand == NULL || canddts > id_dts )
+            {
+                p_cand = id;
+                canddts = id_dts;
+            }
         }
 
         if( p_cand != NULL )
@@ -563,7 +594,7 @@ static void OutputStart( sout_stream_t *p_stream )
                 p_cand->pp_last = &p_cand->p_first;
             p_block->p_next = NULL;
 
-            if( p_block->i_dts >= p_sys->i_dts_start )
+            if( BlockTick( p_block ) >= p_sys->i_dts_start )
                 OutputSend( p_stream, p_cand, p_block );
             else
                 block_Release( p_block );

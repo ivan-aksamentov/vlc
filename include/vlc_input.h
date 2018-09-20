@@ -49,7 +49,7 @@
  *****************************************************************************/
 struct seekpoint_t
 {
-    int64_t i_time_offset;
+    vlc_tick_t i_time_offset;
     char    *psz_name;
 };
 
@@ -335,6 +335,9 @@ typedef enum input_event_type_e
     /* "rate" has changed */
     INPUT_EVENT_RATE,
 
+    /* "capabilities" has changed */
+    INPUT_EVENT_CAPABILITIES,
+
     /* At least one of "position" or "time" */
     INPUT_EVENT_POSITION,
 
@@ -352,8 +355,6 @@ typedef enum input_event_type_e
     INPUT_EVENT_PROGRAM,
     /* A ES has been added or removed or selected */
     INPUT_EVENT_ES,
-    /* "teletext-es" has changed */
-    INPUT_EVENT_TELETEXT,
 
     /* "record" has changed */
     INPUT_EVENT_RECORD,
@@ -381,43 +382,150 @@ typedef enum input_event_type_e
     /* cache" has changed */
     INPUT_EVENT_CACHE,
 
-    /* A audio_output_t object has been created/deleted by *the input* */
-    INPUT_EVENT_AOUT,
     /* A vout_thread_t object has been created/deleted by *the input* */
     INPUT_EVENT_VOUT,
 
+    /* (pre-)parsing events */
+    INPUT_EVENT_SUBITEMS,
+
 } input_event_type_e;
+
+#define VLC_INPUT_CAPABILITIES_SEEKABLE (1<<0)
+#define VLC_INPUT_CAPABILITIES_PAUSEABLE (1<<1)
+#define VLC_INPUT_CAPABILITIES_CHANGE_RATE (1<<2)
+#define VLC_INPUT_CAPABILITIES_REWINDABLE (1<<3)
+#define VLC_INPUT_CAPABILITIES_RECORDABLE (1<<4)
+
+struct vlc_input_event_position
+{
+    float percentage;
+    vlc_tick_t ms;
+};
+
+struct vlc_input_event_title
+{
+    enum {
+        VLC_INPUT_TITLE_NEW_LIST,
+        VLC_INPUT_TITLE_SELECTED,
+    } action;
+    union
+    {
+        struct
+        {
+            const input_title_t **array;
+            size_t count;
+        } list;
+        size_t selected_idx;
+    };
+};
+
+struct vlc_input_event_chapter
+{
+    int title;
+    int seekpoint;
+};
+
+struct vlc_input_event_program {
+    enum {
+        VLC_INPUT_PROGRAM_ADDED,
+        VLC_INPUT_PROGRAM_DELETED,
+        VLC_INPUT_PROGRAM_SELECTED,
+        VLC_INPUT_PROGRAM_SCRAMBLED,
+    } action;
+    int id;
+    union {
+        const char *title;
+        bool scrambled;
+    };
+};
+
+struct vlc_input_event_es {
+    enum {
+        VLC_INPUT_ES_ADDED,
+        VLC_INPUT_ES_DELETED,
+        VLC_INPUT_ES_UPDATED,
+        VLC_INPUT_ES_SELECTED,
+        VLC_INPUT_ES_UNSELECTED,
+    } action;
+    /**
+     * ES track id: only valid from the event callback, unless the id is held
+     * by the user with vlc_es_Hold(). */
+    vlc_es_id_t *id;
+    /**
+     * Title of ES track, can be updated after the VLC_INPUT_ES_UPDATED event.
+     */
+    const char *title;
+    /**
+     * ES track information, can be updated after the VLC_INPUT_ES_UPDATED event.
+     */
+    const es_format_t *fmt;
+};
+
+struct vlc_input_event_signal {
+    float quality;
+    float strength;
+};
+
+struct vlc_input_event_vout
+{
+    enum {
+        VLC_INPUT_EVENT_VOUT_ADDED,
+        VLC_INPUT_EVENT_VOUT_DELETED,
+    } action;
+    vout_thread_t *vout;
+};
+
+struct vlc_input_event
+{
+    input_event_type_e type;
+
+    union {
+        /* INPUT_EVENT_STATE */
+        input_state_e state;
+        /* INPUT_EVENT_RATE */
+        float rate;
+        /* INPUT_EVENT_CAPABILITIES */
+        int capabilities; /**< cf. VLC_INPUT_CAPABILITIES_* bitwise flags */
+        /* INPUT_EVENT_POSITION */
+        struct vlc_input_event_position position;
+        /* INPUT_EVENT_LENGTH */
+        vlc_tick_t length;
+        /* INPUT_EVENT_TITLE */
+        struct vlc_input_event_title title;
+        /* INPUT_EVENT_CHAPTER */
+        struct vlc_input_event_chapter chapter;
+        /* INPUT_EVENT_PROGRAM */
+        struct vlc_input_event_program program;
+        /* INPUT_EVENT_ES */
+        struct vlc_input_event_es es;
+        /* INPUT_EVENT_RECORD */
+        bool record;
+        /* INPUT_EVENT_STATISTICS */
+        const struct input_stats_t *stats;
+        /* INPUT_EVENT_SIGNAL */
+        struct vlc_input_event_signal signal;
+        /* INPUT_EVENT_AUDIO_DELAY */
+        vlc_tick_t audio_delay;
+        /* INPUT_EVENT_SUBTITLE_DELAY */
+        vlc_tick_t subtitle_delay;
+        /* INPUT_EVENT_CACHE */
+        float cache;
+        /* INPUT_EVENT_VOUT */
+        struct vlc_input_event_vout vout;
+        /* INPUT_EVENT_SUBITEMS */
+        input_item_node_t *subitems;
+    };
+};
+
+typedef void (*input_thread_events_cb)( input_thread_t *input,
+                                        const struct vlc_input_event *event,
+                                        void *userdata);
 
 /**
  * Input queries
  */
 enum input_query_e
 {
-    /* input variable "position" */
-    INPUT_GET_POSITION,         /* arg1= double *       res=    */
-    INPUT_SET_POSITION,         /* arg1= double         res=can fail    */
-
-    /* input variable "length" */
-    INPUT_GET_LENGTH,           /* arg1= int64_t *      res=can fail    */
-
-    /* input variable "time" */
-    INPUT_GET_TIME,             /* arg1= int64_t *      res=    */
-    INPUT_SET_TIME,             /* arg1= int64_t        res=can fail    */
-
-    /* input variable "rate" (nominal is INPUT_RATE_DEFAULT) */
-    INPUT_GET_RATE,             /* arg1= int *          res=    */
-    INPUT_SET_RATE,             /* arg1= int            res=can fail    */
-
-    /* input variable "state" */
-    INPUT_GET_STATE,            /* arg1= int *          res=    */
-    INPUT_SET_STATE,            /* arg1= int            res=can fail    */
-
-    /* input variable "audio-delay" and "sub-delay" */
-    INPUT_GET_AUDIO_DELAY,      /* arg1 = int* res=can fail */
-    INPUT_SET_AUDIO_DELAY,      /* arg1 = int  res=can fail */
-    INPUT_GET_SPU_DELAY,        /* arg1 = int* res=can fail */
-    INPUT_SET_SPU_DELAY,        /* arg1 = int  res=can fail */
-
     /* Menu (VCD/DVD/BD) Navigation */
     /** Activate the navigation item selected. res=can fail */
     INPUT_NAV_ACTIVATE,
@@ -434,12 +542,6 @@ enum input_query_e
     /** Activate disc Root Menu. res=can fail */
     INPUT_NAV_MENU,
 
-    /* Meta datas */
-    INPUT_ADD_INFO,   /* arg1= char* arg2= char* arg3=...     res=can fail */
-    INPUT_REPLACE_INFOS,/* arg1= info_category_t *            res=cannot fail */
-    INPUT_MERGE_INFOS,/* arg1= info_category_t *              res=cannot fail */
-    INPUT_DEL_INFO,   /* arg1= char* arg2= char*              res=can fail */
-
     /* bookmarks */
     INPUT_GET_BOOKMARK,    /* arg1= seekpoint_t *               res=can fail */
     INPUT_GET_BOOKMARKS,   /* arg1= seekpoint_t *** arg2= int * res=can fail */
@@ -450,27 +552,15 @@ enum input_query_e
     INPUT_SET_BOOKMARK,    /* arg1= int  res=can fail    */
 
     /* titles */
-    INPUT_GET_TITLE_INFO,     /* arg1=input_title_t** arg2= int * res=can fail */
     INPUT_GET_FULL_TITLE_INFO,     /* arg1=input_title_t*** arg2= int * res=can fail */
-
-    /* seekpoints */
-    INPUT_GET_SEEKPOINTS,  /* arg1=seekpoint_t*** arg2= int * res=can fail */
-
-    /* Attachments */
-    INPUT_GET_ATTACHMENTS, /* arg1=input_attachment_t***, arg2=int*  res=can fail */
-    INPUT_GET_ATTACHMENT,  /* arg1=input_attachment_t**, arg2=char*  res=can fail */
 
     /* On the fly input slave */
     INPUT_ADD_SLAVE,       /* arg1= enum slave_type, arg2= const char *,
                             * arg3= bool forced, arg4= bool notify,
                             * arg5= bool check_extension */
 
-    /* On the fly record while playing */
-    INPUT_SET_RECORD_STATE, /* arg1=bool    res=can fail */
-    INPUT_GET_RECORD_STATE, /* arg1=bool*   res=can fail */
-
     /* ES */
-    INPUT_RESTART_ES,       /* arg1=int (-AUDIO/VIDEO/SPU_ES for the whole category) */
+    INPUT_RESTART_ES_BY_ID,/* arg1=int (-AUDIO/VIDEO/SPU_ES for the whole category) */
 
     /* Viewpoint */
     INPUT_UPDATE_VIEWPOINT, /* arg1=(const vlc_viewpoint_t*), arg2=bool b_absolute */
@@ -495,18 +585,35 @@ enum input_query_e
 /*****************************************************************************
  * Prototypes
  *****************************************************************************/
-
-VLC_API input_thread_t * input_Create( vlc_object_t *p_parent, input_item_t *,
-                                       const char *psz_log, input_resource_t *,
+VLC_API input_thread_t * input_Create( vlc_object_t *p_parent,
+                                       input_thread_events_cb event_cb, void *events_data,
+                                       input_item_t *, const char *psz_log, input_resource_t *,
                                        vlc_renderer_item_t* p_renderer ) VLC_USED;
-#define input_Create(a,b,c,d,e) input_Create(VLC_OBJECT(a),b,c,d,e)
+#define input_Create(a,b,c,d,e,f,g) input_Create(VLC_OBJECT(a),b,c,d,e,f,g)
+
+
+/**
+ * Creates an item preparser.
+ *
+ * Creates an input thread to preparse an item. The input needs to be started
+ * with input_Start() afterwards.
+ *
+ * @param obj parent object
+ * @param item input item to preparse
+ * @return an input thread or NULL on error
+ */
+VLC_API input_thread_t *input_CreatePreparser(vlc_object_t *obj,
+                                              input_thread_events_cb events_cb,
+                                              void *events_data, input_item_t *item)
+VLC_USED;
 
 VLC_API int input_Start( input_thread_t * );
 
 VLC_API void input_Stop( input_thread_t * );
 
-VLC_API int input_Read( vlc_object_t *, input_item_t * );
-#define input_Read(a,b) input_Read(VLC_OBJECT(a),b)
+VLC_API int input_Read( vlc_object_t *, input_item_t *,
+                        input_thread_events_cb, void * );
+#define input_Read(a,b,c,d) input_Read(VLC_OBJECT(a),b,c,d)
 
 VLC_API int input_vaControl( input_thread_t *, int i_query, va_list  );
 
@@ -518,26 +625,8 @@ VLC_API void input_SetTime( input_thread_t *, vlc_tick_t i_time, bool b_fast );
 
 VLC_API void input_SetPosition( input_thread_t *, float f_position, bool b_fast );
 
-/**
- * Create a new input_thread_t and start it.
- *
- * Provided for convenience.
- *
- * \see input_Create
- */
-static inline
-input_thread_t *input_CreateAndStart( vlc_object_t *parent,
-                                      input_item_t *item, const char *log )
-{
-    input_thread_t *input = input_Create( parent, item, log, NULL, NULL );
-    if( input != NULL && input_Start( input ) )
-    {
-        vlc_object_release( input );
-        input = NULL;
-    }
-    return input;
-}
-#define input_CreateAndStart(a,b,c) input_CreateAndStart(VLC_OBJECT(a),b,c)
+VLC_API void input_LegacyEvents(input_thread_t *, const struct vlc_input_event *, void * );
+VLC_API void input_LegacyVarInit ( input_thread_t * );
 
 /**
  * Get the input item for an input thread
@@ -546,17 +635,6 @@ input_thread_t *input_CreateAndStart( vlc_object_t *parent,
  * you do not need it anymore.
  */
 VLC_API input_item_t* input_GetItem( input_thread_t * ) VLC_USED;
-
-/**
- * It will return the current state of the input.
- * Provided for convenience.
- */
-static inline input_state_e input_GetState( input_thread_t * p_input )
-{
-    input_state_e state = INIT_S;
-    input_Control( p_input, INPUT_GET_STATE, &state );
-    return state;
-}
 
 /**
  * Return one of the video output (if any). If possible, you should use
@@ -654,11 +732,14 @@ VLC_API void input_DecoderDelete( decoder_t * );
 VLC_API void input_DecoderDecode( decoder_t *, block_t *, bool b_do_pace );
 VLC_API void input_DecoderDrain( decoder_t * );
 VLC_API void input_DecoderFlush( decoder_t * );
+VLC_API int  input_DecoderSetSpuHighlight( decoder_t *, const vlc_spu_highlight_t * );
 
 /**
  * This function creates a sane filename path.
  */
-VLC_API char * input_CreateFilename( input_thread_t *, const char *psz_path, const char *psz_prefix, const char *psz_extension ) VLC_USED;
+VLC_API char * input_CreateFilename( input_thread_t *, input_item_t *,
+                                     const char *psz_path, const char *psz_prefix,
+                                     const char *psz_extension ) VLC_USED;
 
 /**
  * It creates an empty input resource handler.

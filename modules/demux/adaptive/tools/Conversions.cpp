@@ -88,10 +88,10 @@ static time_t str_duration( const char *psz_duration )
 
 IsoTime::IsoTime(const std::string &str)
 {
-    time = str_duration(str.c_str());
+    time = vlc_tick_from_sec(str_duration(str.c_str()));
 }
 
-IsoTime::operator time_t () const
+IsoTime::operator vlc_tick_t () const
 {
     return time;
 }
@@ -159,11 +159,11 @@ UTCTime::UTCTime(const std::string &str)
         tm.tm_sec = values[UTCTIME_SEC];
         tm.tm_isdst = 0;
 
-        t = timegm( &tm );
-        t += values[UTCTIME_TZ] * 60;
-        t *= 1000;
-        t += values[UTCTIME_MSEC];
-        t *= CLOCK_FREQ / 1000;
+        int64_t mst = timegm( &tm );
+        mst += values[UTCTIME_TZ] * 60;
+        mst *= 1000;
+        mst += values[UTCTIME_MSEC];
+        t = VLC_TICK_FROM_MS(mst);
     } catch(int) {
         t = 0;
     }
@@ -171,7 +171,7 @@ UTCTime::UTCTime(const std::string &str)
 
 time_t UTCTime::time() const
 {
-    return t / CLOCK_FREQ;
+    return SEC_FROM_VLC_TICK(t);
 }
 
 vlc_tick_t UTCTime::mtime() const

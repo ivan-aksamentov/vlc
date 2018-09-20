@@ -350,12 +350,15 @@ static int GenericOpen( demux_t *p_demux, const char *psz_module,
     }
     else
         date_Init( &p_sys->dts, 25000, 1000 );
-    date_Set( &p_sys->dts, VLC_TS_0 );
+    date_Set( &p_sys->dts, VLC_TICK_0 );
 
     /* Load the mpegvideo packetizer */
     es_format_Init( &fmt, VIDEO_ES, i_codec );
-    fmt.video.i_frame_rate = p_sys->dts.i_divider_num;
-    fmt.video.i_frame_rate_base = p_sys->dts.i_divider_den;
+    if( f_fps )
+    {
+        fmt.video.i_frame_rate = p_sys->dts.i_divider_num;
+        fmt.video.i_frame_rate_base = p_sys->dts.i_divider_den;
+    }
     p_sys->p_packetizer = demux_PacketizerNew( p_demux, &fmt, psz_module );
     if( !p_sys->p_packetizer )
     {
@@ -434,7 +437,7 @@ static int Demux( demux_t *p_demux)
             if( p_block_in )
             {
                 p_block_in->i_dts = date_Get( &p_sys->dts );
-                p_block_in->i_pts = VLC_TS_INVALID;
+                p_block_in->i_pts = VLC_TICK_INVALID;
             }
 
             if( p_sys->p_es == NULL )
@@ -470,7 +473,7 @@ static int Demux( demux_t *p_demux)
                         p_sys->frame_rate_den = 1000;
                     }
                     date_Init( &p_sys->dts, 2 * p_sys->frame_rate_num, p_sys->frame_rate_den );
-                    date_Set( &p_sys->dts, VLC_TS_0 );
+                    date_Set( &p_sys->dts, VLC_TICK_0 );
                     msg_Dbg( p_demux, "using %.2f fps", (double) p_sys->frame_rate_num / p_sys->frame_rate_den );
                 }
 
@@ -478,8 +481,8 @@ static int Demux( demux_t *p_demux)
                 unsigned i_nb_fields;
                 if( i_frame_length > 0 )
                 {
-                    i_nb_fields = i_frame_length * 2 * p_sys->frame_rate_num /
-                                  ( p_sys->frame_rate_den * CLOCK_FREQ );
+                    i_nb_fields = round( (double)i_frame_length * 2 * p_sys->frame_rate_num /
+                                  ( p_sys->frame_rate_den * CLOCK_FREQ ) );
                 }
                 else i_nb_fields = 2;
                 if( i_nb_fields <= 6 ) /* in the legit range */

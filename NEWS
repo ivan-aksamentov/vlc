@@ -16,6 +16,7 @@ Audio output:
 Demuxer:
  * Support for HEIF format
  * Support for DASH WebM
+ * Support for DVBSUB in mkv
 
 Codecs:
  * Support for experimental AV1 video encoding
@@ -23,15 +24,28 @@ Codecs:
  * Remove iomx support for Android
  * WebP image decoding
  * Support for SMPTE-TT image profile
+ * Support for 16-bit greyscale
+ * Support IMM4 decoder
+
+Access:
+ * Enable SMB2 / SMB3 support on mobile ports with libsmb2
 
 Video output:
  * Remove aa plugin
  * Remove evas plugin
  * Remove omxil_vout plugin
+ * Remove RealRTSP plugin
+ * Remove Real demuxer plugin
+
+Stream output:
+ * New SDI output with improved audio and ancillary support.
+   Candidate for deprecation of decklink vout/aout modules.
 
 macOS:
  * Remove Growl notification support
 
+appleOS:
+ * Improved proxy configuration handling
 
 
 Changes between 3.0.2 and 3.0.3:

@@ -850,7 +850,7 @@ static picture_t * RemoveOneFrameFromDPB(decoder_sys_t *p_sys)
         picture_t *p_field = p_info->p_picture;
 
         /* Compute time if missing */
-        if (p_field->date == VLC_TS_INVALID)
+        if (p_field->date == VLC_TICK_INVALID)
             p_field->date = date_Get(&p_sys->pts);
         else
             date_Set(&p_sys->pts, p_field->date);
@@ -933,7 +933,7 @@ static frame_info_t * CreateReorderInfo(decoder_t *p_dec, const block_t *p_block
     /* required for still pictures/menus */
     p_info->b_forced = (p_block->i_flags & BLOCK_FLAG_END_OF_SEQUENCE);
 
-    if (date_Get(&p_sys->pts) == VLC_TS_INVALID)
+    if (date_Get(&p_sys->pts) == VLC_TICK_INVALID)
         date_Set(&p_sys->pts, p_block->i_dts);
 
     return p_info;
@@ -959,7 +959,7 @@ static void OnDecodedFrame(decoder_t *p_dec, frame_info_t *p_info)
                 break;
             }
             else if (!p_sys->b_poc_based_reorder &&
-                     p_info->p_picture->date > VLC_TS_INVALID &&
+                     p_info->p_picture->date > VLC_TICK_INVALID &&
                      p_sys->p_pic_reorder->p_picture->date > p_info->p_picture->date)
             {
                 p_sys->b_invalid_pic_reorder_max = true;
@@ -1418,6 +1418,7 @@ static int OpenDecoder(vlc_object_t *p_this)
             p_sys->pf_get_extradata = GetDecoderExtradataH264;
             p_sys->pf_fill_reorder_info = FillReorderInfoH264;
             p_sys->b_poc_based_reorder = true;
+            p_sys->b_vt_need_keyframe = true;
             break;
 
         case kCMVideoCodecType_HEVC:
@@ -1671,7 +1672,7 @@ static CMSampleBufferRef VTSampleBufferCreate(decoder_t *p_dec,
     CMBlockBufferRef  block_buf = NULL;
     CMSampleBufferRef sample_buf = NULL;
     CMTime pts;
-    if(!p_sys->b_poc_based_reorder && p_block->i_pts == VLC_TS_INVALID)
+    if(!p_sys->b_poc_based_reorder && p_block->i_pts == VLC_TICK_INVALID)
         pts = CMTimeMake(p_block->i_dts, CLOCK_FREQ);
     else
         pts = CMTimeMake(p_block->i_pts, CLOCK_FREQ);
@@ -1900,11 +1901,6 @@ static int DecodeBlock(decoder_t *p_dec, block_t *p_block)
 
             /* Session will be started by Late Start code block */
             StopVideoToolbox(p_dec);
-            if (p_dec->fmt_in.i_extra == 0)
-            {
-                /* Clean old parameter sets since they may be corrupt */
-                hxxx_helper_clean(&p_sys->hh);
-            }
 
             vlc_mutex_lock(&p_sys->lock);
             p_sys->vtsession_status = VTSESSION_STATUS_OK;
@@ -2143,7 +2139,7 @@ static int pic_holder_wait(struct pic_holder *pic_holder, const picture_t *pic)
      * output pictures (will they be rendered immediately ?), so don't wait
      * infinitely. The output will be paced anyway by the vlc_cond_timedwait()
      * call. */
-    vlc_tick_t deadline = vlc_tick_now() + INT64_C(200000);
+    vlc_tick_t deadline = vlc_tick_now() + VLC_TICK_FROM_MS(200);
     int ret = 0;
     while (ret == 0 && pic_holder->field_reorder_max != 0
         && pic_holder->nb_field_out >= pic_holder->field_reorder_max + reserved_fields)

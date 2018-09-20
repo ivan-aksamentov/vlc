@@ -169,6 +169,11 @@ static void vlc_av_frame_Release(block_t *block)
     free(b);
 }
 
+static const struct vlc_block_callbacks vlc_av_frame_cbs =
+{
+    vlc_av_frame_Release,
+};
+
 static block_t *vlc_av_frame_Wrap(AVFrame *frame)
 {
     for (unsigned i = 1; i < AV_NUM_DATA_POINTERS; i++)
@@ -183,9 +188,9 @@ static block_t *vlc_av_frame_Wrap(AVFrame *frame)
 
     block_t *block = &b->self;
 
-    block_Init(block, frame->extended_data[0], frame->linesize[0]);
+    block_Init(block, &vlc_av_frame_cbs,
+               frame->extended_data[0], frame->linesize[0]);
     block->i_nb_samples = frame->nb_samples;
-    block->pf_release = vlc_av_frame_Release;
     b->frame = frame;
     return block;
 }
@@ -279,7 +284,7 @@ static void Flush( decoder_t *p_dec )
 
     if( avcodec_is_open( ctx ) )
         avcodec_flush_buffers( ctx );
-    date_Set( &p_sys->end_date, VLC_TS_INVALID );
+    date_Set( &p_sys->end_date, VLC_TICK_INVALID );
 
     if( ctx->codec_id == AV_CODEC_ID_MP2 ||
         ctx->codec_id == AV_CODEC_ID_MP3 )
@@ -331,12 +336,12 @@ static int DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
         if( p_block->i_flags & BLOCK_FLAG_DISCONTINUITY )
         {
-            date_Set( &p_sys->end_date, VLC_TS_INVALID );
+            date_Set( &p_sys->end_date, VLC_TICK_INVALID );
         }
 
         /* We've just started the stream, wait for the first PTS. */
-        if( p_block->i_pts == VLC_TS_INVALID &&
-            date_Get( &p_sys->end_date ) == VLC_TS_INVALID )
+        if( p_block->i_pts == VLC_TICK_INVALID &&
+            date_Get( &p_sys->end_date ) == VLC_TICK_INVALID )
             goto drop;
 
         if( p_block->i_buffer <= 0 )

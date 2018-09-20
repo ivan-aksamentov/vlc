@@ -74,7 +74,7 @@ vlc_module_end ()
  * Local prototypes
  *****************************************************************************/
 #define MAX_BLOCKS 100
-#define GOOM_DELAY 400000
+#define GOOM_DELAY VLC_TICK_FROM_MS(400)
 
 typedef struct
 {
@@ -154,7 +154,7 @@ static int Open( vlc_object_t *p_this )
 
     p_thread->i_blocks = 0;
     date_Init( &p_thread->date, p_filter->fmt_in.audio.i_rate, 1 );
-    date_Set( &p_thread->date, VLC_TS_0 );
+    date_Set( &p_thread->date, VLC_TICK_0 );
     p_thread->i_channels = aout_FormatNbChannels( &p_filter->fmt_in.audio );
 
     if( vlc_clone( &p_thread->thread,
@@ -242,12 +242,12 @@ static int FillBuffer( int16_t *p_data, int *pi_data,
                 p_block->i_buffer / sizeof(float) / p_this->i_channels );
 
         /* Date management */
-        if( p_block->i_pts != VLC_TS_INVALID &&
+        if( p_block->i_pts != VLC_TICK_INVALID &&
             p_block->i_pts != date_Get( pi_date_end ) )
         {
            date_Set( pi_date_end, p_block->i_pts );
         }
-        p_block->i_pts = VLC_TS_INVALID;
+        p_block->i_pts = VLC_TICK_INVALID;
 
         date_Increment( pi_date_end, i_samples );
 

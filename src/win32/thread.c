@@ -422,7 +422,7 @@ void vlc_addr_wait(void *addr, unsigned val)
 
 bool vlc_addr_timedwait(void *addr, unsigned val, vlc_tick_t delay)
 {
-    delay = (delay + 999) / 1000;
+    delay = (delay + (1000-1)) / 1000;
 
     if (delay > 0x7fffffff)
     {
@@ -719,7 +719,7 @@ static vlc_tick_t mdate_tick (void)
 
     /* milliseconds */
     static_assert ((CLOCK_FREQ % 1000) == 0, "Broken frequencies ratio");
-    return ts * (CLOCK_FREQ / 1000);
+    return VLC_TICK_FROM_MS( ts );
 }
 #if !VLC_WINSTORE_APP
 static vlc_tick_t mdate_multimedia (void)
@@ -728,7 +728,7 @@ static vlc_tick_t mdate_multimedia (void)
 
     /* milliseconds */
     static_assert ((CLOCK_FREQ % 1000) == 0, "Broken frequencies ratio");
-    return ts * (CLOCK_FREQ / 1000);
+    return VLC_TICK_FROM_MS( ts );
 }
 #endif
 
@@ -743,7 +743,7 @@ static vlc_tick_t mdate_perf (void)
     /* We need to split the division to avoid 63-bits overflow */
     lldiv_t d = lldiv (counter.QuadPart, clk.perf.freq.QuadPart);
 
-    return (d.quot * CLOCK_FREQ) + ((d.rem * CLOCK_FREQ) / clk.perf.freq.QuadPart);
+    return vlc_tick_from_sec( d.quot ) + ((d.rem * CLOCK_FREQ) / clk.perf.freq.QuadPart);
 }
 
 static vlc_tick_t mdate_wall (void)
@@ -784,7 +784,7 @@ void (vlc_tick_wait)(vlc_tick_t deadline)
     vlc_testcancel();
     while ((delay = (deadline - vlc_tick_now())) > 0)
     {
-        delay = (delay + 999) / 1000;
+        delay = (delay + (1000-1)) / 1000;
         if (unlikely(delay > 0x7fffffff))
             delay = 0x7fffffff;
 
@@ -877,38 +877,70 @@ static BOOL SelectClockSource(void *data)
     return TRUE;
 }
 
-size_t EnumClockSource(const char *var, char ***vp, char ***np)
+int EnumClockSource(const char *var, char ***vp, char ***np)
 {
     const size_t max = 6;
-    char **values = xmalloc (sizeof (*values) * max);
-    char **names = xmalloc (sizeof (*names) * max);
-    size_t n = 0;
+    char **values = malloc (sizeof (*values) * max);
+    char **names = malloc (sizeof (*names) * max);
+    if (!values || !names)
+    {
+        free(values);
+        free(names);
+        *vp = NULL;
+        *np = NULL;
+        return -1;
+    }
+    int n = 0;
 
-    values[n] = xstrdup ("");
-    names[n] = xstrdup (_("Auto"));
+    values[n] = strdup ("");
+    names[n] = strdup (_("Auto"));
+    if (!values[n] || !names[n])
+        goto error;
     n++;
-    values[n] = xstrdup ("interrupt");
-    names[n] = xstrdup ("Interrupt time");
+    values[n] = strdup ("interrupt");
+    names[n] = strdup ("Interrupt time");
+    if (!values[n] || !names[n])
+        goto error;
     n++;
-    values[n] = xstrdup ("tick");
-    names[n] = xstrdup ("Windows time");
+    values[n] = strdup ("tick");
+    names[n] = strdup ("Windows time");
+    if (!values[n] || !names[n])
+        goto error;
     n++;
 #if !VLC_WINSTORE_APP
-    values[n] = xstrdup ("multimedia");
-    names[n] = xstrdup ("Multimedia timers");
+    values[n] = strdup ("multimedia");
+    names[n] = strdup ("Multimedia timers");
+    if (!values[n] || !names[n])
+        goto error;
     n++;
 #endif
-    values[n] = xstrdup ("perf");
-    names[n] = xstrdup ("Performance counters");
+    values[n] = strdup ("perf");
+    names[n] = strdup ("Performance counters");
+    if (!values[n] || !names[n])
+        goto error;
     n++;
-    values[n] = xstrdup ("wall");
-    names[n] = xstrdup ("System time (DANGEROUS!)");
+    values[n] = strdup ("wall");
+    names[n] = strdup ("System time (DANGEROUS!)");
+    if (!values[n] || !names[n])
+        goto error;
     n++;
 
     *vp = values;
     *np = names;
     (void) var;
     return n;
+
+error:
+    for (int i = 0; i <= n; ++i)
+    {
+        free (values[i]);
+        free (names[i]);
+    }
+    free( values );
+    free( names);
+    *vp = NULL;
+    *np = NULL;
+    return -1;
 }
 
 

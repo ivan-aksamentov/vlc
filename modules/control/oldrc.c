@@ -697,14 +697,14 @@ static void *Run( void *data )
         {
             int64_t t = 0;
             if( p_sys->p_input != NULL )
-                t = var_GetInteger( p_sys->p_input, "time" ) / CLOCK_FREQ;
+                t = SEC_FROM_VLC_TICK(var_GetInteger( p_sys->p_input, "time" ));
             msg_rc( "%"PRIu64, t );
         }
         else if( !strcmp( psz_cmd, "get_length" ) )
         {
             int64_t l = 0;
             if( p_sys->p_input != NULL )
-                l = var_GetInteger( p_sys->p_input, "length" ) / CLOCK_FREQ;
+                l = SEC_FROM_VLC_TICK(var_GetInteger( p_sys->p_input, "length" ));
             msg_rc( "%"PRIu64, l );
         }
         else if( !strcmp( psz_cmd, "get_title" ) )
@@ -905,7 +905,7 @@ static void PositionChanged( intf_thread_t *p_intf,
     vlc_mutex_lock( &p_intf->p_sys->status_lock );
     if( p_intf->p_sys->b_input_buffering )
         msg_rc( STATUS_CHANGE "( time: %"PRId64"s )",
-                (var_GetInteger( p_input, "time" ) / CLOCK_FREQ) );
+                SEC_FROM_VLC_TICK(var_GetInteger( p_input, "time" )) );
     p_intf->p_sys->b_input_buffering = false;
     vlc_mutex_unlock( &p_intf->p_sys->status_lock );
 }
@@ -984,7 +984,7 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
         else
         {
             int t = atoi( newval.psz_string );
-            var_SetInteger( p_input, "time", CLOCK_FREQ * t );
+            var_SetInteger( p_input, "time", vlc_tick_from_sec( t ) );
         }
         i_error = VLC_SUCCESS;
     }
@@ -1156,9 +1156,9 @@ static void print_playlist( intf_thread_t *p_intf, playlist_item_t *p_item, int 
     char psz_buffer[MSTRTIME_MAX_SIZE];
     for( int i = 0; i< p_item->i_children; i++ )
     {
-        if( p_item->pp_children[i]->p_input->i_duration != -1 )
+        if( p_item->pp_children[i]->p_input->i_duration != INPUT_DURATION_INDEFINITE )
         {
-            secstotimestr( psz_buffer, p_item->pp_children[i]->p_input->i_duration / CLOCK_FREQ );
+            secstotimestr( psz_buffer, SEC_FROM_VLC_TICK(p_item->pp_children[i]->p_input->i_duration) );
             msg_rc( "|%*s- %s (%s)", 2 * i_level, "", p_item->pp_children[i]->p_input->psz_name, psz_buffer );
         }
         else
@@ -1306,7 +1306,7 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
         if( p_item )
         {
             msg_rc( "Trying to add %s to playlist.", newval.psz_string );
-            int i_ret = playlist_AddInput( p_playlist, p_item, true, true );
+            int i_ret = playlist_AddInput( p_playlist, p_item, true );
             input_item_Release( p_item );
             if( i_ret != VLC_SUCCESS )
             {
@@ -1322,7 +1322,7 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
         if( p_item )
         {
             msg_rc( "trying to enqueue %s to playlist", newval.psz_string );
-            int ret =  playlist_AddInput( p_playlist, p_item, false, true );
+            int ret =  playlist_AddInput( p_playlist, p_item, false );
             input_item_Release( p_item );
             if( ret != VLC_SUCCESS )
             {
@@ -1422,22 +1422,7 @@ static int Volume( vlc_object_t *p_this, char const *psz_cmd,
     VLC_UNUSED(psz_cmd); VLC_UNUSED(oldval); VLC_UNUSED(p_data);
     intf_thread_t *p_intf = (intf_thread_t*)p_this;
     playlist_t *p_playlist = p_intf->p_sys->p_playlist;
-    input_thread_t *p_input = playlist_CurrentInput( p_playlist );
     int i_error = VLC_EGENERIC;
-
-    if( !p_input )
-        return VLC_ENOOBJ;
-
-    if( p_input )
-    {
-        int state = var_GetInteger( p_input, "state" );
-        vlc_object_release( p_input );
-        if( state == PAUSE_S )
-        {
-            msg_rc( "%s", _("Type 'pause' to continue.") );
-            return VLC_EGENERIC;
-        }
-    }
 
     if ( *newval.psz_string )
     {
@@ -1466,21 +1451,8 @@ static int VolumeMove( vlc_object_t *p_this, char const *psz_cmd,
     VLC_UNUSED(oldval); VLC_UNUSED(p_data);
     intf_thread_t *p_intf = (intf_thread_t*)p_this;
     float volume;
-    input_thread_t *p_input =
-        playlist_CurrentInput( p_intf->p_sys->p_playlist );
     int i_nb_steps = atoi(newval.psz_string);
     int i_error = VLC_SUCCESS;
-
-    if( !p_input )
-        return VLC_ENOOBJ;
-
-    int state = var_GetInteger( p_input, "state" );
-    vlc_object_release( p_input );
-    if( state == PAUSE_S )
-    {
-        msg_rc( "%s", _("Type 'pause' to continue.") );
-        return VLC_EGENERIC;
-    }
 
     if( !strcmp(psz_cmd, "voldown") )
         i_nb_steps *= -1;
@@ -1774,7 +1746,7 @@ static bool ReadWin32( intf_thread_t *p_intf, unsigned char *p_buffer, int *pi_s
 
     /* On Win32, select() only works on socket descriptors */
     while( WaitForSingleObjectEx( p_intf->p_sys->hConsoleIn,
-                                INTF_IDLE_SLEEP/1000, TRUE ) == WAIT_OBJECT_0 )
+                                MS_FROM_VLC_TICK(INTF_IDLE_SLEEP), TRUE ) == WAIT_OBJECT_0 )
     {
         // Prefer to fail early when there's not enough space to store a 4 bytes
         // UTF8 character. The function will be immediatly called again and we won't

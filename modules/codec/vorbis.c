@@ -241,7 +241,7 @@ static int OpenCommon( vlc_object_t *p_this, bool b_packetizer )
         return VLC_ENOMEM;
 
     /* Misc init */
-    date_Set( &p_sys->end_date, VLC_TS_INVALID );
+    date_Set( &p_sys->end_date, VLC_TICK_INVALID );
     p_sys->i_last_block_size = 0;
     p_sys->b_packetizer = b_packetizer;
     p_sys->b_has_headers = false;
@@ -451,7 +451,7 @@ static void Flush( decoder_t *p_dec )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
 
-    date_Set( &p_sys->end_date, VLC_TS_INVALID );
+    date_Set( &p_sys->end_date, VLC_TICK_INVALID );
 }
 
 /*****************************************************************************
@@ -478,13 +478,13 @@ static block_t *ProcessPacket( decoder_t *p_dec, ogg_packet *p_oggpacket,
     }
 
     /* Date management */
-    if( p_block->i_pts != VLC_TS_INVALID &&
+    if( p_block->i_pts != VLC_TICK_INVALID &&
         p_block->i_pts != date_Get( &p_sys->end_date ) )
     {
         date_Set( &p_sys->end_date, p_block->i_pts );
     }
 
-    if( date_Get( &p_sys->end_date ) == VLC_TS_INVALID )
+    if( date_Get( &p_sys->end_date ) == VLC_TICK_INVALID )
     {
         /* We've just started the stream, wait for the first PTS. */
         if( p_block ) block_Release( p_block );
@@ -802,7 +802,9 @@ static int OpenEncoder( vlc_object_t *p_this )
         {
             vorbis_info_clear( &p_sys->vi );
             free( p_enc->p_sys );
-            msg_Err( p_enc, "VBR mode initialisation failed" );
+            msg_Err( p_enc, "VBR mode initialisation failed %"PRIu8"x(%uHz,q=%d)",
+                     p_enc->fmt_in.audio.i_channels,
+                     p_enc->fmt_in.audio.i_rate, i_quality );
             return VLC_EGENERIC;
         }
 
@@ -834,7 +836,10 @@ static int OpenEncoder( vlc_object_t *p_this )
               i_max_bitrate > 0 ? i_max_bitrate * 1000: -1 ) )
           {
               vorbis_info_clear( &p_sys->vi );
-              msg_Err( p_enc, "CBR mode initialisation failed" );
+              msg_Err( p_enc, "CBR mode initialisation failed %"PRIu8"x(%uHz,r=%u)",
+                       p_enc->fmt_in.audio.i_channels,
+                       p_enc->fmt_in.audio.i_rate,
+                       p_enc->fmt_out.i_bitrate);
               free( p_enc->p_sys );
               return VLC_EGENERIC;
           }

@@ -166,10 +166,10 @@ vlc_tick_t Ogg_SampleToTime( const logical_stream_t *p_stream, int64_t i_sample,
 {
     i_sample = Ogg_ShiftPacketSample( p_stream, i_sample, b_start );
     if( i_sample < 0 )
-        return VLC_TS_INVALID;
+        return VLC_TICK_INVALID;
 
     date_t d = p_stream->dts;
-    date_Set(&d, VLC_TS_0);
+    date_Set(&d, VLC_TICK_0);
     return date_Increment( &d, i_sample );
 }
 
@@ -183,7 +183,7 @@ vlc_tick_t Ogg_GranuleToTime( const logical_stream_t *p_stream, int64_t i_granul
                            bool b_start, bool b_pts )
 {
     if( !Ogg_GranuleIsValid( p_stream, i_granule ) )
-        return VLC_TS_INVALID;
+        return VLC_TICK_INVALID;
 
     int64_t i_sample = Ogg_GranuleToSample( p_stream, i_granule );
     if( b_pts )

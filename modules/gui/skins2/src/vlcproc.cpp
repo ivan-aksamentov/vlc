@@ -406,7 +406,6 @@ int VlcProc::onGenericCallback2( vlc_object_t *pObj, const char *pVariable,
                 b_remove = true;
                 break;
             case INPUT_EVENT_VOUT:
-            case INPUT_EVENT_AOUT:
             case INPUT_EVENT_DEAD:
                 b_remove = false;
                 break;
@@ -729,7 +728,7 @@ void VlcProc::update_current_input()
         char *psz_name = NULL;
         if( psz_fmt != NULL )
         {
-            psz_name = vlc_strfinput( pInput, psz_fmt );
+            psz_name = vlc_strfinput( pInput, NULL, psz_fmt );
             free( psz_fmt );
         }
 

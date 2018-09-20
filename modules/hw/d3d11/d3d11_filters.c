@@ -119,6 +119,9 @@ static bool ApplyFilter( filter_sys_t *p_sys,
                                                      filter,
                                                      TRUE,
                                                      level);
+    ID3D11VideoContext_VideoProcessorSetStreamAutoProcessingMode(p_sys->d3d_proc.d3dvidctx,
+                                                                 p_sys->d3d_proc.videoProcessor,
+                                                                 0, FALSE);
 
     RECT srcRect;
     srcRect.left   = fmt->i_x_offset;
@@ -474,7 +477,7 @@ static int D3D11OpenAdjust(vlc_object_t *obj)
         }
 
         hr = ID3D11VideoDevice_CreateVideoProcessorInputView(sys->d3d_proc.d3dviddev,
-                                                             sys->out[0].resource,
+                                                             sys->out[i].resource,
                                                              sys->d3d_proc.procEnumerator,
                                                              &inDesc,
                                                              &sys->procInput[i]);
@@ -526,8 +529,10 @@ static void D3D11CloseAdjust(vlc_object_t *obj)
 
     for (int i=0; i<PROCESSOR_SLICES; i++)
     {
-        ID3D11VideoProcessorInputView_Release(sys->procInput[i]);
-        ID3D11VideoProcessorOutputView_Release(sys->procOutput[i]);
+        if (sys->procInput[i])
+            ID3D11VideoProcessorInputView_Release(sys->procInput[i]);
+        if (sys->procOutput[i])
+            ID3D11VideoProcessorOutputView_Release(sys->procOutput[i]);
     }
     ID3D11Texture2D_Release(sys->out[0].texture);
     ID3D11Texture2D_Release(sys->out[1].texture);

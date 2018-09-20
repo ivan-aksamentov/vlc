@@ -290,7 +290,7 @@ static int Open( vlc_object_t *p_this )
 
     p_sys->p_es_audio = es_out_Add( p_demux->out, &fmt );
     date_Init( &p_sys->pts, fmt.audio.i_rate, 1 );
-    date_Set( &p_sys->pts, VLC_TS_0 );
+    date_Set( &p_sys->pts, VLC_TICK_0 );
 
     return VLC_SUCCESS;
 }
@@ -320,7 +320,6 @@ static void Close( vlc_object_t *p_this )
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     bool *pb;
-    int64_t *pi64;
     demux_sys_t *p_sys = p_demux->p_sys;
 
     switch( i_query )
@@ -340,13 +339,12 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         return VLC_SUCCESS;
 
     case DEMUX_GET_PTS_DELAY:
-        pi64 = va_arg( args, int64_t * );
-        *pi64 = INT64_C(1000) * var_InheritInteger( p_demux, "live-caching" );
+        *va_arg( args, vlc_tick_t * ) =
+            VLC_TICK_FROM_MS( var_InheritInteger( p_demux, "live-caching" ) );
         return VLC_SUCCESS;
 
     case DEMUX_GET_TIME:
-        pi64 = va_arg( args, int64_t * );
-        *pi64 = date_Get(&p_sys->pts);
+        *va_arg( args, vlc_tick_t * ) = date_Get(&p_sys->pts);
         return VLC_SUCCESS;
 
     /* TODO implement others */

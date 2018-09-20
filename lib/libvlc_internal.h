@@ -60,7 +60,6 @@ VLC_API void libvlc_SetExitHandler( libvlc_int_t *, void (*) (void *), void * );
 struct libvlc_instance_t
 {
     libvlc_int_t *p_libvlc_int;
-    struct libvlc_vlm_t *vlm;
     unsigned      ref_count;
     vlc_mutex_t   instance_lock;
     struct libvlc_callback_entry_list_t *p_callback_list;
@@ -106,7 +105,7 @@ static inline libvlc_time_t from_mtime(vlc_tick_t time)
 
 static inline vlc_tick_t to_mtime(libvlc_time_t time)
 {
-    return time * 1000ULL;
+    return VLC_TICK_FROM_MS(time);
 }
 
 #endif

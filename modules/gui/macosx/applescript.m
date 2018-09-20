@@ -185,8 +185,7 @@
     if (!p_input)
         return NO;
 
-    input_state_e i_state = ERROR_S;
-    input_Control(p_input, INPUT_GET_STATE, &i_state);
+    input_state_e i_state = var_GetInteger(p_input, "state");
     vlc_object_release(p_input);
 
     return ((i_state == OPENING_S) || (i_state == PLAYING_S));
@@ -202,15 +201,15 @@
 
 - (int) audioDesync {
     input_thread_t * p_input = pl_CurrentInput(getIntf());
-    int i_delay = -1;
+    vlc_tick_t i_delay;
 
     if(!p_input)
-        return i_delay;
+        return -1;
 
-    i_delay = (int)var_GetInteger(p_input, "audio-delay");
+    i_delay = var_GetInteger(p_input, "audio-delay");
     vlc_object_release(p_input);
 
-    return (i_delay / 1000);
+    return MS_FROM_VLC_TICK( i_delay );
 }
 
 - (void) setAudioDesync:(int)i_audioDesync {
@@ -218,21 +217,21 @@
     if(!p_input)
         return;
 
-    var_SetInteger(p_input, "audio-delay", i_audioDesync * 1000);
+    var_SetInteger(p_input, "audio-delay", VLC_TICK_FROM_MS( i_audioDesync ));
     vlc_object_release(p_input);
 }
 
 - (int) currentTime {
     input_thread_t * p_input = pl_CurrentInput(getIntf());
-    int i_currentTime = -1;
+    vlc_tick_t i_currentTime;
 
     if (!p_input)
-        return i_currentTime;
+        return -1;
 
-    input_Control(p_input, INPUT_GET_TIME, &i_currentTime);
+    i_currentTime = var_GetInteger(p_input, "time");
     vlc_object_release(p_input);
 
-    return (int)(i_currentTime / CLOCK_FREQ);
+    return (int)SEC_FROM_VLC_TICK(i_currentTime);
 }
 
 - (void) setCurrentTime:(int)i_currentTime {
@@ -243,7 +242,8 @@
         if (!p_input)
             return;
 
-        input_Control(p_input, INPUT_SET_TIME, (int64_t)(i64_value * CLOCK_FREQ));
+        input_SetTime(p_input, vlc_tick_from_sec(i64_value),
+                      var_GetBool(p_input, "input-fast-seek"));
         vlc_object_release(p_input);
     }
 }

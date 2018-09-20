@@ -64,15 +64,15 @@ static void VoutDestructor(vlc_object_t *);
 /* Maximum delay between 2 displayed pictures.
  * XXX it is needed for now but should be removed in the long term.
  */
-#define VOUT_REDISPLAY_DELAY (4*CLOCK_FREQ/50)
+#define VOUT_REDISPLAY_DELAY VLC_TICK_FROM_MS(80)
 
 /**
  * Late pictures having a delay higher than this value are thrashed.
  */
-#define VOUT_DISPLAY_LATE_THRESHOLD (CLOCK_FREQ/50)
+#define VOUT_DISPLAY_LATE_THRESHOLD VLC_TICK_FROM_MS(20)
 
 /* Better be in advance when awakening than late... */
-#define VOUT_MWAIT_TOLERANCE (CLOCK_FREQ/250)
+#define VOUT_MWAIT_TOLERANCE VLC_TICK_FROM_MS(4)
 
 /* */
 static int VoutValidateFormat(video_format_t *dst,
@@ -114,7 +114,8 @@ static bool VideoFormatIsCropArEqual(video_format_t *dst,
 }
 
 static vout_thread_t *VoutCreate(vlc_object_t *object,
-                                 const vout_configuration_t *cfg)
+                                 const vout_configuration_t *cfg,
+                                 input_thread_t *input)
 {
     video_format_t original;
     if (VoutValidateFormat(&original, cfg->fmt))
@@ -134,17 +135,22 @@ static vout_thread_t *VoutCreate(vlc_object_t *object,
 
     vout->p->original = original;
     vout->p->dpb_size = cfg->dpb_size;
+    vout->p->mouse_event = cfg->mouse_event;
+    vout->p->opaque = cfg->opaque;
+    vout->p->dead = false;
+    vout->p->is_late_dropped = var_InheritBool(vout, "drop-late-frames");
+    vout->p->pause.is_on = false;
+    vout->p->pause.date = VLC_TICK_INVALID;
 
     vout_control_Init(&vout->p->control);
-    vout_control_PushVoid(&vout->p->control, VOUT_CONTROL_INIT);
-
     vout_statistic_Init(&vout->p->statistic);
-
     vout_snapshot_Init(&vout->p->snapshot);
+    vout_chrono_Init(&vout->p->render, 5, VLC_TICK_FROM_MS(10)); /* Arbitrary initial time */
 
     /* Initialize locks */
     vlc_mutex_init(&vout->p->filter.lock);
     vlc_mutex_init(&vout->p->spu_lock);
+    vlc_mutex_init(&vout->p->window_lock);
 
     /* Take care of some "interface/control" related initialisations */
     vout_IntfInit(vout);
@@ -214,43 +220,38 @@ static vout_thread_t *VoutCreate(vlc_object_t *object,
         return NULL;
     }
 
-    vout->p->input = cfg->input;
+    vout->p->input = input;
     if (vout->p->input)
-        spu_Attach(vout->p->spu, vout->p->input, true);
+        spu_Attach(vout->p->spu, input, true);
 
     return vout;
 }
 
 #undef vout_Request
 vout_thread_t *vout_Request(vlc_object_t *object,
-                              const vout_configuration_t *cfg)
+                            const vout_configuration_t *cfg,
+                            input_thread_t *input)
 {
     vout_thread_t *vout = cfg->vout;
-    if (cfg->change_fmt && !cfg->fmt) {
-        if (vout)
-            vout_CloseAndRelease(vout);
-        return NULL;
-    }
 
     /* If a vout is provided, try reusing it */
     if (vout) {
-        if (vout->p->input != cfg->input) {
+        if (vout->p->input != input) {
             if (vout->p->input)
                 spu_Attach(vout->p->spu, vout->p->input, false);
-            vout->p->input = cfg->input;
+            vout->p->input = input;
             if (vout->p->input)
                 spu_Attach(vout->p->spu, vout->p->input, true);
         }
 
-        if (cfg->change_fmt) {
-            vout_control_cmd_t cmd;
-            vout_control_cmd_Init(&cmd, VOUT_CONTROL_REINIT);
-            cmd.cfg = cfg;
+        vout_control_cmd_t cmd;
+        vout_control_cmd_Init(&cmd, VOUT_CONTROL_REINIT);
+        cmd.cfg = cfg;
+        vout_control_Push(&vout->p->control, &cmd);
+        vout_control_WaitEmpty(&vout->p->control);
 
-            vout_control_Push(&vout->p->control, &cmd);
-            vout_control_WaitEmpty(&vout->p->control);
+        if (cfg->fmt)
             vout_IntfReinit(vout);
-        }
 
         if (!vout->p->dead) {
             msg_Dbg(object, "reusing provided vout");
@@ -260,7 +261,7 @@ vout_thread_t *vout_Request(vlc_object_t *object,
 
         msg_Warn(object, "cannot reuse provided vout");
     }
-    return VoutCreate(object, cfg);
+    return VoutCreate(object, cfg, input);
 }
 
 void vout_Close(vout_thread_t *vout)
@@ -275,8 +276,14 @@ void vout_Close(vout_thread_t *vout)
     vout_control_PushVoid(&vout->p->control, VOUT_CONTROL_CLEAN);
     vlc_join(vout->p->thread, NULL);
 
-    if (vout->p->window != NULL)
+    vout_chrono_Clean(&vout->p->render);
+
+    vlc_mutex_lock(&vout->p->window_lock);
+    if (vout->p->window != NULL) {
         vout_display_window_Delete(vout->p->window);
+        vout->p->window = NULL;
+    }
+    vlc_mutex_unlock(&vout->p->window_lock);
 
     vlc_mutex_lock(&vout->p->spu_lock);
     spu_Destroy(vout->p->spu);
@@ -295,6 +302,7 @@ static void VoutDestructor(vlc_object_t *object)
     free(vout->p->splitter_name);
 
     /* Destroy the locks */
+    vlc_mutex_destroy(&vout->p->window_lock);
     vlc_mutex_destroy(&vout->p->spu_lock);
     vlc_mutex_destroy(&vout->p->filter.lock);
     vout_control_Clean(&vout->p->control);
@@ -360,7 +368,12 @@ void vout_NextPicture(vout_thread_t *vout, vlc_tick_t *duration)
 void vout_DisplayTitle(vout_thread_t *vout, const char *title)
 {
     assert(title);
-    vout_control_PushString(&vout->p->control, VOUT_CONTROL_OSD_TITLE, title);
+
+    if (!vout->p->title.show)
+        return;
+
+    vout_OSDText(vout, VOUT_SPU_CHANNEL_OSD, vout->p->title.position,
+                 VLC_TICK_FROM_MS(vout->p->title.timeout), title);
 }
 
 void vout_MouseState(vout_thread_t *vout, const vlc_mouse_t *mouse)
@@ -396,6 +409,14 @@ void vout_FlushSubpictureChannel( vout_thread_t *vout, int channel )
 {
     vout_control_PushInteger(&vout->p->control, VOUT_CONTROL_FLUSH_SUBPICTURE,
                              channel);
+}
+void vout_SetSpuHighlight( vout_thread_t *vout,
+                        const vlc_spu_highlight_t *spu_hl )
+{
+    vlc_mutex_lock(&vout->p->spu_lock);
+    if (vout->p->spu)
+        spu_SetHighlight(vout->p->spu, spu_hl);
+    vlc_mutex_unlock(&vout->p->spu_lock);
 }
 
 /**
@@ -486,18 +507,48 @@ void vout_ChangeAspectRatio( vout_thread_t *p_vout,
 /* vout_Control* are usable by anyone at anytime */
 void vout_ControlChangeFullscreen(vout_thread_t *vout, const char *id)
 {
-    vout_control_PushString(&vout->p->control, VOUT_CONTROL_FULLSCREEN, id);
+    vout_window_t *window;
+
+    vlc_mutex_lock(&vout->p->window_lock);
+    window = vout->p->window;
+    /* Window is NULL if the output is a splitter,
+     * or if the output was already closed by its owner.
+     */
+    if (window != NULL)
+        vout_window_SetFullScreen(window, id);
+    vlc_mutex_unlock(&vout->p->window_lock);
 }
 
 void vout_ControlChangeWindowed(vout_thread_t *vout)
 {
-    vout_control_PushVoid(&vout->p->control, VOUT_CONTROL_WINDOWED);
+    vout_window_t *window;
+
+    vlc_mutex_lock(&vout->p->window_lock);
+    window = vout->p->window;
+    if (window != NULL)
+        vout_window_UnsetFullScreen(window);
+    vlc_mutex_unlock(&vout->p->window_lock);
 }
 
 void vout_ControlChangeWindowState(vout_thread_t *vout, unsigned st)
 {
-    vout_control_PushInteger(&vout->p->control, VOUT_CONTROL_WINDOW_STATE, st);
+    vout_window_t *window;
+
+    vlc_mutex_lock(&vout->p->window_lock);
+    window = vout->p->window;
+    if (window != NULL)
+        vout_window_SetState(window, st);
+    vlc_mutex_unlock(&vout->p->window_lock);
 }
+
+static void vout_ControlUpdateWindowSize(vout_thread_t *vout)
+{
+    vlc_mutex_lock(&vout->p->window_lock);
+    if (vout->p->window != NULL)
+        vout_display_window_UpdateSize(vout->p->window, &vout->p->original);
+    vlc_mutex_unlock(&vout->p->window_lock);
+}
+
 void vout_ControlChangeDisplaySize(vout_thread_t *vout,
                                    unsigned width, unsigned height)
 {
@@ -515,66 +566,95 @@ void vout_ControlChangeDisplayFilled(vout_thread_t *vout, bool is_filled)
     vout_control_PushBool(&vout->p->control, VOUT_CONTROL_DISPLAY_FILLED,
                           is_filled);
 }
+
 void vout_ControlChangeZoom(vout_thread_t *vout, int num, int den)
 {
+    if (num * 10 < den) {
+        num = den;
+        den *= 10;
+    } else if (num > den * 10) {
+        num = den * 10;
+    }
+
+    vout_ControlUpdateWindowSize(vout);
     vout_control_PushPair(&vout->p->control, VOUT_CONTROL_ZOOM,
                           num, den);
 }
+
 void vout_ControlChangeSampleAspectRatio(vout_thread_t *vout,
                                          unsigned num, unsigned den)
 {
+    vout_ControlUpdateWindowSize(vout);
     vout_control_PushPair(&vout->p->control, VOUT_CONTROL_ASPECT_RATIO,
                           num, den);
 }
+
 void vout_ControlChangeCropRatio(vout_thread_t *vout,
                                  unsigned num, unsigned den)
 {
+    vout_ControlUpdateWindowSize(vout);
     vout_control_PushPair(&vout->p->control, VOUT_CONTROL_CROP_RATIO,
                           num, den);
 }
+
 void vout_ControlChangeCropWindow(vout_thread_t *vout,
                                   int x, int y, int width, int height)
 {
     vout_control_cmd_t cmd;
+
+    vout_ControlUpdateWindowSize(vout);
+
     vout_control_cmd_Init(&cmd, VOUT_CONTROL_CROP_WINDOW);
     cmd.window.x      = __MAX(x, 0);
     cmd.window.y      = __MAX(y, 0);
     cmd.window.width  = __MAX(width, 0);
     cmd.window.height = __MAX(height, 0);
-
     vout_control_Push(&vout->p->control, &cmd);
 }
+
 void vout_ControlChangeCropBorder(vout_thread_t *vout,
                                   int left, int top, int right, int bottom)
 {
     vout_control_cmd_t cmd;
+
+    vout_ControlUpdateWindowSize(vout);
+
     vout_control_cmd_Init(&cmd, VOUT_CONTROL_CROP_BORDER);
     cmd.border.left   = __MAX(left, 0);
     cmd.border.top    = __MAX(top, 0);
     cmd.border.right  = __MAX(right, 0);
     cmd.border.bottom = __MAX(bottom, 0);
-
     vout_control_Push(&vout->p->control, &cmd);
 }
+
 void vout_ControlChangeFilters(vout_thread_t *vout, const char *filters)
 {
     vout_control_PushString(&vout->p->control, VOUT_CONTROL_CHANGE_FILTERS,
                             filters);
 }
+
 void vout_ControlChangeSubSources(vout_thread_t *vout, const char *filters)
 {
-    vout_control_PushString(&vout->p->control, VOUT_CONTROL_CHANGE_SUB_SOURCES,
-                            filters);
+    vlc_mutex_lock(&vout->p->spu_lock);
+    if (likely(vout->p->spu != NULL))
+        spu_ChangeSources(vout->p->spu, filters);
+    vlc_mutex_unlock(&vout->p->spu_lock);
 }
+
 void vout_ControlChangeSubFilters(vout_thread_t *vout, const char *filters)
 {
-    vout_control_PushString(&vout->p->control, VOUT_CONTROL_CHANGE_SUB_FILTERS,
-                            filters);
+    vlc_mutex_lock(&vout->p->spu_lock);
+    if (likely(vout->p->spu != NULL))
+        spu_ChangeFilters(vout->p->spu, filters);
+    vlc_mutex_unlock(&vout->p->spu_lock);
 }
+
 void vout_ControlChangeSubMargin(vout_thread_t *vout, int margin)
 {
-    vout_control_PushInteger(&vout->p->control, VOUT_CONTROL_CHANGE_SUB_MARGIN,
-                             margin);
+    vlc_mutex_lock(&vout->p->spu_lock);
+    if (likely(vout->p->spu != NULL))
+        spu_ChangeMargin(vout->p->spu, margin);
+    vlc_mutex_unlock(&vout->p->spu_lock);
 }
 
 void vout_ControlChangeViewpoint(vout_thread_t *vout,
@@ -626,17 +706,6 @@ static void VoutGetDisplayCfg(vout_thread_t *vout, vout_display_cfg_t *cfg)
         cfg->align.vertical = VOUT_DISPLAY_ALIGN_TOP;
     else if (align_mask & 0x8)
         cfg->align.vertical = VOUT_DISPLAY_ALIGN_BOTTOM;
-}
-
-void vout_SetDisplayWindowSize(vout_thread_t *vout,
-                               unsigned width, unsigned height)
-{
-    vout_window_t *window = vout->p->window;
-
-    if (window != NULL)
-    /* Request a resize of the window. If it fails, there is nothing to do.
-     * If it succeeds, the window will emit a resize event later. */
-        vout_window_SetSize(window, width, height);
 }
 
 /* */
@@ -724,8 +793,10 @@ static void ThreadChangeFilters(vout_thread_t *vout,
     vlc_array_init(&array_static);
     vlc_array_init(&array_interactive);
 
-    if ((vout->p->filter.has_deint =
-         deinterlace == 1 || (deinterlace == -1 && vout->p->filter.has_deint)))
+    vout->p->filter.has_deint =
+         deinterlace == 1 || (deinterlace == -1 && vout->p->filter.has_deint);
+
+    if (vout->p->filter.has_deint)
     {
         vout_filter_t *e = malloc(sizeof(*e));
 
@@ -849,18 +920,18 @@ static int ThreadDisplayPreparePicture(vout_thread_t *vout, bool reuse, bool fra
                 if (is_late_dropped && !decoded->b_force) {
                     vlc_tick_t late_threshold;
                     if (decoded->format.i_frame_rate && decoded->format.i_frame_rate_base)
-                        late_threshold = ((CLOCK_FREQ/2) * decoded->format.i_frame_rate_base) / decoded->format.i_frame_rate;
+                        late_threshold = VLC_TICK_FROM_MS(500) * decoded->format.i_frame_rate_base / decoded->format.i_frame_rate;
                     else
                         late_threshold = VOUT_DISPLAY_LATE_THRESHOLD;
                     const vlc_tick_t predicted = vlc_tick_now() + 0; /* TODO improve */
                     const vlc_tick_t late = predicted - decoded->date;
                     if (late > late_threshold) {
-                        msg_Warn(vout, "picture is too late to be displayed (missing %"PRId64" ms)", late/1000);
+                        msg_Warn(vout, "picture is too late to be displayed (missing %"PRId64" ms)", MS_FROM_VLC_TICK(late));
                         picture_Release(decoded);
                         vout_statistic_AddLost(&vout->p->statistic, 1);
                         continue;
                     } else if (late > 0) {
-                        msg_Dbg(vout, "picture might be displayed late (missing %"PRId64" ms)", late/1000);
+                        msg_Dbg(vout, "picture might be displayed late (missing %"PRId64" ms)", MS_FROM_VLC_TICK(late));
                     }
                 }
                 if (!VideoFormatIsCropArEqual(&decoded->format, &vout->p->filter.format))
@@ -953,29 +1024,29 @@ static picture_t *ConvertRGB32AndBlend(vout_thread_t *vout, picture_t *pic,
 static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
 {
     vout_thread_sys_t *sys = vout->p;
-    vout_display_t *vd = vout->p->display.vd;
+    vout_display_t *vd = sys->display.vd;
 
-    picture_t *torender = picture_Hold(vout->p->displayed.current);
+    picture_t *torender = picture_Hold(sys->displayed.current);
 
-    vout_chrono_Start(&vout->p->render);
+    vout_chrono_Start(&sys->render);
 
-    vlc_mutex_lock(&vout->p->filter.lock);
-    picture_t *filtered = filter_chain_VideoFilter(vout->p->filter.chain_interactive, torender);
-    vlc_mutex_unlock(&vout->p->filter.lock);
+    vlc_mutex_lock(&sys->filter.lock);
+    picture_t *filtered = filter_chain_VideoFilter(sys->filter.chain_interactive, torender);
+    vlc_mutex_unlock(&sys->filter.lock);
 
     if (!filtered)
         return VLC_EGENERIC;
 
-    if (filtered->date != vout->p->displayed.current->date)
+    if (filtered->date != sys->displayed.current->date)
         msg_Warn(vout, "Unsupported timestamp modifications done by chain_interactive");
 
     /*
      * Get the subpicture to be displayed
      */
-    const bool do_snapshot = vout_snapshot_IsRequested(&vout->p->snapshot);
+    const bool do_snapshot = vout_snapshot_IsRequested(&sys->snapshot);
     vlc_tick_t render_subtitle_date;
-    if (vout->p->pause.is_on)
-        render_subtitle_date = vout->p->pause.date;
+    if (sys->pause.is_on)
+        render_subtitle_date = sys->pause.date;
     else
         render_subtitle_date = filtered->date > 1 ? filtered->date : vlc_tick_now();
     vlc_tick_t render_osd_date = vlc_tick_now(); /* FIXME wrong */
@@ -1024,23 +1095,23 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
         }
         subpicture_chromas = NULL;
 
-        if (vout->p->spu_blend &&
-            vout->p->spu_blend->fmt_out.video.i_chroma != fmt_spu.i_chroma) {
-            filter_DeleteBlend(vout->p->spu_blend);
-            vout->p->spu_blend = NULL;
-            vout->p->spu_blend_chroma = 0;
+        if (sys->spu_blend &&
+            sys->spu_blend->fmt_out.video.i_chroma != fmt_spu.i_chroma) {
+            filter_DeleteBlend(sys->spu_blend);
+            sys->spu_blend = NULL;
+            sys->spu_blend_chroma = 0;
         }
-        if (!vout->p->spu_blend && vout->p->spu_blend_chroma != fmt_spu.i_chroma) {
-            vout->p->spu_blend_chroma = fmt_spu.i_chroma;
-            vout->p->spu_blend = filter_NewBlend(VLC_OBJECT(vout), &fmt_spu);
-            if (!vout->p->spu_blend)
+        if (!sys->spu_blend && sys->spu_blend_chroma != fmt_spu.i_chroma) {
+            sys->spu_blend_chroma = fmt_spu.i_chroma;
+            sys->spu_blend = filter_NewBlend(VLC_OBJECT(vout), &fmt_spu);
+            if (!sys->spu_blend)
                 msg_Err(vout, "Failed to create blending filter, OSD/Subtitles will not work");
         }
     }
 
     video_format_t fmt_spu_rot;
     video_format_ApplyRotation(&fmt_spu_rot, &fmt_spu);
-    subpicture_t *subpic = spu_Render(vout->p->spu,
+    subpicture_t *subpic = spu_Render(sys->spu,
                                       subpicture_chromas, &fmt_spu_rot,
                                       &vd->source,
                                       render_subtitle_date, render_osd_date,
@@ -1052,16 +1123,16 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
      * - be sure to end up with a direct buffer.
      * - blend subtitles, and in a fast access buffer
      */
-    bool is_direct = vout->p->decoder_pool == vout->p->display_pool;
+    bool is_direct = sys->decoder_pool == sys->display_pool;
     picture_t *todisplay = filtered;
     picture_t *snap_pic = todisplay;
     if (do_early_spu && subpic) {
-        if (vout->p->spu_blend) {
-            picture_t *blent = picture_pool_Get(vout->p->private_pool);
+        if (sys->spu_blend) {
+            picture_t *blent = picture_pool_Get(sys->private_pool);
             if (blent) {
                 VideoFormatCopyCropAr(&blent->format, &filtered->format);
                 picture_Copy(blent, filtered);
-                if (picture_BlendSubpicture(blent, vout->p->spu_blend, subpic)) {
+                if (picture_BlendSubpicture(blent, sys->spu_blend, subpic)) {
                     picture_Release(todisplay);
                     snap_pic = todisplay = blent;
                 } else
@@ -1086,8 +1157,8 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
     assert(vout_IsDisplayFiltered(vd) == !sys->display.use_dr);
     if (sys->display.use_dr && !is_direct) {
         picture_t *direct = NULL;
-        if (likely(vout->p->display_pool != NULL))
-            direct = picture_pool_Get(vout->p->display_pool);
+        if (likely(sys->display_pool != NULL))
+            direct = picture_pool_Get(sys->display_pool);
         if (!direct) {
             picture_Release(todisplay);
             if (subpic)
@@ -1111,7 +1182,7 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
     if (do_snapshot)
     {
         assert(snap_pic);
-        vout_snapshot_Set(&vout->p->snapshot, &vd->source, snap_pic);
+        vout_snapshot_Set(&sys->snapshot, &vd->source, snap_pic);
         if (snap_pic != todisplay)
             picture_Release(snap_pic);
     }
@@ -1129,8 +1200,8 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
     if (sys->display.use_dr) {
         vout_display_Prepare(vd, todisplay, subpic, todisplay->date);
     } else {
-        if (!do_dr_spu && !do_early_spu && vout->p->spu_blend && subpic)
-            picture_BlendSubpicture(todisplay, vout->p->spu_blend, subpic);
+        if (!do_dr_spu && !do_early_spu && sys->spu_blend && subpic)
+            picture_BlendSubpicture(todisplay, sys->spu_blend, subpic);
         vout_display_Prepare(vd, todisplay, do_dr_spu ? subpic : NULL,
                              todisplay->date);
 
@@ -1141,13 +1212,13 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
         }
     }
 
-    vout_chrono_Stop(&vout->p->render);
+    vout_chrono_Stop(&sys->render);
 #if 0
         {
         static int i = 0;
         if (((i++)%10) == 0)
             msg_Info(vout, "render: avg %d ms var %d ms",
-                     (int)(vout->p->render.avg/1000), (int)(vout->p->render.var/1000));
+                     (int)(sys->render.avg/1000), (int)(sys->render.var/1000));
         }
 #endif
 
@@ -1161,35 +1232,36 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
         vlc_tick_wait(todisplay->date);
 
     /* Display the direct buffer returned by vout_RenderPicture */
-    vout->p->displayed.date = vlc_tick_now();
+    sys->displayed.date = vlc_tick_now();
     vout_display_Display(vd, todisplay, subpic);
 
-    vout_statistic_AddDisplayed(&vout->p->statistic, 1);
+    vout_statistic_AddDisplayed(&sys->statistic, 1);
 
     return VLC_SUCCESS;
 }
 
 static int ThreadDisplayPicture(vout_thread_t *vout, vlc_tick_t *deadline)
 {
+    vout_thread_sys_t *sys = vout->p;
     bool frame_by_frame = !deadline;
-    bool paused = vout->p->pause.is_on;
-    bool first = !vout->p->displayed.current;
+    bool paused = sys->pause.is_on;
+    bool first = !sys->displayed.current;
 
     if (first)
         if (ThreadDisplayPreparePicture(vout, true, frame_by_frame)) /* FIXME not sure it is ok */
             return VLC_EGENERIC;
 
     if (!paused || frame_by_frame)
-        while (!vout->p->displayed.next && !ThreadDisplayPreparePicture(vout, false, frame_by_frame))
+        while (!sys->displayed.next && !ThreadDisplayPreparePicture(vout, false, frame_by_frame))
             ;
 
     const vlc_tick_t date = vlc_tick_now();
-    const vlc_tick_t render_delay = vout_chrono_GetHigh(&vout->p->render) + VOUT_MWAIT_TOLERANCE;
+    const vlc_tick_t render_delay = vout_chrono_GetHigh(&sys->render) + VOUT_MWAIT_TOLERANCE;
 
     bool drop_next_frame = frame_by_frame;
-    vlc_tick_t date_next = VLC_TS_INVALID;
-    if (!paused && vout->p->displayed.next) {
-        date_next = vout->p->displayed.next->date - render_delay;
+    vlc_tick_t date_next = VLC_TICK_INVALID;
+    if (!paused && sys->displayed.next) {
+        date_next = sys->displayed.next->date - render_delay;
         if (date_next /* + 0 FIXME */ <= date)
             drop_next_frame = true;
     }
@@ -1205,34 +1277,34 @@ static int ThreadDisplayPicture(vout_thread_t *vout, vlc_tick_t *deadline)
      */
     bool refresh = false;
 
-    vlc_tick_t date_refresh = VLC_TS_INVALID;
-    if (vout->p->displayed.date != VLC_TS_INVALID) {
-        date_refresh = vout->p->displayed.date + VOUT_REDISPLAY_DELAY - render_delay;
+    vlc_tick_t date_refresh = VLC_TICK_INVALID;
+    if (sys->displayed.date != VLC_TICK_INVALID) {
+        date_refresh = sys->displayed.date + VOUT_REDISPLAY_DELAY - render_delay;
         refresh = date_refresh <= date;
     }
     bool force_refresh = !drop_next_frame && refresh;
 
     if (!first && !refresh && !drop_next_frame) {
         if (!frame_by_frame) {
-            if (date_refresh != VLC_TS_INVALID)
+            if (date_refresh != VLC_TICK_INVALID)
                 *deadline = date_refresh;
-            if (date_next != VLC_TS_INVALID && date_next < *deadline)
+            if (date_next != VLC_TICK_INVALID && date_next < *deadline)
                 *deadline = date_next;
         }
         return VLC_EGENERIC;
     }
 
     if (drop_next_frame) {
-        picture_Release(vout->p->displayed.current);
-        vout->p->displayed.current = vout->p->displayed.next;
-        vout->p->displayed.next    = NULL;
+        picture_Release(sys->displayed.current);
+        sys->displayed.current = sys->displayed.next;
+        sys->displayed.next    = NULL;
     }
 
-    if (!vout->p->displayed.current)
+    if (!sys->displayed.current)
         return VLC_EGENERIC;
 
     /* display the picture immediately */
-    bool is_forced = frame_by_frame || force_refresh || vout->p->displayed.current->b_force;
+    bool is_forced = frame_by_frame || force_refresh || sys->displayed.current->b_force;
     int ret = ThreadDisplayRenderPicture(vout, is_forced);
     return force_refresh ? VLC_EGENERIC : ret;
 }
@@ -1248,31 +1320,6 @@ static void ThreadFlushSubpicture(vout_thread_t *vout, int channel)
     spu_ClearChannel(vout->p->spu, channel);
 }
 
-static void ThreadDisplayOsdTitle(vout_thread_t *vout, const char *string)
-{
-    if (!vout->p->title.show)
-        return;
-
-    vout_OSDText(vout, VOUT_SPU_CHANNEL_OSD,
-                 vout->p->title.position, INT64_C(1000) * vout->p->title.timeout,
-                 string);
-}
-
-static void ThreadChangeSubSources(vout_thread_t *vout, const char *filters)
-{
-    spu_ChangeSources(vout->p->spu, filters);
-}
-
-static void ThreadChangeSubFilters(vout_thread_t *vout, const char *filters)
-{
-    spu_ChangeFilters(vout->p->spu, filters);
-}
-
-static void ThreadChangeSubMargin(vout_thread_t *vout, int margin)
-{
-    spu_ChangeMargin(vout->p->spu, margin);
-}
-
 static void ThreadChangePause(vout_thread_t *vout, bool is_paused, vlc_tick_t date)
 {
     assert(!vout->p->pause.is_on || !is_paused);
@@ -1280,9 +1327,9 @@ static void ThreadChangePause(vout_thread_t *vout, bool is_paused, vlc_tick_t da
     if (vout->p->pause.is_on) {
         const vlc_tick_t duration = date - vout->p->pause.date;
 
-        if (vout->p->step.timestamp != VLC_TS_INVALID)
+        if (vout->p->step.timestamp != VLC_TICK_INVALID)
             vout->p->step.timestamp += duration;
-        if (vout->p->step.last != VLC_TS_INVALID)
+        if (vout->p->step.last != VLC_TICK_INVALID)
             vout->p->step.last += duration;
         picture_fifo_OffsetDate(vout->p->decoder_fifo, duration);
         if (vout->p->displayed.decoded)
@@ -1291,8 +1338,8 @@ static void ThreadChangePause(vout_thread_t *vout, bool is_paused, vlc_tick_t da
 
         ThreadFilterFlush(vout, false);
     } else {
-        vout->p->step.timestamp = VLC_TS_INVALID;
-        vout->p->step.last      = VLC_TS_INVALID;
+        vout->p->step.timestamp = VLC_TICK_INVALID;
+        vout->p->step.last      = VLC_TICK_INVALID;
     }
     vout->p->pause.is_on = is_paused;
     vout->p->pause.date  = date;
@@ -1304,20 +1351,21 @@ static void ThreadChangePause(vout_thread_t *vout, bool is_paused, vlc_tick_t da
 
 static void ThreadFlush(vout_thread_t *vout, bool below, vlc_tick_t date)
 {
-    vout->p->step.timestamp = VLC_TS_INVALID;
-    vout->p->step.last      = VLC_TS_INVALID;
+    vout->p->step.timestamp = VLC_TICK_INVALID;
+    vout->p->step.last      = VLC_TICK_INVALID;
 
     ThreadFilterFlush(vout, false); /* FIXME too much */
 
     picture_t *last = vout->p->displayed.decoded;
     if (last) {
-        if (( below && last->date <= date) ||
+        if ((date == VLC_TICK_INVALID) ||
+            ( below && last->date <= date) ||
             (!below && last->date >= date)) {
             picture_Release(last);
 
             vout->p->displayed.decoded   = NULL;
-            vout->p->displayed.date      = VLC_TS_INVALID;
-            vout->p->displayed.timestamp = VLC_TS_INVALID;
+            vout->p->displayed.date      = VLC_TICK_INVALID;
+            vout->p->displayed.timestamp = VLC_TICK_INVALID;
         }
     }
 
@@ -1329,7 +1377,7 @@ static void ThreadStep(vout_thread_t *vout, vlc_tick_t *duration)
 {
     *duration = 0;
 
-    if (vout->p->step.last == VLC_TS_INVALID)
+    if (vout->p->step.last == VLC_TICK_INVALID)
         vout->p->step.last = vout->p->displayed.timestamp;
 
     if (ThreadDisplayPicture(vout, NULL))
@@ -1337,42 +1385,12 @@ static void ThreadStep(vout_thread_t *vout, vlc_tick_t *duration)
 
     vout->p->step.timestamp = vout->p->displayed.timestamp;
 
-    if (vout->p->step.last != VLC_TS_INVALID &&
+    if (vout->p->step.last != VLC_TICK_INVALID &&
         vout->p->step.timestamp > vout->p->step.last) {
         *duration = vout->p->step.timestamp - vout->p->step.last;
         vout->p->step.last = vout->p->step.timestamp;
         /* TODO advance subpicture by the duration ... */
     }
-}
-
-static void ThreadChangeFullscreen(vout_thread_t *vout, const char *id)
-{
-    vout_window_t *window = vout->p->window;
-
-    if (window == NULL)
-        return; /* splitter! */
-
-    vout_window_SetFullScreen(window, id);
-}
-
-static void ThreadChangeWindow(vout_thread_t *vout)
-{
-    vout_window_t *window = vout->p->window;
-
-    if (window == NULL)
-        return; /* splitter! */
-
-    vout_window_UnsetFullScreen(window);
-}
-
-static void ThreadChangeWindowState(vout_thread_t *vout, unsigned state)
-{
-    vout_window_t *window = vout->p->window;
-
-    if (window == NULL)
-        return; /* splitter! */
-
-    vout_window_SetState(window, state);
 }
 
 static void ThreadTranslateMouseState(vout_thread_t *vout,
@@ -1400,65 +1418,6 @@ static void ThreadTranslateMouseState(vout_thread_t *vout,
 
     /* Then pass up the filter chains. */
     vout_SendDisplayEventMouse(vout, &vid_mouse);
-}
-
-static void ThreadChangeDisplaySize(vout_thread_t *vout,
-                                    unsigned width, unsigned height)
-{
-    vout_SetDisplaySize(vout->p->display.vd, width, height);
-}
-
-static void ThreadChangeDisplayFilled(vout_thread_t *vout, bool is_filled)
-{
-    vout_SetDisplayFilled(vout->p->display.vd, is_filled);
-}
-
-static void ThreadChangeZoom(vout_thread_t *vout, int num, int den)
-{
-    if (num * 10 < den) {
-        num = den;
-        den *= 10;
-    } else if (num > den * 10) {
-        num = den * 10;
-    }
-
-    vout_SetDisplayZoom(vout->p->display.vd, num, den);
-}
-
-static void ThreadChangeAspectRatio(vout_thread_t *vout,
-                                    unsigned num, unsigned den)
-{
-    vout_SetDisplayAspect(vout->p->display.vd, num, den);
-}
-
-
-static void ThreadExecuteCropWindow(vout_thread_t *vout,
-                                    unsigned x, unsigned y,
-                                    unsigned width, unsigned height)
-{
-    vout_SetDisplayCrop(vout->p->display.vd, 0, 0,
-                        x, y, width, height);
-}
-static void ThreadExecuteCropBorder(vout_thread_t *vout,
-                                    unsigned left, unsigned top,
-                                    unsigned right, unsigned bottom)
-{
-    msg_Dbg(vout, "ThreadExecuteCropBorder %d.%d %dx%d", left, top, right, bottom);
-    vout_SetDisplayCrop(vout->p->display.vd, 0, 0,
-                        left, top, -(int)right, -(int)bottom);
-}
-
-static void ThreadExecuteCropRatio(vout_thread_t *vout,
-                                   unsigned num, unsigned den)
-{
-    vout_SetDisplayCrop(vout->p->display.vd, num, den,
-                        0, 0, 0, 0);
-}
-
-static void ThreadExecuteViewpoint(vout_thread_t *vout,
-                                   const vlc_viewpoint_t *p_viewpoint)
-{
-    vout_SetDisplayViewpoint(vout->p->display.vd, p_viewpoint);
 }
 
 static int ThreadStart(vout_thread_t *vout, vout_display_state_t *state)
@@ -1519,12 +1478,12 @@ static int ThreadStart(vout_thread_t *vout, vout_display_state_t *state)
     vout->p->displayed.current       = NULL;
     vout->p->displayed.next          = NULL;
     vout->p->displayed.decoded       = NULL;
-    vout->p->displayed.date          = VLC_TS_INVALID;
-    vout->p->displayed.timestamp     = VLC_TS_INVALID;
+    vout->p->displayed.date          = VLC_TICK_INVALID;
+    vout->p->displayed.timestamp     = VLC_TICK_INVALID;
     vout->p->displayed.is_interlaced = false;
 
-    vout->p->step.last               = VLC_TS_INVALID;
-    vout->p->step.timestamp          = VLC_TS_INVALID;
+    vout->p->step.last               = VLC_TICK_INVALID;
+    vout->p->step.timestamp          = VLC_TICK_INVALID;
 
     vout->p->spu_blend_chroma        = 0;
     vout->p->spu_blend               = NULL;
@@ -1569,23 +1528,9 @@ static void ThreadStop(vout_thread_t *vout, vout_display_state_t *state)
     if (vout->p->decoder_fifo)
         picture_fifo_Delete(vout->p->decoder_fifo);
     assert(!vout->p->decoder_pool);
-}
 
-static void ThreadInit(vout_thread_t *vout)
-{
-    vout->p->dead            = false;
-    vout->p->is_late_dropped = var_InheritBool(vout, "drop-late-frames");
-    vout->p->pause.is_on     = false;
-    vout->p->pause.date      = VLC_TS_INVALID;
-
-    vout_chrono_Init(&vout->p->render, 5, CLOCK_FREQ/100); /* Arbitrary initial time */
-}
-
-static void ThreadClean(vout_thread_t *vout)
-{
-    vout_chrono_Clean(&vout->p->render);
-    vout->p->dead = true;
-    vout_control_Dead(&vout->p->control);
+    if (vout->p->mouse_event)
+        vout->p->mouse_event(NULL, vout->p->opaque);
 }
 
 static int ThreadReinit(vout_thread_t *vout,
@@ -1593,12 +1538,21 @@ static int ThreadReinit(vout_thread_t *vout,
 {
     video_format_t original;
 
+    if (!cfg->fmt)
+    {
+        vout->p->mouse_event = NULL;
+        vout->p->opaque = NULL;
+        return VLC_SUCCESS;
+    }
+
+    vout->p->mouse_event = cfg->mouse_event;
+    vout->p->opaque = cfg->opaque;
+
     vout->p->pause.is_on = false;
-    vout->p->pause.date  = VLC_TS_INVALID;
+    vout->p->pause.date  = VLC_TICK_INVALID;
 
     if (VoutValidateFormat(&original, cfg->fmt)) {
         ThreadStop(vout, NULL);
-        ThreadClean(vout);
         return VLC_EGENERIC;
     }
 
@@ -1645,10 +1599,9 @@ static int ThreadReinit(vout_thread_t *vout,
 
     vout->p->original = original;
     vout->p->dpb_size = cfg->dpb_size;
-    if (ThreadStart(vout, &state)) {
-        ThreadClean(vout);
+    if (ThreadStart(vout, &state))
         return VLC_EGENERIC;
-    }
+
     return VLC_SUCCESS;
 }
 
@@ -1660,17 +1613,8 @@ static void ThreadCancel(vout_thread_t *vout, bool canceled)
 static int ThreadControl(vout_thread_t *vout, vout_control_cmd_t cmd)
 {
     switch(cmd.type) {
-    case VOUT_CONTROL_INIT:
-        ThreadInit(vout);
-        if (ThreadStart(vout, NULL))
-        {
-            ThreadClean(vout);
-            return 1;
-        }
-        break;
     case VOUT_CONTROL_CLEAN:
         ThreadStop(vout, NULL);
-        ThreadClean(vout);
         return 1;
     case VOUT_CONTROL_REINIT:
         if (ThreadReinit(vout, cmd.cfg))
@@ -1686,9 +1630,6 @@ static int ThreadControl(vout_thread_t *vout, vout_control_cmd_t cmd)
     case VOUT_CONTROL_FLUSH_SUBPICTURE:
         ThreadFlushSubpicture(vout, cmd.integer);
         break;
-    case VOUT_CONTROL_OSD_TITLE:
-        ThreadDisplayOsdTitle(vout, cmd.string);
-        break;
     case VOUT_CONTROL_CHANGE_FILTERS:
         ThreadChangeFilters(vout, NULL,
                             cmd.string != NULL ?
@@ -1699,15 +1640,6 @@ static int ThreadControl(vout_thread_t *vout, vout_control_cmd_t cmd)
         ThreadChangeFilters(vout, NULL, vout->p->filter.configuration,
                             cmd.boolean ? 1 : 0, false);
         break;
-    case VOUT_CONTROL_CHANGE_SUB_SOURCES:
-        ThreadChangeSubSources(vout, cmd.string);
-        break;
-    case VOUT_CONTROL_CHANGE_SUB_FILTERS:
-        ThreadChangeSubFilters(vout, cmd.string);
-        break;
-    case VOUT_CONTROL_CHANGE_SUB_MARGIN:
-        ThreadChangeSubMargin(vout, cmd.integer);
-        break;
     case VOUT_CONTROL_PAUSE:
         ThreadChangePause(vout, cmd.pause.is_on, cmd.pause.date);
         break;
@@ -1717,43 +1649,38 @@ static int ThreadControl(vout_thread_t *vout, vout_control_cmd_t cmd)
     case VOUT_CONTROL_STEP:
         ThreadStep(vout, cmd.time_ptr);
         break;
-    case VOUT_CONTROL_FULLSCREEN:
-        ThreadChangeFullscreen(vout, cmd.string);
-        break;
-    case VOUT_CONTROL_WINDOWED:
-        ThreadChangeWindow(vout);
-        break;
-    case VOUT_CONTROL_WINDOW_STATE:
-        ThreadChangeWindowState(vout, cmd.integer);
-        break;
     case VOUT_CONTROL_MOUSE_STATE:
         ThreadTranslateMouseState(vout, &cmd.mouse);
         break;
     case VOUT_CONTROL_DISPLAY_SIZE:
-        ThreadChangeDisplaySize(vout, cmd.window.width, cmd.window.height);
+        vout_SetDisplaySize(vout->p->display.vd,
+                            cmd.window.width, cmd.window.height);
         break;
     case VOUT_CONTROL_DISPLAY_FILLED:
-        ThreadChangeDisplayFilled(vout, cmd.boolean);
+        vout_SetDisplayFilled(vout->p->display.vd, cmd.boolean);
         break;
     case VOUT_CONTROL_ZOOM:
-        ThreadChangeZoom(vout, cmd.pair.a, cmd.pair.b);
+        vout_SetDisplayZoom(vout->p->display.vd, cmd.pair.a, cmd.pair.b);
         break;
     case VOUT_CONTROL_ASPECT_RATIO:
-        ThreadChangeAspectRatio(vout, cmd.pair.a, cmd.pair.b);
+        vout_SetDisplayAspect(vout->p->display.vd, cmd.pair.a, cmd.pair.b);
         break;
     case VOUT_CONTROL_CROP_RATIO:
-        ThreadExecuteCropRatio(vout, cmd.pair.a, cmd.pair.b);
+        vout_SetDisplayCrop(vout->p->display.vd, cmd.pair.a, cmd.pair.b,
+                            0, 0, 0, 0);
         break;
     case VOUT_CONTROL_CROP_WINDOW:
-        ThreadExecuteCropWindow(vout, cmd.window.x, cmd.window.y,
-                                cmd.window.width, cmd.window.height);
+        vout_SetDisplayCrop(vout->p->display.vd, 0, 0,
+                            cmd.window.x, cmd.window.y,
+                            cmd.window.width, cmd.window.height);
         break;
     case VOUT_CONTROL_CROP_BORDER:
-        ThreadExecuteCropBorder(vout, cmd.border.left, cmd.border.top,
-                                cmd.border.right, cmd.border.bottom);
+        vout_SetDisplayCrop(vout->p->display.vd, 0, 0,
+                            cmd.border.left, cmd.border.top,
+                            -(int)cmd.border.right, -(int)cmd.border.bottom);
         break;
     case VOUT_CONTROL_VIEWPOINT:
-        ThreadExecuteViewpoint(vout, &cmd.viewpoint);
+        vout_SetDisplayViewpoint(vout->p->display.vd, &cmd.viewpoint);
         break;
     default:
         break;
@@ -1774,23 +1701,27 @@ static void *Thread(void *object)
     vout_thread_t *vout = object;
     vout_thread_sys_t *sys = vout->p;
 
-    vlc_tick_t deadline = VLC_TS_INVALID;
+    vlc_tick_t deadline = VLC_TICK_INVALID;
     bool wait = false;
+
+    if (ThreadStart(vout, NULL))
+        goto out;
+
     for (;;) {
         vout_control_cmd_t cmd;
 
         if (wait)
         {
-            const vlc_tick_t max_deadline = vlc_tick_now() + CLOCK_FREQ/10;
-            deadline = deadline == VLC_TS_INVALID ? max_deadline : __MIN(deadline, max_deadline);
+            const vlc_tick_t max_deadline = vlc_tick_now() + VLC_TICK_FROM_MS(100);
+            deadline = deadline == VLC_TICK_INVALID ? max_deadline : __MIN(deadline, max_deadline);
         } else {
-            deadline = VLC_TS_INVALID;
+            deadline = VLC_TICK_INVALID;
         }
         while (!vout_control_Pop(&sys->control, &cmd, deadline))
             if (ThreadControl(vout, cmd))
-                return NULL;
+                goto out;
 
-        deadline = VLC_TS_INVALID;
+        deadline = VLC_TICK_INVALID;
         wait = ThreadDisplayPicture(vout, &deadline) != VLC_SUCCESS;
 
         const bool picture_interlaced = sys->displayed.is_interlaced;
@@ -1798,4 +1729,9 @@ static void *Thread(void *object)
         vout_SetInterlacingState(vout, picture_interlaced);
         vout_ManageWrapper(vout);
     }
+
+out:
+    vout->p->dead = true;
+    vout_control_Dead(&vout->p->control);
+    return NULL;
 }

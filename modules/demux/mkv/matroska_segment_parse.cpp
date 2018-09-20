@@ -41,6 +41,8 @@ extern "C" {
 #include <stdexcept>
 #include <limits>
 
+namespace mkv {
+
 /* GetFourCC helper */
 #define GetFOURCC( p )  __GetFOURCC( (uint8_t*)p )
 static vlc_fourcc_t __GetFOURCC( uint8_t *p )
@@ -325,9 +327,8 @@ void matroska_segment_c::ParseTrackEntry( const KaxTrackEntry *m )
         }
         E_CASE( KaxTrackDefaultDuration, defd )
         {
-            vars.tk->i_default_duration = static_cast<uint64>(defd);
+            vars.tk->i_default_duration = VLC_TICK_FROM_NS(static_cast<uint64>(defd));
             debug( vars, "Track Default Duration=%" PRId64, vars.tk->i_default_duration );
-            vars.tk->i_default_duration /= 1000;
         }
         E_CASE( KaxTrackTimecodeScale, ttcs )
         {
@@ -387,13 +388,13 @@ void matroska_segment_c::ParseTrackEntry( const KaxTrackEntry *m )
 #if LIBMATROSKA_VERSION >= 0x010401
         E_CASE( KaxCodecDelay, codecdelay )
         {
-            vars.tk->i_codec_delay = static_cast<uint64_t>( codecdelay ) / 1000;
+            vars.tk->i_codec_delay = VLC_TICK_FROM_NS(static_cast<uint64_t>( codecdelay ));
             msg_Dbg( vars.p_demuxer, "|   |   |   + Track Codec Delay =%" PRIu64,
                      vars.tk->i_codec_delay );
         }
         E_CASE( KaxSeekPreRoll, spr )
         {
-            vars.tk->i_seek_preroll = static_cast<uint64_t>( spr ) / 1000;
+            vars.tk->i_seek_preroll = VLC_TICK_FROM_NS(static_cast<uint64_t>( spr ));
             debug( vars, "Track Seek Preroll =%" PRIu64, vars.tk->i_seek_preroll );
         }
 #endif
@@ -553,6 +554,32 @@ void matroska_segment_c::ParseTrackEntry( const KaxTrackEntry *m )
         }
         E_CASE( KaxVideoStereoMode, stereo ) // UNUSED
         {
+            vars.tk->fmt.video.b_multiview_right_eye_first = false;
+            switch (static_cast<uint8>( stereo ))
+            {
+            case 0: vars.tk->fmt.video.multiview_mode = MULTIVIEW_2D;         break;
+            case 1: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_SBS; break;
+            case 2: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_TB;  break;
+            case 3: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_TB;
+                    vars.tk->fmt.video.b_multiview_right_eye_first = true;    break;
+            case 4: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_CHECKERBOARD;
+                    vars.tk->fmt.video.b_multiview_right_eye_first = true;    break;
+            case 5: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_CHECKERBOARD; break;
+            case 6: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_ROW;
+                    vars.tk->fmt.video.b_multiview_right_eye_first = true;    break;
+            case 7: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_ROW; break;
+            case 8: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_COL;
+                    vars.tk->fmt.video.b_multiview_right_eye_first = true;    break;
+            case 9: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_COL; break;
+            case 11: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_SBS;
+                     vars.tk->fmt.video.b_multiview_right_eye_first = true;    break;
+            case 13: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_FRAME; break;
+            case 14: vars.tk->fmt.video.multiview_mode = MULTIVIEW_STEREO_FRAME;
+                    vars.tk->fmt.video.b_multiview_right_eye_first = true;    break;
+            default:
+            case 10: case 12:
+                debug( vars, " unsupported Stereo Mode=%u", static_cast<uint8>( stereo ) ) ;
+            }
             debug( vars, "Track Video Stereo Mode=%u", static_cast<uint8>( stereo ) ) ;
         }
         E_CASE( KaxVideoPixelWidth, vwidth )
@@ -960,9 +987,10 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
         matroska_segment_c * obj;
         EbmlElement       *&  el;
         EbmlMaster        *&   m;
+        double             f_duration;
         int& i_upper_level;
 
-    } captures = { &sys.demuxer, this, el, m, i_upper_level };
+    } captures = { &sys.demuxer, this, el, m, -1., i_upper_level };
 
     MKV_SWITCH_CREATE(EbmlTypeDispatcher, InfoHandlers, InfoHandlerPayload)
     {
@@ -1007,8 +1035,8 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
         }
         E_CASE( KaxDuration, dur )
         {
-            vars.obj->i_duration = vlc_tick_t( static_cast<double>( dur ) );
-            debug( vars, "Duration=%" PRId64, vars.obj->i_duration );
+            vars.f_duration = static_cast<double>( dur );
+            debug( vars, "Duration=%.0f", vars.f_duration );
         }
         E_CASE( KaxMuxingApp, mapp )
         {
@@ -1103,8 +1131,8 @@ void matroska_segment_c::ParseInfo( KaxInfo *info )
 
     InfoHandlers::Dispatcher().iterate( m->begin(), m->end(), &captures );
 
-    if( i_duration != -1 )
-        i_duration = vlc_tick_t( static_cast<double>( i_duration * i_timescale ) / 10e5 );
+    if( captures.f_duration != -1. )
+        i_duration = VLC_TICK_FROM_NS( captures.f_duration * i_timescale );
 }
 
 
@@ -1169,12 +1197,12 @@ void matroska_segment_c::ParseChapterAtom( int i_level, KaxChapterAtom *ca, chap
         }
         E_CASE( KaxChapterTimeStart, start )
         {
-            vars.chapters.i_start_time = static_cast<uint64>( start ) / (INT64_C(1000000000) / CLOCK_FREQ);
+            vars.chapters.i_start_time = VLC_TICK_FROM_NS(static_cast<uint64>( start ));
             debug( vars, "ChapterTimeStart=%" PRId64, vars.chapters.i_start_time );
         }
         E_CASE( KaxChapterTimeEnd, end )
         {
-            vars.chapters.i_end_time = static_cast<uint64>( end ) / (INT64_C(1000000000) / CLOCK_FREQ);
+            vars.chapters.i_end_time = VLC_TICK_FROM_NS(static_cast<uint64>( end ));
             debug( vars, "ChapterTimeEnd=%" PRId64, vars.chapters.i_end_time );
         }
         E_CASE( KaxChapterDisplay, chapter_display )
@@ -1448,7 +1476,7 @@ bool matroska_segment_c::ParseCluster( KaxCluster *cluster, bool b_update_start_
     }
 
     if( b_update_start_time )
-        i_mk_start_time = cluster->GlobalTimecode() / INT64_C( 1000 );
+        i_mk_start_time = VLC_TICK_FROM_NS( cluster->GlobalTimecode() );
 
     return true;
 }
@@ -2055,6 +2083,18 @@ bool matroska_segment_c::TrackInit( mkv_track_t * p_tk )
                 }
             }
         }
+        S_CASE("S_DVBSUB")
+        {
+            vars.p_fmt->i_codec = VLC_CODEC_DVBS;
+
+            if( vars.p_tk->i_extra_data < 4 )
+                throw std::runtime_error( "not enough codec data for S_DVBSUB" );
+
+            uint16_t page_id = GetWBE( &vars.p_tk->p_extra_data[0] );
+            uint16_t ancillary_id = GetWBE( &vars.p_tk->p_extra_data[2] );
+
+            vars.p_fmt->subs.dvb.i_id = ( ancillary_id << 16 ) | page_id;
+        }
         S_CASE("S_HDMV/PGS") {
             vars.p_fmt->i_codec = VLC_CODEC_BD_PG;
         }
@@ -2090,3 +2130,5 @@ bool matroska_segment_c::TrackInit( mkv_track_t * p_tk )
 
     return true;
 }
+
+} // namespace

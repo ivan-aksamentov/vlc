@@ -84,12 +84,18 @@ typedef union
     vlc_viewpoint_t viewpoint;
     struct {
         bool b_fast_seek;
+        bool b_absolute;
         vlc_tick_t i_val;
     } time;
     struct {
         bool b_fast_seek;
+        bool b_absolute;
         float f_val;
     } pos;
+    struct {
+        bool b_absolute;
+        vlc_tick_t i_val;
+    } delay;
 } input_control_param_t;
 
 typedef struct
@@ -102,6 +108,9 @@ typedef struct
 typedef struct input_thread_private_t
 {
     struct input_thread_t input;
+
+    input_thread_events_cb events_cb;
+    void *events_data;
 
     /* Global properties */
     bool        b_preparsing;
@@ -120,6 +129,10 @@ typedef struct input_thread_private_t
     vlc_tick_t  i_start;    /* :start-time,0 by default */
     vlc_tick_t  i_stop;     /* :stop-time, 0 if none */
     vlc_tick_t  i_time;     /* Current time */
+
+    /* Delays */
+    vlc_tick_t  i_audio_delay;
+    vlc_tick_t  i_spu_delay;
 
     /* Output */
     bool            b_out_pace_control; /* XXX Move it ot es_sout ? */
@@ -158,6 +171,10 @@ typedef struct input_thread_private_t
     int            i_slave;
     input_source_t **slave;
 
+    /* Last ES added */
+    enum es_format_category_e i_last_es_cat;
+    int                       i_last_es_id;
+
     /* Resources */
     input_resource_t *p_resource;
     input_resource_t *p_resource_private;
@@ -168,7 +185,7 @@ typedef struct input_thread_private_t
     /* Buffer of pending actions */
     vlc_mutex_t lock_control;
     vlc_cond_t  wait_control;
-    int i_control;
+    size_t i_control;
     input_control_t control[INPUT_CONTROL_FIFO_SIZE];
 
     vlc_thread_t thread;
@@ -213,8 +230,8 @@ enum input_control_e
     INPUT_CONTROL_NAV_POPUP,
     INPUT_CONTROL_NAV_MENU,
 
-    INPUT_CONTROL_SET_ES,
-    INPUT_CONTROL_RESTART_ES,
+    INPUT_CONTROL_SET_ES_BY_ID,
+    INPUT_CONTROL_RESTART_ES_BY_ID,
 
     INPUT_CONTROL_SET_VIEWPOINT,    // new absolute viewpoint
     INPUT_CONTROL_SET_INITIAL_VIEWPOINT, // set initial viewpoint (generally from video)
@@ -234,7 +251,7 @@ enum input_control_e
 
 /* Internal helpers */
 
-void input_ControlPush( input_thread_t *, int, input_control_param_t * );
+void input_ControlPush( input_thread_t *, int, const input_control_param_t * );
 
 /* XXX for string value you have to allocate it before calling
  * input_ControlPushHelper
@@ -254,8 +271,12 @@ static inline void input_ControlPushHelper( input_thread_t *p_input, int i_type,
 
 bool input_Stopped( input_thread_t * );
 
+int input_GetAttachments(input_thread_t *input, input_attachment_t ***attachments);
+
+input_attachment_t *input_GetAttachment(input_thread_t *input, const char *name);
+
 /* Bound pts_delay */
-#define INPUT_PTS_DELAY_MAX (CLOCK_FREQ*60)
+#define INPUT_PTS_DELAY_MAX VLC_TICK_FROM_SEC(60)
 
 /**********************************************************************
  * Item metadata
@@ -269,10 +290,6 @@ void input_ExtractAttachmentAndCacheArt( input_thread_t *, const char *name );
  ***************************************************************************/
 
 /* var.c */
-void input_ControlVarInit ( input_thread_t * );
-void input_ControlVarStop( input_thread_t * );
-void input_ControlVarNavigation( input_thread_t * );
-void input_ControlVarTitle( input_thread_t *, int i_title );
 
 void input_ConfigVarInit ( input_thread_t * );
 
@@ -283,9 +300,6 @@ int subtitles_Filter( const char *);
 /* meta.c */
 void vlc_audio_replay_gain_MergeFromMeta( audio_replay_gain_t *p_dst,
                                           const vlc_meta_t *p_meta );
-
-/* item.c */
-void input_item_node_PostAndDelete( input_item_node_t *p_node );
 
 /* stats.c */
 typedef struct input_rate_t

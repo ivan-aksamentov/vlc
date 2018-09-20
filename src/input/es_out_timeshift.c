@@ -40,6 +40,7 @@
 
 #include <vlc_common.h>
 #include <vlc_fs.h>
+#include <vlc_mouse.h>
 #ifdef _WIN32
 #  include <vlc_charset.h>
 #endif
@@ -618,8 +619,8 @@ static int ControlLocked( es_out_t *p_out, int i_query, va_list args )
     case ES_OUT_DEL_GROUP:
     case ES_OUT_SET_META:
     case ES_OUT_SET_ES:
+    case ES_OUT_UNSET_ES:
     case ES_OUT_RESTART_ES:
-    case ES_OUT_RESTART_ALL_ES:
     case ES_OUT_SET_ES_DEFAULT:
     case ES_OUT_SET_ES_STATE:
     case ES_OUT_SET_ES_CAT_POLICY:
@@ -651,6 +652,36 @@ static int ControlLocked( es_out_t *p_out, int i_query, va_list args )
             return VLC_SUCCESS;
         }
         return es_out_Control( p_sys->p_out, ES_OUT_GET_ES_STATE, p_es->p_es, pb_enabled );
+    }
+    case ES_OUT_VOUT_SET_MOUSE_EVENT:
+    {
+        es_out_id_t *p_es = va_arg( args, es_out_id_t * );
+        vlc_mouse_event cb = va_arg( args, vlc_mouse_event );
+        void *user_data = va_arg( args, void * );
+        return es_out_Control( p_sys->p_out, ES_OUT_VOUT_SET_MOUSE_EVENT,
+                               p_es->p_es, cb, user_data );
+    }
+    case ES_OUT_VOUT_ADD_OVERLAY:
+    {
+        es_out_id_t *p_es = va_arg( args, es_out_id_t * );
+        subpicture_t *sub = va_arg( args, subpicture_t * );
+        int *channel = va_arg( args, int * );
+        return es_out_Control( p_sys->p_out, ES_OUT_VOUT_ADD_OVERLAY,
+                               p_es->p_es, sub, channel );
+    }
+    case ES_OUT_VOUT_FLUSH_OVERLAY:
+    {
+        es_out_id_t *p_es = va_arg( args, es_out_id_t * );
+        int channel = va_arg( args, int );
+        return es_out_Control( p_sys->p_out, ES_OUT_VOUT_FLUSH_OVERLAY,
+                               p_es->p_es, channel );
+    }
+    case ES_OUT_SPU_SET_HIGHLIGHT:
+    {
+        es_out_id_t *p_es = (es_out_id_t*)va_arg( args, es_out_id_t * );
+        const vlc_spu_highlight_t *p_hl = va_arg( args, const vlc_spu_highlight_t * );
+        return es_out_Control( p_sys->p_out, ES_OUT_SPU_SET_HIGHLIGHT,
+                               p_es->p_es, p_hl );
     }
     /* Special internal input control */
     case ES_OUT_GET_EMPTY:
@@ -891,7 +922,7 @@ static bool TsHasCmd( ts_thread_t *p_ts )
     bool b_cmd;
 
     vlc_mutex_lock( &p_ts->lock );
-    b_cmd =  TsStorageIsEmpty( p_ts->p_storage_r );
+    b_cmd = !TsStorageIsEmpty( p_ts->p_storage_r );
     vlc_mutex_unlock( &p_ts->lock );
 
     return b_cmd;
@@ -1382,7 +1413,6 @@ static int CmdInitControl( ts_cmd_t *p_cmd, int i_query, va_list args, bool b_co
 
     case ES_OUT_RESET_PCR:           /* no arg */
     case ES_OUT_SET_EOS:
-    case ES_OUT_RESTART_ALL_ES:
         break;
 
     case ES_OUT_SET_META:        /* arg1=const vlc_meta_t* */
@@ -1449,6 +1479,7 @@ static int CmdInitControl( ts_cmd_t *p_cmd, int i_query, va_list args, bool b_co
 
     /* Modified control */
     case ES_OUT_SET_ES:      /* arg1= es_out_id_t*                   */
+    case ES_OUT_UNSET_ES:    /* arg1= es_out_id_t*                   */
     case ES_OUT_RESTART_ES:  /* arg1= es_out_id_t*                   */
     case ES_OUT_SET_ES_DEFAULT: /* arg1= es_out_id_t*                */
         p_cmd->u.control.u.p_es = (es_out_id_t*)va_arg( args, es_out_id_t * );
@@ -1534,7 +1565,6 @@ static int CmdExecuteControl( es_out_t *p_out, ts_cmd_t *p_cmd )
 
     case ES_OUT_RESET_PCR:           /* no arg */
     case ES_OUT_SET_EOS:
-    case ES_OUT_RESTART_ALL_ES:
         return es_out_Control( p_out, i_query );
 
     case ES_OUT_SET_GROUP_META:  /* arg1=int i_group arg2=const vlc_meta_t* */
@@ -1561,6 +1591,7 @@ static int CmdExecuteControl( es_out_t *p_out, ts_cmd_t *p_cmd )
 
     /* Modified control */
     case ES_OUT_SET_ES:      /* arg1= es_out_id_t*                   */
+    case ES_OUT_UNSET_ES:    /* arg1= es_out_id_t*                   */
     case ES_OUT_RESTART_ES:  /* arg1= es_out_id_t*                   */
     case ES_OUT_SET_ES_DEFAULT: /* arg1= es_out_id_t*                */
         return es_out_Control( p_out, i_query, !p_cmd->u.control.u.p_es ? NULL :

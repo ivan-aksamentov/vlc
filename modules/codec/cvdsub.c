@@ -37,6 +37,8 @@
 
 #include <vlc_bits.h>
 
+#include "../demux/mpeg/timestamps.h"
+
 #define DEBUG_CVDSUB 1
 
 /*****************************************************************************
@@ -202,7 +204,7 @@ static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
     if( !(p_spu = Reassemble( p_dec, p_block )) ) return NULL;
 
     p_spu->i_dts = p_spu->i_pts;
-    p_spu->i_length = 0;
+    p_spu->i_length = VLC_TICK_INVALID;
 
     return p_spu;
 }
@@ -239,7 +241,7 @@ static block_t *Reassemble( decoder_t *p_dec, block_t *p_block )
      * to detect the first packet in a subtitle.  The first packet
      * seems to have a valid PTS while later packets for the same
      * image don't. */
-    if( p_sys->i_state == SUBTITLE_BLOCK_EMPTY && p_block->i_pts == VLC_TS_INVALID )
+    if( p_sys->i_state == SUBTITLE_BLOCK_EMPTY && p_block->i_pts == VLC_TICK_INVALID )
     {
         msg_Warn( p_dec, "first packet expected but no PTS present");
         return NULL;
@@ -352,13 +354,12 @@ static void ParseMetaInfo( decoder_t *p_dec, block_t *p_spu  )
         switch( p[0] )
         {
         case 0x04: /* subtitle duration in 1/90000ths of a second */
-            p_sys->i_duration = (p[1]<<16) + (p[2]<<8) + p[3];
+            p_sys->i_duration = FROM_SCALE_NZ( (p[1]<<16) + (p[2]<<8) + p[3] );
 
 #ifdef DEBUG_CVDSUB
-            msg_Dbg( p_dec, "subtitle display duration %lu secs",
-                     (long unsigned int)(p_sys->i_duration / 90000) );
+            msg_Dbg( p_dec, "subtitle display duration %lu ms",
+                     MS_FROM_VLC_TICK(p_sys->i_duration) );
 #endif
-            p_sys->i_duration *= 100 / 9;
             break;
 
         case 0x0c: /* unknown */

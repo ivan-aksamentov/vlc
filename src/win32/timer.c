@@ -70,7 +70,7 @@ void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
         DeleteTimerQueueTimer (NULL, timer->handle, INVALID_HANDLE_VALUE);
         timer->handle = INVALID_HANDLE_VALUE;
     }
-    if (value == 0)
+    if (value == VLC_TIMER_DISARM)
         return; /* Disarm */
 
     if (absolute)
@@ -79,11 +79,12 @@ void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
         if (value < 0)
             value = 0;
     }
-    value = (value + 999) / 1000;
-    interval = (interval + 999) / 1000;
+    value = (value + (1000-1)) / 1000;
+    interval = (interval + (1000-1)) / 1000;
 
     if (!CreateTimerQueueTimer (&timer->handle, NULL, vlc_timer_do, timer,
-                                value, interval, WT_EXECUTEDEFAULT))
+                                MS_FROM_VLC_TICK(value), MS_FROM_VLC_TICK(interval),
+                                WT_EXECUTEDEFAULT))
         abort ();
 }
 

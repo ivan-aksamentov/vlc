@@ -418,8 +418,7 @@ int vlc_cond_timedwait_daytime (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex,
 
     gettimeofday (&tv, NULL);
 
-    total = CLOCK_FREQ * tv.tv_sec +
-            CLOCK_FREQ * tv.tv_usec / 1000000L;
+    total = vlc_tick_from_timeval( &tv );
     total = (deadline - total) / 1000;
     if( total < 0 )
         total = 0;
@@ -910,7 +909,7 @@ vlc_tick_t vlc_tick_now (void)
     /* We need to split the division to avoid 63-bits overflow */
     lldiv_t d = lldiv (Q2LL(counter), freq);
 
-    return (d.quot * CLOCK_FREQ) + ((d.rem * CLOCK_FREQ) / freq);
+    return vlc_tick_from_sec( d.quot ) + ((d.rem * CLOCK_FREQ) / freq);
 }
 
 #undef vlc_tick_wait
@@ -1011,7 +1010,7 @@ void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
         timer->interval = 0;
     }
 
-    if (value == 0)
+    if (value == VLC_TIMER_DISARM)
         return; /* Disarm */
 
     if (absolute)
@@ -1019,8 +1018,8 @@ void vlc_timer_schedule (vlc_timer_t timer, bool absolute,
     value = (value + 999) / 1000;
     interval = (interval + 999) / 1000;
 
-    timer->interval = interval;
-    if (DosAsyncTimer (value, (HSEM)timer->hev, &timer->htimer))
+    timer->interval = MS_FROM_VLC_TICK(interval);
+    if (DosAsyncTimer (MS_FROM_VLC_TICK(value), (HSEM)timer->hev, &timer->htimer))
         abort ();
 }
 

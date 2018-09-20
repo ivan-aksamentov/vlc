@@ -99,7 +99,7 @@ const demux_index_entry_t *OggSeek_IndexAdd ( logical_stream_t *p_stream,
 
     idx = p_stream->idx;
 
-    if ( i_timestamp == VLC_TS_INVALID || i_pagepos < 1 ) return NULL;
+    if ( i_timestamp == VLC_TICK_INVALID || i_pagepos < 1 ) return NULL;
 
     if ( idx == NULL )
     {
@@ -284,16 +284,16 @@ void Oggseek_ProbeEnd( demux_t *p_demux )
 
                     i_length = Ogg_GranuleToTime( p_sys->pp_stream[i], i_granule,
                                                   !p_sys->pp_stream[i]->b_contiguous, false );
-                    if( i_length > VLC_TS_INVALID )
-                        p_sys->i_length = __MAX( p_sys->i_length, (i_length - VLC_TS_0) / 1000000 );
+                    if( i_length != VLC_TICK_INVALID )
+                    {
+                        /* We found at least a page with valid granule */
+                        p_sys->i_length = __MAX( p_sys->i_length, SEC_FROM_VLC_TICK(i_length - VLC_TICK_0) );
+                        goto clean;
+                    }
                     break;
                 }
             }
-            if ( i_length > VLC_TS_INVALID ) break;
         }
-
-        /* We found at least a page with valid granule */
-        if ( i_length > VLC_TS_INVALID ) break;
 
         /* Otherwise increase read size, starting earlier */
         if ( i_backoffset <= ( UINT_MAX >> 1 ) )
@@ -638,9 +638,9 @@ static int64_t OggBisectSearchByTime( demux_t *p_demux, logical_stream_t *p_stre
         int64_t i_pos;
         vlc_tick_t i_timestamp;
         int64_t i_granule;
-    } bestlower = { p_stream->i_data_start, VLC_TS_INVALID, -1 },
-      current = { -1, VLC_TS_INVALID, -1 },
-      lowestupper = { -1, VLC_TS_INVALID, -1 };
+    } bestlower = { p_stream->i_data_start, VLC_TICK_INVALID, -1 },
+      current = { -1, VLC_TICK_INVALID, -1 },
+      lowestupper = { -1, VLC_TICK_INVALID, -1 };
 
     demux_sys_t *p_sys  = p_demux->p_sys;
 
@@ -681,7 +681,7 @@ static int64_t OggBisectSearchByTime( demux_t *p_demux, logical_stream_t *p_stre
         current.i_timestamp = Ogg_GranuleToTime( p_stream, current.i_granule,
                                                  !p_stream->b_contiguous, false );
 
-        if ( current.i_timestamp == VLC_TS_INVALID && current.i_granule > 0 )
+        if ( current.i_timestamp == VLC_TICK_INVALID && current.i_granule > 0 )
         {
             msg_Err( p_demux, "Unmatched granule. New codec ?" );
             return -1;
@@ -702,9 +702,9 @@ static int64_t OggBisectSearchByTime( demux_t *p_demux, logical_stream_t *p_stre
                     bestlower = current;
                 i_start_pos = current.i_pos;
             }
-            else if ( current.i_timestamp > i_targettime )
+            else
             {
-                if ( lowestupper.i_timestamp == VLC_TS_INVALID ||
+                if ( lowestupper.i_timestamp == VLC_TICK_INVALID ||
                      current.i_timestamp < lowestupper.i_timestamp )
                     lowestupper = current;
                 /* check lower half of segment */
@@ -795,7 +795,7 @@ int Oggseek_BlindSeektoAbsoluteTime( demux_t *p_demux, logical_stream_t *p_strea
     {
         /* But only if there's no keyframe/preload requirements */
         /* FIXME: add function to get preload time by codec, ex: opus */
-        i_lowerpos = VLC_TS_0 + (i_time - VLC_TS_0) * p_sys->i_bitrate / INT64_C(8000000);
+        i_lowerpos = VLC_TICK_0 + (i_time - VLC_TICK_0) * p_sys->i_bitrate / INT64_C(8000000);
         b_found = true;
     }
 

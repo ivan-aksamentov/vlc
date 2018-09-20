@@ -254,8 +254,10 @@ typedef int64_t stime_t;
 #define ATOM_WMV3 VLC_FOURCC( 'W', 'M', 'V', '3' )
 #define ATOM_WVC1 VLC_FOURCC( 'W', 'V', 'C', '1' )
 
+#define ATOM_av01 VLC_FOURCC( 'a', 'v', '0', '1' )
 #define ATOM_avc1 VLC_FOURCC( 'a', 'v', 'c', '1' )
 #define ATOM_avc3 VLC_FOURCC( 'a', 'v', 'c', '3' )
+#define ATOM_av1C VLC_FOURCC( 'a', 'v', '1', 'C' )
 #define ATOM_avcC VLC_FOURCC( 'a', 'v', 'c', 'C' )
 #define ATOM_vpcC VLC_FOURCC( 'v', 'p', 'c', 'C' )
 #define ATOM_m4ds VLC_FOURCC( 'm', '4', 'd', 's' )
@@ -400,6 +402,8 @@ typedef int64_t stime_t;
 #define ATOM_irot VLC_FOURCC( 'i', 'r', 'o', 't' )
 #define ATOM_SmDm VLC_FOURCC( 'S', 'm', 'D', 'm' )
 #define ATOM_CoLL VLC_FOURCC( 'C', 'o', 'L', 'L' )
+#define ATOM_mdcv VLC_FOURCC( 'm', 'd', 'c', 'v' )
+#define ATOM_clli VLC_FOURCC( 'c', 'l', 'l', 'i' )
 
 #define ATOM_0x40PRM VLC_FOURCC( '@', 'P', 'R', 'M' )
 #define ATOM_0x40PRQ VLC_FOURCC( '@', 'P', 'R', 'Q' )
@@ -1269,20 +1273,7 @@ typedef struct
     uint8_t i_profile_compatibility;
     uint8_t i_level;
 
-    uint8_t i_reserved1;     /* 6 bits */
-    uint8_t i_length_size;
-
-    uint8_t i_reserved2;    /* 3 bits */
-    uint8_t  i_sps;
-    uint16_t *i_sps_length;
-    uint8_t  **sps;
-
-    uint8_t  i_pps;
-    uint16_t *i_pps_length;
-    uint8_t  **pps;
-
-    /* XXX: Hack raw avcC atom payload */
-    int     i_avcC;
+    size_t   i_avcC;
     uint8_t *p_avcC;
 
 } MP4_Box_data_avcC_t;

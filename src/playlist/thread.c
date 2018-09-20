@@ -35,6 +35,7 @@
 #include <vlc_rand.h>
 #include <vlc_renderer_discovery.h>
 #include "playlist_internal.h"
+#include "../input/input_internal.h"
 
 /*****************************************************************************
  * Local prototypes
@@ -184,6 +185,18 @@ void ResetCurrentlyPlaying( playlist_t *p_playlist,
     p_sys->b_reset_currently_playing = false;
 }
 
+static void on_input_event(input_thread_t *input,
+                           const struct vlc_input_event *event, void *userdata)
+{
+    if (event->type == INPUT_EVENT_SUBITEMS)
+    {
+        playlist_t *playlist = userdata;
+        input_item_t *item = input_GetItem(input);
+        playlist_AddSubtree(playlist, item, event->subitems);
+    }
+
+    input_LegacyEvents(input, event, userdata);
+}
 
 /**
  * Start the input for an item
@@ -214,16 +227,18 @@ static bool PlayItem( playlist_t *p_playlist, playlist_item_t *p_item )
 
     libvlc_MetadataCancel( p_playlist->obj.libvlc, p_item );
 
-    input_thread_t *p_input_thread = input_Create( p_playlist, p_input, NULL,
+    input_thread_t *p_input_thread = input_Create( p_playlist,
+                                                   on_input_event, p_playlist,
+                                                   p_input, NULL,
                                                    p_sys->p_input_resource,
                                                    p_renderer );
     if( p_renderer )
         vlc_renderer_item_release( p_renderer );
     if( likely(p_input_thread != NULL) )
     {
+        input_LegacyVarInit( p_input_thread );
         var_AddCallback( p_input_thread, "intf-event",
                          InputEvent, p_playlist );
-
         if( input_Start( p_input_thread ) )
         {
             var_DelCallback( p_input_thread, "intf-event",
@@ -241,7 +256,7 @@ static bool PlayItem( playlist_t *p_playlist, playlist_item_t *p_item )
     if( !b_has_art || strncmp( psz_arturl, "attachment://", 13 ) )
     {
         PL_DEBUG( "requesting art for new input thread" );
-        libvlc_ArtRequest( p_playlist->obj.libvlc, p_input, META_REQUEST_OPTION_NONE );
+        libvlc_ArtRequest( p_playlist->obj.libvlc, p_input, META_REQUEST_OPTION_NONE, NULL, NULL );
     }
     free( psz_arturl );
 
@@ -452,7 +467,6 @@ static void LoopInput( playlist_t *p_playlist )
     if( !var_InheritBool( p_input, "sout-keep" ) )
         input_resource_TerminateSout( p_sys->p_input_resource );
     var_DelCallback( p_input, "intf-event", InputEvent, p_playlist );
-
     input_Close( p_input );
     PL_LOCK;
 }

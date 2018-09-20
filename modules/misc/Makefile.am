@@ -1,9 +1,8 @@
 miscdir = $(pluginsdir)/misc
 
-liblogger_plugin_la_SOURCES = misc/logger.c
 libstats_plugin_la_SOURCES = misc/stats.c
 
-misc_LTLIBRARIES = liblogger_plugin.la libstats_plugin.la
+misc_LTLIBRARIES = libstats_plugin.la
 
 libaudioscrobbler_plugin_la_SOURCES = misc/audioscrobbler.c
 libaudioscrobbler_plugin_la_LIBADD = $(SOCKET_LIBS)
@@ -101,3 +100,16 @@ libxml_plugin_la_LIBADD = $(LIBXML2_LIBS)
 libxml_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(miscdir)' $(LDFLAGS_xml)
 EXTRA_LTLIBRARIES += libxml_plugin.la
 misc_LTLIBRARIES += $(LTLIBxml)
+
+libmedialibrary_plugin_la_SOURCES = \
+	misc/medialibrary/medialib.cpp \
+	misc/medialibrary/MetadataExtractor.cpp \
+	misc/medialibrary/entities.cpp \
+	misc/medialibrary/medialibrary.h
+
+libmedialibrary_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(MEDIALIBRARY_CFLAGS)
+libmedialibrary_plugin_la_LIBADD = $(MEDIALIBRARY_LIBS)
+libmedialibrary_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(miscdir)'
+EXTRA_LTLIBRARIES += libmedialibrary_plugin.la
+misc_LTLIBRARIES += $(LTLIBmedialibrary)
+

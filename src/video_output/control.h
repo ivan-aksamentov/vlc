@@ -28,7 +28,6 @@
 
 /* */
 enum {
-    VOUT_CONTROL_INIT,
     VOUT_CONTROL_CLEAN,
     VOUT_CONTROL_REINIT,                /* cfg */
     VOUT_CONTROL_CANCEL,
@@ -40,20 +39,13 @@ enum {
 #endif
     VOUT_CONTROL_SUBPICTURE,            /* subpicture */
     VOUT_CONTROL_FLUSH_SUBPICTURE,      /* integer */
-    VOUT_CONTROL_OSD_TITLE,             /* string */
     VOUT_CONTROL_CHANGE_FILTERS,        /* string */
     VOUT_CONTROL_CHANGE_INTERLACE,      /* boolean */
-    VOUT_CONTROL_CHANGE_SUB_SOURCES,    /* string */
-    VOUT_CONTROL_CHANGE_SUB_FILTERS,    /* string */
-    VOUT_CONTROL_CHANGE_SUB_MARGIN,     /* integer */
 
     VOUT_CONTROL_PAUSE,
     VOUT_CONTROL_FLUSH,                 /* time */
     VOUT_CONTROL_STEP,                  /* time_ptr */
 
-    VOUT_CONTROL_FULLSCREEN,            /* string */
-    VOUT_CONTROL_WINDOWED,              /* void */
-    VOUT_CONTROL_WINDOW_STATE,          /* unsigned */
     VOUT_CONTROL_MOUSE_STATE,           /* vlc_mouse_t */
     VOUT_CONTROL_DISPLAY_SIZE,          /* window */
     VOUT_CONTROL_DISPLAY_FILLED,        /* bool */
@@ -83,10 +75,6 @@ typedef struct {
             bool is_on;
             vlc_tick_t date;
         } pause;
-        struct {
-            int channel;
-            char *string;
-        } message;
         struct {
             unsigned left;
             unsigned top;
@@ -133,7 +121,6 @@ void vout_control_PushVoid(vout_control_t *, int type);
 void vout_control_PushBool(vout_control_t *, int type, bool boolean);
 void vout_control_PushInteger(vout_control_t *, int type, int integer);
 void vout_control_PushTime(vout_control_t *, int type, vlc_tick_t time);
-void vout_control_PushMessage(vout_control_t *, int type, int channel, const char *string);
 void vout_control_PushPair(vout_control_t *, int type, int a, int b);
 void vout_control_PushString(vout_control_t *, int type, const char *string);
 void vout_control_Wake(vout_control_t *);

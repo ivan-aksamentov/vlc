@@ -74,7 +74,7 @@ static void picture_Destroy( picture_t *p_picture )
 void picture_Reset( picture_t *p_picture )
 {
     /* */
-    p_picture->date = VLC_TS_INVALID;
+    p_picture->date = VLC_TICK_INVALID;
     p_picture->b_force = false;
     p_picture->b_progressive = false;
     p_picture->i_nb_fields = 2;
@@ -92,6 +92,11 @@ static int LCM( int a, int b )
 
 int picture_Setup( picture_t *p_picture, const video_format_t *restrict fmt )
 {
+    const vlc_chroma_description_t *p_dsc =
+        vlc_fourcc_GetChromaDescription( fmt->i_chroma );
+    if( unlikely(!p_dsc) )
+        return VLC_EGENERIC;
+
     /* Store default values */
     p_picture->i_planes = 0;
     for( unsigned i = 0; i < VOUT_MAX_PLANES; i++ )
@@ -106,11 +111,11 @@ int picture_Setup( picture_t *p_picture, const video_format_t *restrict fmt )
     video_format_Setup( &p_picture->format, fmt->i_chroma, fmt->i_width, fmt->i_height,
                         fmt->i_visible_width, fmt->i_visible_height,
                         fmt->i_sar_num, fmt->i_sar_den );
-
-    const vlc_chroma_description_t *p_dsc =
-        vlc_fourcc_GetChromaDescription( p_picture->format.i_chroma );
-    if( !p_dsc )
-        return VLC_EGENERIC;
+    if( fmt->i_x_offset < fmt->i_width &&
+        fmt->i_y_offset < fmt->i_height &&
+        fmt->i_visible_width  > 0 && fmt->i_x_offset + fmt->i_visible_width  <= fmt->i_width &&
+        fmt->i_visible_height > 0 && fmt->i_y_offset + fmt->i_visible_height <= fmt->i_height )
+        video_format_CopyCrop( &p_picture->format, fmt );
 
     /* We want V (width/height) to respect:
         (V * p_dsc->p[i].w.i_num) % p_dsc->p[i].w.i_den == 0
@@ -175,19 +180,6 @@ int picture_Setup( picture_t *p_picture, const video_format_t *restrict fmt )
 
 static picture_priv_t *picture_NewPrivate(const video_format_t *restrict p_fmt)
 {
-    video_format_t fmt = *p_fmt;
-
-    /* It is needed to be sure all information are filled */
-    video_format_Setup( &fmt, p_fmt->i_chroma,
-                              p_fmt->i_width, p_fmt->i_height,
-                              p_fmt->i_visible_width, p_fmt->i_visible_height,
-                              p_fmt->i_sar_num, p_fmt->i_sar_den );
-    if( p_fmt->i_x_offset < p_fmt->i_width &&
-        p_fmt->i_y_offset < p_fmt->i_height &&
-        p_fmt->i_visible_width  > 0 && p_fmt->i_x_offset + p_fmt->i_visible_width  <= p_fmt->i_width &&
-        p_fmt->i_visible_height > 0 && p_fmt->i_y_offset + p_fmt->i_visible_height <= p_fmt->i_height )
-        video_format_CopyCrop( &fmt, p_fmt );
-
     /* */
     picture_priv_t *priv = malloc( sizeof (*priv) );
     if( unlikely(priv == NULL) )
@@ -196,10 +188,9 @@ static picture_priv_t *picture_NewPrivate(const video_format_t *restrict p_fmt)
     picture_t *p_picture = &priv->picture;
 
     memset( p_picture, 0, sizeof( *p_picture ) );
-    p_picture->format = fmt;
 
     /* Make sure the real dimensions are a multiple of 16 */
-    if( picture_Setup( p_picture, &fmt ) )
+    if( picture_Setup( p_picture, p_fmt ) )
     {
         free( p_picture );
         return NULL;
@@ -332,7 +323,8 @@ void plane_CopyPixels( plane_t *p_dst, const plane_t *p_src )
 {
     const unsigned i_width  = __MIN( p_dst->i_visible_pitch,
                                      p_src->i_visible_pitch );
-    const unsigned i_height = __MIN( p_dst->i_lines, p_src->i_lines );
+    const unsigned i_height = __MIN( p_dst->i_visible_lines,
+                                     p_src->i_visible_lines );
 
     /* The 2x visible pitch check does two things:
        1) Makes field plane_t's work correctly (see the deinterlacer module)

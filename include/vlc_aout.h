@@ -35,11 +35,11 @@
 
 /* Buffers which arrive in advance of more than AOUT_MAX_ADVANCE_TIME
  * will be considered as bogus and be trashed */
-#define AOUT_MAX_ADVANCE_TIME           (AOUT_MAX_PREPARE_TIME + CLOCK_FREQ)
+#define AOUT_MAX_ADVANCE_TIME           (AOUT_MAX_PREPARE_TIME + VLC_TICK_FROM_SEC(1))
 
 /* Buffers which arrive in advance of more than AOUT_MAX_PREPARE_TIME
  * will cause the calling thread to sleep */
-#define AOUT_MAX_PREPARE_TIME           (2 * CLOCK_FREQ)
+#define AOUT_MAX_PREPARE_TIME           VLC_TICK_FROM_SEC(2)
 
 /* Buffers which arrive after pts - AOUT_MIN_PREPARE_TIME will be trashed
  * to avoid too heavy resampling */
@@ -48,11 +48,11 @@
 /* Tolerance values from EBU Recommendation 37 */
 /** Maximum advance of actual audio playback time to coded PTS,
  * above which downsampling will be performed */
-#define AOUT_MAX_PTS_ADVANCE            (CLOCK_FREQ / 25)
+#define AOUT_MAX_PTS_ADVANCE            VLC_TICK_FROM_MS(40)
 
 /** Maximum delay of actual audio playback time from coded PTS,
  * above which upsampling will be performed */
-#define AOUT_MAX_PTS_DELAY              (3 * CLOCK_FREQ / 50)
+#define AOUT_MAX_PTS_DELAY              VLC_TICK_FROM_MS(60)
 
 /* Max acceptable resampling (in %) */
 #define AOUT_MAX_RESAMPLING             10

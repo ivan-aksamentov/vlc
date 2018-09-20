@@ -313,7 +313,7 @@ rtp_queue (demux_t *demux, rtp_session_t *session, block_t *block)
              * It is independent of RTP sequence. */
             uint32_t freq = pt->frequency;
             int64_t ts = rtp_timestamp (block);
-            int64_t d = ((now - src->last_rx) * freq) / CLOCK_FREQ;
+            int64_t d = SEC_FROM_VLC_TICK((now - src->last_rx) * freq);
             d        -=    ts - src->last_ts;
             if (d < 0) d = -d;
             src->jitter += ((d - src->jitter) + 8) >> 4;
@@ -438,8 +438,8 @@ bool rtp_dequeue (demux_t *demux, const rtp_session_t *session,
                 deadline = 0; /* no jitter estimate with no frequency :( */
 
             /* Make sure we wait at least for 25 msec */
-            if (deadline < (CLOCK_FREQ / 40))
-                deadline = CLOCK_FREQ / 40;
+            if (deadline < VLC_TICK_FROM_MS(25))
+                deadline = VLC_TICK_FROM_MS(25);
 
             /* Additionnaly, we implicitly wait for the packetization time
              * multiplied by the number of missing packets. block is the first

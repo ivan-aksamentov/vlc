@@ -61,14 +61,6 @@ static void vlc_clock_setup_once (void)
     vlc_clock_prec = (res.tv_nsec + 500) / 1000;
 }
 
-static struct timespec mtime_to_ts (vlc_tick_t date)
-{
-    lldiv_t d = lldiv (date, CLOCK_FREQ);
-    struct timespec ts = { d.quot, d.rem * (1000000000 / CLOCK_FREQ) };
-
-    return ts;
-}
-
 /**
  * Print a backtrace to the standard error for debugging purpose.
  */
@@ -227,7 +219,7 @@ void vlc_cond_wait (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex)
 int vlc_cond_timedwait (vlc_cond_t *p_condvar, vlc_mutex_t *p_mutex,
                         vlc_tick_t deadline)
 {
-    struct timespec ts = mtime_to_ts (deadline);
+    struct timespec ts = timespec_from_vlc_tick (deadline);
     int val = pthread_cond_timedwait (p_condvar, p_mutex, &ts);
     if (val != ETIMEDOUT)
         VLC_THREAD_ASSERT ("timed-waiting on condition");
@@ -585,8 +577,7 @@ vlc_tick_t vlc_tick_now (void)
     if (unlikely(clock_gettime(CLOCK_MONOTONIC, &ts) != 0))
         abort ();
 
-    static_assert(INT64_C(1000000) == CLOCK_FREQ, "CLOCK_FREQ mismatch");
-    return (INT64_C(1000000) * ts.tv_sec) + (ts.tv_nsec / 1000);
+    return vlc_tick_from_timespec( &ts );
 }
 
 #undef vlc_tick_wait
@@ -599,7 +590,7 @@ void vlc_tick_wait (vlc_tick_t deadline)
     pthread_once(&vlc_clock_once, vlc_clock_setup_once);
     deadline -= vlc_clock_prec;
 
-    struct timespec ts = mtime_to_ts (deadline);
+    struct timespec ts = timespec_from_vlc_tick (deadline);
 
     while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) == EINTR);
 }
@@ -607,7 +598,7 @@ void vlc_tick_wait (vlc_tick_t deadline)
 #undef vlc_tick_sleep
 void vlc_tick_sleep (vlc_tick_t delay)
 {
-    struct timespec ts = mtime_to_ts (delay);
+    struct timespec ts = timespec_from_vlc_tick (delay);
 
     while (clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts) == EINTR);
 }

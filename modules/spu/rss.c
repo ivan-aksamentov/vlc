@@ -264,7 +264,7 @@ static int CreateFilter( vlc_object_t *p_this )
     p_sys->i_cur_char = 0;
     p_sys->i_feeds = 0;
     p_sys->p_feeds = NULL;
-    p_sys->i_speed = var_CreateGetInteger( p_filter, CFG_PREFIX "speed" );
+    p_sys->i_speed = VLC_TICK_FROM_US( var_CreateGetInteger( p_filter, CFG_PREFIX "speed" ) );
     p_sys->i_length = var_CreateGetInteger( p_filter, CFG_PREFIX "length" );
     p_sys->b_images = var_CreateGetBool( p_filter, CFG_PREFIX "images" );
 
@@ -313,8 +313,7 @@ static int CreateFilter( vlc_object_t *p_this )
         vlc_mutex_destroy( &p_sys->lock );
         goto error;
     }
-    vlc_timer_schedule( p_sys->timer, false, 1,
-                        (vlc_tick_t)(i_ttl)*CLOCK_FREQ );
+    vlc_timer_schedule_asap( p_sys->timer, vlc_tick_from_sec(i_ttl) );
 
     free( psz_urls );
     return VLC_SUCCESS;

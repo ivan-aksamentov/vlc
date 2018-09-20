@@ -294,7 +294,12 @@ static void ReadDir(intf_thread_t *intf)
             continue;
 
         dir_entry->file = IsFile(sys->current_dir, entry);
-        dir_entry->path = xstrdup(entry);
+        dir_entry->path = strdup(entry);
+        if (unlikely(dir_entry->path == NULL))
+        {
+            free(dir_entry);
+            continue;
+        }
         TAB_APPEND(sys->n_dir_entries, sys->dir_entries, dir_entry);
         continue;
     }
@@ -1089,10 +1094,8 @@ static int DrawStatus(intf_thread_t *intf, input_thread_t *p_input)
                         repeat, random, loop);
 
         default:
-            val.i_int = var_GetInteger(p_input, "time");
-            secstotimestr(buf1, val.i_int / CLOCK_FREQ);
-            val.i_int = var_GetInteger(p_input, "length");
-            secstotimestr(buf2, val.i_int / CLOCK_FREQ);
+            secstotimestr(buf1, SEC_FROM_VLC_TICK(var_GetInteger(p_input, "time")));
+            secstotimestr(buf2, SEC_FROM_VLC_TICK(var_GetInteger(p_input, "length")));
 
             mvnprintw(y++, 0, COLS, _(" Position : %s/%s"), buf1, buf2);
 
@@ -1300,7 +1303,7 @@ static void AddItem(intf_thread_t *intf, const char *path)
     node = playlist_CurrentPlayingItem(playlist);
 
     while (node != NULL) {
-        if (node == playlist->p_playing || node == playlist->p_media_library)
+        if (node == playlist->p_playing)
             break;
         node = node->p_parent;
     }

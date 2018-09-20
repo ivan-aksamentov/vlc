@@ -242,11 +242,11 @@ static int Control (demux_t *demux, int query, va_list ap)
     switch (query)
     {
         case DEMUX_GET_TIME:
-            *va_arg (ap, int64_t *) = vlc_tick_now () - sys->start;
+            *va_arg (ap, vlc_tick_t *) = vlc_tick_now () - sys->start;
             break;
 
         case DEMUX_GET_PTS_DELAY:
-            *va_arg (ap, int64_t *) = sys->caching;
+            *va_arg (ap, vlc_tick_t *) = sys->caching;
             break;
 
         //case DEMUX_SET_NEXT_DEMUX_TIME: still needed?
@@ -459,7 +459,7 @@ static int Open (vlc_object_t *obj)
     sys->rate = param;
 
     sys->start = vlc_tick_now ();
-    sys->caching = INT64_C(1000) * var_InheritInteger (demux, "live-caching");
+    sys->caching = VLC_TICK_FROM_MS(var_InheritInteger (demux, "live-caching"));
     param = sys->caching;
     val = snd_pcm_hw_params_set_buffer_time_near (pcm, hw, &param, NULL);
     if (val)

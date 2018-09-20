@@ -37,8 +37,8 @@ enum es_out_query_e
 {
     /* set or change the selected ES in its category (audio/video/spu) */
     ES_OUT_SET_ES,      /* arg1= es_out_id_t*                   */
+    ES_OUT_UNSET_ES,    /* arg1= es_out_id_t* res=can fail      */
     ES_OUT_RESTART_ES,  /* arg1= es_out_id_t*                   */
-    ES_OUT_RESTART_ALL_ES, /* Deprecated, no effect */
 
     /* set 'default' tag on ES (copied across from container) */
     ES_OUT_SET_ES_DEFAULT, /* arg1= es_out_id_t*                */
@@ -64,8 +64,9 @@ enum es_out_query_e
     ES_OUT_SET_GROUP_PCR,       /* arg1= int i_group, arg2=vlc_tick_t i_pcr(microsecond!)*/
     ES_OUT_RESET_PCR,           /* no arg */
 
-    /* Try not to use this one as it is a bit hacky */
-    ES_OUT_SET_ES_FMT,         /* arg1= es_out_id_t* arg2=es_format_t* */
+    /* This will update the fmt, drain and restart the decoder (if any).
+     * The new fmt must have the same i_cat and i_id. */
+    ES_OUT_SET_ES_FMT,         /* arg1= es_out_id_t* arg2=es_format_t* res=can fail */
 
     /* Allow preroll of data (data with dts/pts < i_pts for all ES will be decoded but not displayed */
     ES_OUT_SET_NEXT_DISPLAY_TIME,       /* arg1=int64_t i_pts(microsecond) */
@@ -97,6 +98,20 @@ enum es_out_query_e
     ES_OUT_MODIFY_PCR_SYSTEM, /* arg1=int is_absolute, arg2=vlc_tick_t, res=can fail */
 
     ES_OUT_POST_SUBNODE, /* arg1=input_item_node_t *, res=can fail */
+
+    ES_OUT_VOUT_SET_MOUSE_EVENT, /* arg1= es_out_id_t* (video es),
+                                    arg2=vlc_mouse_event, arg3=void *(user_data),
+                                    res=can fail */
+
+    ES_OUT_VOUT_ADD_OVERLAY, /* arg1= es_out_id_t* (video es),
+                              * arg2= subpicture_t *,
+                              * arg3= int * (channel id), res= can fail */
+
+    ES_OUT_VOUT_FLUSH_OVERLAY, /* arg1= es_out_id_t* (video es),
+                                * arg2= int (channel id), res= can fail */
+
+    ES_OUT_SPU_SET_HIGHLIGHT, /* arg1= es_out_id_t* (spu es),
+                                 arg2= const vlc_spu_highlight_t *, res=can fail  */
 
     /* First value usable for private control */
     ES_OUT_PRIVATE_START = 0x10000,

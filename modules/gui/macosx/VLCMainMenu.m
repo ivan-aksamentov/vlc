@@ -835,10 +835,10 @@
     input_thread_t *p_input = pl_CurrentInput(getIntf());
     if (p_input) {
         /* we can obviously only do that if an input is available */
-        int64_t length = var_GetInteger(p_input, "length");
-        [_timeSelectionPanel setMaxValue:(int)(length / CLOCK_FREQ)];
-        int64_t pos = var_GetInteger(p_input, "time");
-        [_timeSelectionPanel setJumpTimeValue: (int)(pos / CLOCK_FREQ)];
+        vlc_tick_t length = var_GetInteger(p_input, "length");
+        [_timeSelectionPanel setMaxTime:(int)SEC_FROM_VLC_TICK(length)];
+        vlc_tick_t pos = var_GetInteger(p_input, "time");
+        [_timeSelectionPanel setPosition: (int)SEC_FROM_VLC_TICK(pos)];
         [_timeSelectionPanel runModalForWindow:[NSApp mainWindow]
                              completionHandler:^(NSInteger returnCode, int64_t returnTime) {
 
@@ -847,7 +847,8 @@
 
             input_thread_t *p_input = pl_CurrentInput(getIntf());
             if (p_input) {
-                input_Control(p_input, INPUT_SET_TIME, (int64_t)(returnTime * CLOCK_FREQ));
+                input_SetTime(p_input, vlc_tick_from_sec(returnTime),
+                              var_GetBool(p_input, "input-fast-seek"));
                 vlc_object_release(p_input);
             }
         }];
@@ -1168,50 +1169,31 @@
 
     if ([savePanel runModal] == NSFileHandlingPanelOKButton) {
         NSString *filename = [[savePanel URL] path];
+        NSString *ext;
+        char const* psz_module;
 
-        if ([_playlistSaveAccessoryPopup indexOfSelectedItem] == 0) {
-            NSString *actualFilename;
-            NSRange range;
-            range.location = [filename length] - [@".m3u" length];
-            range.length = [@".m3u" length];
-
-            if ([filename compare:@".m3u" options: NSCaseInsensitiveSearch range: range] != NSOrderedSame)
-                actualFilename = [NSString stringWithFormat: @"%@.m3u", filename];
-            else
-                actualFilename = filename;
-
-            playlist_Export(p_playlist,
-                            [actualFilename fileSystemRepresentation],
-                            true, "export-m3u");
-        } else if ([_playlistSaveAccessoryPopup indexOfSelectedItem] == 1) {
-            NSString *actualFilename;
-            NSRange range;
-            range.location = [filename length] - [@".xspf" length];
-            range.length = [@".xspf" length];
-
-            if ([filename compare:@".xspf" options: NSCaseInsensitiveSearch range: range] != NSOrderedSame)
-                actualFilename = [NSString stringWithFormat: @"%@.xspf", filename];
-            else
-                actualFilename = filename;
-
-            playlist_Export(p_playlist,
-                            [actualFilename fileSystemRepresentation],
-                            true, "export-xspf");
-        } else {
-            NSString *actualFilename;
-            NSRange range;
-            range.location = [filename length] - [@".html" length];
-            range.length = [@".html" length];
-
-            if ([filename compare:@".html" options: NSCaseInsensitiveSearch range: range] != NSOrderedSame)
-                actualFilename = [NSString stringWithFormat: @"%@.html", filename];
-            else
-                actualFilename = filename;
-
-            playlist_Export(p_playlist,
-                            [actualFilename fileSystemRepresentation],
-                            true, "export-html");
+        switch ([_playlistSaveAccessoryPopup indexOfSelectedItem]) {
+            case 0: psz_module = "export-m3u";
+                    ext = @"m3u";
+                    break;
+            case 1: psz_module = "export-xspf";
+                    ext = @"xspf";
+                    break;
+            case 2: psz_module = "export-html";
+                    ext = @"html";
+                    break;
+            default:
+                    return;
         }
+
+        NSString *actualFilename = filename;
+
+        if ([[filename pathExtension] caseInsensitiveCompare:ext] != NSOrderedSame)
+            actualFilename = [NSString stringWithFormat: @"%@.%@", filename, ext];
+
+        playlist_Export(p_playlist,
+                        [actualFilename fileSystemRepresentation],
+                        psz_module);
     }
 }
 

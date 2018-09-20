@@ -37,8 +37,7 @@
 #include "input/input_interface.h"
 #include <assert.h>
 
-#include "art.h"
-#include "preparser.h"
+#include "preparser/preparser.h"
 
 void playlist_ServicesDiscoveryKillAll( playlist_t *p_playlist );
 
@@ -80,6 +79,7 @@ typedef struct playlist_private_t
     vlc_mutex_t lock; /**< dah big playlist global lock */
     vlc_cond_t signal; /**< wakes up the playlist engine thread */
     bool     killed; /**< playlist is shutting down */
+    bool     cork_effective; /**< Corked while actively playing */
 
     int      i_last_playlist_id; /**< Last id to an item */
     bool     b_reset_currently_playing; /** Reset current item array */
@@ -109,10 +109,6 @@ playlist_item_t * get_current_status_node( playlist_t * p_playlist );
 void set_current_status_item( playlist_t *, playlist_item_t * );
 void set_current_status_node( playlist_t *, playlist_item_t * );
 
-/* Load/Save */
-int playlist_MLLoad( playlist_t *p_playlist );
-int playlist_MLDump( playlist_t *p_playlist );
-
 /**********************************************************************
  * Item management
  **********************************************************************/
@@ -121,6 +117,8 @@ void playlist_SendAddNotify( playlist_t *p_playlist, playlist_item_t *item );
 
 int playlist_InsertInputItemTree ( playlist_t *,
         playlist_item_t *, input_item_node_t *, int, bool );
+
+void playlist_AddSubtree(playlist_t *, input_item_t *, input_item_node_t *);
 
 /* Tree walking */
 int playlist_NodeInsert(playlist_item_t*, playlist_item_t *, int);

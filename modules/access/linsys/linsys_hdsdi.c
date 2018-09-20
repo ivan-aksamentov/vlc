@@ -61,8 +61,8 @@
 #define SDIAUDIO_SAMPLESIZE_FILE "/sys/class/sdiaudio/sdiaudiorx%u/sample_size"
 #define SDIAUDIO_CHANNELS_FILE  "/sys/class/sdiaudio/sdiaudiorx%u/channels"
 #define NB_VBUFFERS             2
-#define CLOCK_GAP               (CLOCK_FREQ/2)
-#define START_DATE              INT64_C(4294967296)
+#define CLOCK_GAP               VLC_TICK_FROM_MS(500)
+#define START_DATE              INT64_C(0x100000000)
 
 #define MAX_AUDIOS              4
 
@@ -148,7 +148,7 @@ typedef struct
     unsigned int i_width, i_height, i_aspect, i_forced_aspect;
     unsigned int i_vblock_size, i_ablock_size;
     vlc_tick_t   i_next_vdate, i_next_adate;
-    int          i_incr, i_aincr;
+    vlc_tick_t   i_incr, i_aincr;
 
     /* ES stuff */
     int          i_id_video;
@@ -296,7 +296,6 @@ static void *Demux( void *opaque )
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     bool *pb;
-    int64_t *pi64;
 
     switch( i_query )
     {
@@ -309,9 +308,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = INT64_C(1000)
-                  * var_InheritInteger( p_demux, "live-caching" );
+            *va_arg( args, vlc_tick_t * ) =
+                VLC_TICK_FROM_MS(var_InheritInteger( p_demux, "live-caching" ));
             return VLC_SUCCESS;
 
         /* TODO implement others */
@@ -496,7 +494,7 @@ static int InitVideo( demux_t *p_demux )
     }
 
     p_sys->i_next_vdate = START_DATE;
-    p_sys->i_incr = 1000000 * p_sys->i_frame_rate_base / p_sys->i_frame_rate;
+    p_sys->i_incr = CLOCK_FREQ * p_sys->i_frame_rate_base / p_sys->i_frame_rate;
     p_sys->i_vblock_size = p_sys->i_width * p_sys->i_height * 3 / 2
                             + sizeof(struct block_extension_t);
 
@@ -545,7 +543,7 @@ static int InitAudio( demux_t *p_demux )
 
     p_sys->i_next_adate = START_DATE;
     p_sys->i_ablock_size = p_sys->i_sample_rate * 4 * p_sys->i_frame_rate_base / p_sys->i_frame_rate;
-    p_sys->i_aincr = 1000000 * p_sys->i_ablock_size / (p_sys->i_sample_rate * 4);
+    p_sys->i_aincr = CLOCK_FREQ * p_sys->i_ablock_size / (p_sys->i_sample_rate * 4);
 
     return VLC_SUCCESS;
 }

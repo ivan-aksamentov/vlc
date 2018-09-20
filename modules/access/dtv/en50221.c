@@ -1267,7 +1267,7 @@ static void CAPMTAdd( cam_t * p_cam, int i_session_id,
     }
  
 #ifdef CAPMT_WAIT
-    vlc_tick_sleep( CAPMT_WAIT * 1000 );
+    vlc_tick_sleep( VLC_TICK_FROM_MS(CAPMT_WAIT) );
 #endif
  
     msg_Dbg( p_cam->obj, "adding CAPMT for SID %d on session %d",
@@ -1488,7 +1488,7 @@ static void DateTimeManage( cam_t * p_cam, int i_session_id )
         (date_time_t *)p_cam->p_sessions[i_session_id - 1].p_sys;
 
     if ( p_date->i_interval
-          && vlc_tick_now() > p_date->i_last + (vlc_tick_t)p_date->i_interval * CLOCK_FREQ )
+          && vlc_tick_now() > p_date->i_last + vlc_tick_from_sec( p_date->i_interval ) )
     {
         DateTimeSend( p_cam, i_session_id );
     }
@@ -1884,7 +1884,7 @@ static int InitSlot( cam_t * p_cam, int i_slot )
 
     if ( p_cam->pb_active_slot[i_slot] )
     {
-        p_cam->i_timeout = CLOCK_FREQ / 10;
+        p_cam->i_timeout = VLC_TICK_FROM_MS(100);
         return VLC_SUCCESS;
     }
 
@@ -1958,9 +1958,9 @@ cam_t *en50221_Init( vlc_object_t *obj, int fd )
             }
         }
 
-        p_cam->i_timeout = CLOCK_FREQ / 10;
+        p_cam->i_timeout = VLC_TICK_FROM_MS(100);
         /* Wait a bit otherwise it doesn't initialize properly... */
-        vlc_tick_sleep( CLOCK_FREQ / 10 );
+        vlc_tick_sleep( VLC_TICK_FROM_MS(100) );
         p_cam->i_next_event = 0;
     }
     else

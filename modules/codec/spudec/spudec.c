@@ -185,7 +185,7 @@ static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
     }
 
     p_spu->i_dts = p_spu->i_pts;
-    p_spu->i_length = 0;
+    p_spu->i_length = VLC_TICK_INVALID;
 
     /* reinit context */
     p_sys->i_spu_size = 0;
@@ -210,7 +210,7 @@ static block_t *Reassemble( decoder_t *p_dec, block_t *p_block )
     }
 
     if( p_sys->i_spu_size <= 0 &&
-        ( p_block->i_pts == VLC_TS_INVALID || p_block->i_buffer < 4 ) )
+        ( p_block->i_pts == VLC_TICK_INVALID || p_block->i_buffer < 4 ) )
     {
         msg_Dbg( p_dec, "invalid starting packet (size < 4 or pts <=0)" );
         msg_Dbg( p_dec, "spu size: %d, i_pts: %"PRId64" i_buffer: %zu",

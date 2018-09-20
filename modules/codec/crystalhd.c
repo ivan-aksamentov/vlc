@@ -73,8 +73,8 @@
 #include <assert.h>
 
 /* BC pts are multiple of 100ns */
-#define TO_BC_PTS( a ) ( a * 10 + 1 )
-#define FROM_BC_PTS( a ) ((a - 1) /10)
+#define TO_BC_PTS( a )   ( MSFTIME_FROM_VLC_TICK(a) + 1 )
+#define FROM_BC_PTS( a ) VLC_TICK_FROM_MSFTIME(a - 1)
 
 //#define DEBUG_CRYSTALHD 1
 
@@ -453,7 +453,7 @@ static int DecodeBlock( decoder_t *p_dec, block_t *p_block )
             BC_STATUS status = BC_FUNC_PSYS(DtsProcInput)( p_sys->bcm_handle,
                                             p_block->p_buffer,
                                             p_block->i_buffer,
-                                            p_block->i_pts != VLC_TS_INVALID ? TO_BC_PTS(p_block->i_pts) : 0, false );
+                                            p_block->i_pts != VLC_TICK_INVALID ? TO_BC_PTS(p_block->i_pts) : 0, false );
 
             block_Release( p_block );
 
@@ -510,7 +510,7 @@ static int DecodeBlock( decoder_t *p_dec, block_t *p_block )
 
             //  crystal_CopyPicture( p_pic, &proc_out );
             p_pic->date = proc_out.PicInfo.timeStamp > 0 ?
-                          FROM_BC_PTS(proc_out.PicInfo.timeStamp) : VLC_TS_INVALID;
+                          FROM_BC_PTS(proc_out.PicInfo.timeStamp) : VLC_TICK_INVALID;
             //p_pic->date += 100 * 1000;
 #ifdef DEBUG_CRYSTALHD
             msg_Dbg( p_dec, "TS Output is %"PRIu64, p_pic->date);

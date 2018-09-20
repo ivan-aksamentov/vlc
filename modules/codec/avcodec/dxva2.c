@@ -92,7 +92,7 @@ typedef struct {
 static const d3d9_format_t d3d_formats[] = {
     { "YV12",   MAKEFOURCC('Y','V','1','2'),    VLC_CODEC_YV12 },
     { "NV12",   MAKEFOURCC('N','V','1','2'),    VLC_CODEC_NV12 },
-    { "IMC3",   MAKEFOURCC('I','M','C','3'),    VLC_CODEC_YV12 },
+    //{ "IMC3",   MAKEFOURCC('I','M','C','3'),    VLC_CODEC_YV12 },
     { "P010",   MAKEFOURCC('P','0','1','0'),    VLC_CODEC_P010 },
 
     { NULL, 0, 0 }
@@ -514,7 +514,9 @@ static int DxSetupOutput(vlc_va_t *va, const GUID *input, const video_format_t *
     if (!directx_va_canUseDecoder(va, identifier.VendorId, identifier.DeviceId,
                                   input, driverBuild))
     {
-        msg_Warn(va, "GPU blacklisted for %s codec", directx_va_GetDecoderName(input));
+        char* psz_decoder_name = directx_va_GetDecoderName(input);
+        msg_Warn(va, "GPU blacklisted for %s codec", psz_decoder_name);
+        free(psz_decoder_name);
         return VLC_EGENERIC;
     }
 

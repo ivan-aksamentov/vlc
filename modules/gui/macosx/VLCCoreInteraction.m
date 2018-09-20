@@ -103,11 +103,11 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
         b_mediaKeySupport = var_InheritBool(p_intf, "macosx-mediakeys");
         if (b_mediaKeySupport) {
             _mediaKeyController = [[SPMediaKeyTap alloc] initWithDelegate:self];
-            [[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
-                                                                     [SPMediaKeyTap defaultMediaKeyUserBundleIdentifiers], kMediaKeyUsingBundleIdentifiersDefaultsKey,
-                                                                     nil]];
         }
-        [[NSNotificationCenter defaultCenter] addObserver: self selector: @selector(coreChangedMediaKeySupportSetting:) name:VLCMediaKeySupportSettingChangedNotification object: nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(coreChangedMediaKeySupportSetting:)
+                                                     name:VLCMediaKeySupportSettingChangedNotification
+                                                   object:nil];
 
         /* init Apple Remote support */
         _remote = [[AppleRemote alloc] init];
@@ -121,6 +121,11 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
 
 - (void)dealloc
 {
+    #warning BUG! This class is a singleton, so dealloc is never called!
+    // Dealloc is never called, which not only means the below code is never
+    // run, but it means that the SPMediaKeyTap object and the AppleRemote object
+    // is not deallocated properly either.
+
     intf_thread_t *p_intf = getIntf();
     var_DelCallback(pl_Get(p_intf), "intf-boss", BossCallback, (__bridge void *)self);
     [[NSNotificationCenter defaultCenter] removeObserver: self];
@@ -147,7 +152,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
 
     } else {
         PLRootType root = [[[[VLCMain sharedInstance] playlist] model] currentRootType];
-        if ([[[VLCMain sharedInstance] playlist] isSelectionEmpty] && (root == ROOT_TYPE_PLAYLIST || root == ROOT_TYPE_MEDIALIBRARY))
+        if ([[[VLCMain sharedInstance] playlist] isSelectionEmpty] && (root == ROOT_TYPE_PLAYLIST))
             [[[VLCMain sharedInstance] open] openFileGeneric];
         else
             [[[VLCMain sharedInstance] playlist] playItem:nil];
@@ -255,14 +260,14 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
         return 0;
 
     input_thread_t * p_input = pl_CurrentInput(p_intf);
-    int64_t i_duration = -1;
+    vlc_tick_t i_duration;
     if (!p_input)
-        return i_duration;
+        return -1;
 
-    input_Control(p_input, INPUT_GET_LENGTH, &i_duration);
+    i_duration = var_GetInteger(p_input, "length");
     vlc_object_release(p_input);
 
-    return (i_duration / 1000000);
+    return SEC_FROM_VLC_TICK(i_duration);
 }
 
 - (NSURL*)URLOfCurrentPlaylistItem
@@ -320,7 +325,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
     NSString *o_name = @"";
     char *format = var_InheritString(getIntf(), "input-title-format");
     if (format) {
-        char *formated = vlc_strfinput(p_input, format);
+        char *formated = vlc_strfinput(p_input, NULL, format);
         free(format);
         o_name = toNSStr(formated);
         free(formated);
@@ -359,7 +364,7 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
 
     int64_t i_interval = var_InheritInteger( p_input, p_value );
     if (i_interval > 0) {
-        vlc_tick_t val = CLOCK_FREQ * i_interval;
+        vlc_tick_t val = vlc_tick_from_sec( i_interval );
         if (!b_value)
             val = val * -1;
         var_SetInteger( p_input, "time-offset", val );
@@ -903,14 +908,18 @@ static int BossCallback(vlc_object_t *p_this, const char *psz_var,
     if (b_mediaKeySupport && ([[[main playlist] model] hasChildren] ||
                               [[main inputManager] hasInput])) {
         if (!b_mediaKeyTrapEnabled) {
-            b_mediaKeyTrapEnabled = YES;
-            msg_Dbg(p_intf, "Enable media key support");
-            [_mediaKeyController startWatchingMediaKeys];
+            msg_Dbg(p_intf, "Enabling media key support");
+            if ([_mediaKeyController startWatchingMediaKeys]) {
+                b_mediaKeyTrapEnabled = YES;
+            } else {
+                msg_Warn(p_intf, "Failed to enable media key support, likely "
+                    "app needs to be whitelisted in Security Settings.");
+            }
         }
     } else {
         if (b_mediaKeyTrapEnabled) {
             b_mediaKeyTrapEnabled = NO;
-            msg_Dbg(p_intf, "Disable media key support");
+            msg_Dbg(p_intf, "Disabling media key support");
             [_mediaKeyController stopWatchingMediaKeys];
         }
     }

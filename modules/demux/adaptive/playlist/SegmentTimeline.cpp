@@ -62,7 +62,7 @@ void SegmentTimeline::addElement(uint64_t number, stime_t d, uint64_t r, stime_t
     }
 }
 
-vlc_tick_t SegmentTimeline::getMinAheadScaledTime(uint64_t number) const
+stime_t SegmentTimeline::getMinAheadScaledTime(uint64_t number) const
 {
     stime_t totalscaledtime = 0;
 
@@ -246,22 +246,6 @@ void SegmentTimeline::mergeWith(SegmentTimeline &other)
             last = el;
         }
     }
-}
-
-vlc_tick_t SegmentTimeline::start() const
-{
-    if(elements.empty())
-        return 0;
-    return inheritTimescale().ToTime(elements.front()->t);
-}
-
-vlc_tick_t SegmentTimeline::end() const
-{
-    if(elements.empty())
-        return 0;
-    const Element *last = elements.back();
-    stime_t scaled = last->t + last->d * (last->r + 1);
-    return inheritTimescale().ToTime(scaled);
 }
 
 void SegmentTimeline::debug(vlc_object_t *obj, int indent) const

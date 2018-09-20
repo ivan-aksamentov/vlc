@@ -332,7 +332,7 @@ static int AndroidWindow_ConnectSurface(vout_display_sys_t *sys,
 }
 
 static android_window *AndroidWindow_New(vout_display_t *vd,
-                                         video_format_t *p_fmt,
+                                         const video_format_t *p_fmt,
                                          enum AWindow_ID id)
 {
     vout_display_sys_t *sys = vd->sys;
@@ -503,15 +503,9 @@ static void SetRGBMask(video_format_t *p_fmt)
 static int OpenCommon(vout_display_t *vd)
 {
     vout_display_sys_t *sys;
-    video_format_t sub_fmt;
+    video_format_t fmt, sub_fmt;
 
-    /* Fallback to normal projection in case of soft decoding/display (the
-     * openGL vout, with a higher priority, should be used when the projection
-     * need to be handled). */
-    if (vd->fmt.i_chroma == VLC_CODEC_ANDROID_OPAQUE
-     && vd->fmt.projection_mode != PROJECTION_MODE_RECTANGULAR)
-        return VLC_EGENERIC;
-    vd->fmt.projection_mode = PROJECTION_MODE_RECTANGULAR;
+    fmt = vd->fmt;
 
     vout_window_t *embed =
         vout_display_NewWindow(vd, VOUT_WINDOW_TYPE_ANDROID_NATIVE);
@@ -540,34 +534,34 @@ static int OpenCommon(vout_display_t *vd)
     sys->i_display_width = vd->cfg->display.width;
     sys->i_display_height = vd->cfg->display.height;
 
-    if (vd->fmt.i_chroma != VLC_CODEC_ANDROID_OPAQUE) {
+    if (fmt.i_chroma != VLC_CODEC_ANDROID_OPAQUE) {
         /* Setup chroma */
         char *psz_fcc = var_InheritString(vd, CFG_PREFIX "chroma");
         if (psz_fcc) {
-            vd->fmt.i_chroma = vlc_fourcc_GetCodecFromString(VIDEO_ES, psz_fcc);
+            fmt.i_chroma = vlc_fourcc_GetCodecFromString(VIDEO_ES, psz_fcc);
             free(psz_fcc);
         } else
-            vd->fmt.i_chroma = VLC_CODEC_RGB32;
+            fmt.i_chroma = VLC_CODEC_RGB32;
 
-        switch(vd->fmt.i_chroma) {
+        switch(fmt.i_chroma) {
             case VLC_CODEC_YV12:
                 /* avoid swscale usage by asking for I420 instead since the
                  * vout already has code to swap the buffers */
-                vd->fmt.i_chroma = VLC_CODEC_I420;
+                fmt.i_chroma = VLC_CODEC_I420;
             case VLC_CODEC_I420:
                 break;
             case VLC_CODEC_RGB16:
             case VLC_CODEC_RGB32:
             case VLC_CODEC_RGBA:
-                SetRGBMask(&vd->fmt);
-                video_format_FixRgb(&vd->fmt);
+                SetRGBMask(&fmt);
+                video_format_FixRgb(&fmt);
                 break;
             default:
                 goto error;
         }
     }
 
-    sys->p_window = AndroidWindow_New(vd, &vd->fmt, AWindow_Video);
+    sys->p_window = AndroidWindow_New(vd, &fmt, AWindow_Video);
     if (!sys->p_window)
         goto error;
 
@@ -576,11 +570,11 @@ static int OpenCommon(vout_display_t *vd)
 
     /* use software rotation if we don't do opaque */
     if (!sys->p_window->b_opaque)
-        video_format_TransformTo(&vd->fmt, ORIENT_NORMAL);
+        video_format_TransformTo(&fmt, ORIENT_NORMAL);
 
     msg_Dbg(vd, "using %s", sys->p_window->b_opaque ? "opaque" : "ANW");
 
-    video_format_ApplyRotation(&sub_fmt, &vd->fmt);
+    video_format_ApplyRotation(&sub_fmt, &fmt);
     sub_fmt.i_chroma = subpicture_chromas[0];
     SetRGBMask(&sub_fmt);
     video_format_FixRgb(&sub_fmt);
@@ -600,6 +594,7 @@ static int OpenCommon(vout_display_t *vd)
         goto error;
     }
 
+    vd->fmt = fmt;
     /* Setup vout_display */
     vd->pool    = Pool;
     vd->prepare = Prepare;
@@ -621,8 +616,11 @@ static int Open(vlc_object_t *p_this)
     if (vd->fmt.i_chroma == VLC_CODEC_ANDROID_OPAQUE)
         return VLC_EGENERIC;
 
-    /* At this point, gles2 vout failed (old Android device) */
+    /* There are two cases:
+     * 1. the projection_mode is PROJECTION_MODE_RECTANGULAR
+     * 2. gles2 vout failed */
     vd->fmt.projection_mode = PROJECTION_MODE_RECTANGULAR;
+
     return OpenCommon(vd);
 }
 
@@ -630,9 +628,12 @@ static int OpenOpaque(vlc_object_t *p_this)
 {
     vout_display_t *vd = (vout_display_t*)p_this;
 
-    if (vd->fmt.i_chroma != VLC_CODEC_ANDROID_OPAQUE
-     || vd->fmt.projection_mode != PROJECTION_MODE_RECTANGULAR
-     || vd->fmt.orientation != ORIENT_NORMAL)
+    if (vd->fmt.i_chroma != VLC_CODEC_ANDROID_OPAQUE)
+        return VLC_EGENERIC;
+
+    if (!vd->obj.force
+        && (vd->fmt.projection_mode != PROJECTION_MODE_RECTANGULAR
+            || vd->fmt.orientation != ORIENT_NORMAL))
     {
         /* Let the gles2 vout handle orientation and projection */
         return VLC_EGENERIC;
@@ -991,7 +992,7 @@ static void Prepare(vout_display_t *vd, picture_t *picture,
         vlc_tick_t now = vlc_tick_now();
         if (date > now)
         {
-            if (date - now <= 1*CLOCK_FREQ)
+            if (date - now <= VLC_TICK_FROM_SEC(1))
                 AndroidOpaquePicture_ReleaseAtTime(picture->p_sys, date);
             else /* The picture will be displayed from the Display callback */
                 msg_Warn(vd, "picture way too early to release at time");

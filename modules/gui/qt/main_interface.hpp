@@ -99,8 +99,7 @@ public:
     StandardPLPanel* getPlaylistView();
 
 protected:
-    void dropEventPlay( QDropEvent* event, bool b_play ) { dropEventPlay(event, b_play, true); }
-    void dropEventPlay( QDropEvent *, bool, bool );
+    void dropEventPlay( QDropEvent* event, bool b_play );
     void changeEvent( QEvent * ) Q_DECL_OVERRIDE;
     void dropEvent( QDropEvent *) Q_DECL_OVERRIDE;
     void dragEnterEvent( QDragEnterEvent * ) Q_DECL_OVERRIDE;
@@ -158,7 +157,7 @@ protected:
     /* resume panel */
     QWidget             *resumePanel;
     QTimer              *resumeTimer;
-    int64_t             i_resumeTime;
+    vlc_tick_t          i_resumeTime;
 
     /* Status Bar */
     QLabel              *nameLabel;
@@ -267,7 +266,7 @@ protected slots:
     void setRaise();
     void voutReleaseMouseEvents();
 
-    void showResumePanel( int64_t);
+    void showResumePanel( vlc_tick_t);
     void hideResumePanel();
     void resumePlayback();
     void onInputChanged( bool );

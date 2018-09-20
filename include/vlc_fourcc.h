@@ -187,6 +187,7 @@
 #define VLC_CODEC_SPEEDHQ         VLC_FOURCC('S','H','Q','2')
 #define VLC_CODEC_PIXLET          VLC_FOURCC('p','x','l','t')
 #define VLC_CODEC_MAGICYUV        VLC_FOURCC('M','8','Y','0')
+#define VLC_CODEC_IMM4            VLC_FOURCC('I','M','M','4')
 
 /***********
  * Chromas
@@ -345,11 +346,24 @@
 #define VLC_CODEC_GBR_PLANAR_9L   VLC_FOURCC('G','B','9','L')
 #define VLC_CODEC_GBR_PLANAR_10B  VLC_FOURCC('G','B','A','B')
 #define VLC_CODEC_GBR_PLANAR_10L  VLC_FOURCC('G','B','A','L')
+#define VLC_CODEC_GBR_PLANAR_12B  VLC_FOURCC('G','B','B','B')
+#define VLC_CODEC_GBR_PLANAR_12L  VLC_FOURCC('G','B','B','L')
+#define VLC_CODEC_GBR_PLANAR_14B  VLC_FOURCC('G','B','D','B')
+#define VLC_CODEC_GBR_PLANAR_14L  VLC_FOURCC('G','B','D','L')
 #define VLC_CODEC_GBR_PLANAR_16L  VLC_FOURCC('G','B','F','L')
 #define VLC_CODEC_GBR_PLANAR_16B  VLC_FOURCC('G','B','F','B')
+#define VLC_CODEC_GBRA_PLANAR_10B VLC_FOURCC('G','B','0','B')
+#define VLC_CODEC_GBRA_PLANAR_10L VLC_FOURCC('G','B','0','L')
+#define VLC_CODEC_GBRA_PLANAR_12B VLC_FOURCC('G','B','C','B')
+#define VLC_CODEC_GBRA_PLANAR_12L VLC_FOURCC('G','B','C','L')
+#define VLC_CODEC_GBRA_PLANAR_16L VLC_FOURCC('G','B','E','L')
+#define VLC_CODEC_GBRA_PLANAR_16B VLC_FOURCC('G','B','E','B')
 
 /* 8 bits grey */
 #define VLC_CODEC_GREY            VLC_FOURCC('G','R','E','Y')
+/* 16 bits grey */
+#define VLC_CODEC_GREY_16L        VLC_FOURCC('G','R','F','L')
+#define VLC_CODEC_GREY_16B        VLC_FOURCC('G','R','F','B')
 
 /* VDPAU video surface YCbCr 4:2:0 */
 #define VLC_CODEC_VDPAU_VIDEO_420 VLC_FOURCC('V','D','V','0')
@@ -563,6 +577,7 @@
 #define VLC_CODEC_CEA608    VLC_FOURCC('c','6','0','8')
 #define VLC_CODEC_CEA708    VLC_FOURCC('c','7','0','8')
 #define VLC_CODEC_TTML      VLC_FOURCC('T','T','M','L')
+#define VLC_CODEC_TTML_TS   VLC_FOURCC('T','s','M','L') /* special for EN.303.560 */
 #define VLC_CODEC_WEBVTT    VLC_FOURCC('w','v','t','t')
 
 /* XYZ colorspace 12 bits packed in 16 bits, organisation |XXX0|YYY0|ZZZ0| */

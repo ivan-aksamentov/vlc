@@ -111,23 +111,23 @@ void Representation::scheduleNextUpdate(uint64_t number)
      * but we need to update before reaching that last segment, thus -1 */
     if(targetDuration)
     {
-        if(minbuffer > CLOCK_FREQ * ( 2 * targetDuration + 1 ))
-            minbuffer -= CLOCK_FREQ * ( targetDuration + 1 );
+        if(minbuffer > vlc_tick_from_sec( 2 * targetDuration + 1 ))
+            minbuffer -= vlc_tick_from_sec( targetDuration + 1 );
         else
-            minbuffer = CLOCK_FREQ * ( targetDuration - 1 );
+            minbuffer = vlc_tick_from_sec( targetDuration - 1 );
     }
     else
     {
-        if(minbuffer < 10 * CLOCK_FREQ)
-            minbuffer = 4 * CLOCK_FREQ;
+        if(minbuffer < VLC_TICK_FROM_SEC(10))
+            minbuffer = VLC_TICK_FROM_SEC(4);
         else
             minbuffer /= 2;
     }
 
-    nextUpdateTime = now + minbuffer / CLOCK_FREQ;
+    nextUpdateTime = now + SEC_FROM_VLC_TICK(minbuffer);
 
     msg_Dbg(playlist->getVLCObject(), "Updated playlist ID %s, next update in %" PRId64 "s",
-            getID().str().c_str(), (vlc_tick_t) nextUpdateTime - now);
+            getID().str().c_str(), (int64_t) nextUpdateTime - now);
 
     debug(playlist->getVLCObject(), 0);
 }

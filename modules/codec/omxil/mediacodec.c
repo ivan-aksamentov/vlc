@@ -222,7 +222,7 @@ static void CSDFree(decoder_t *p_dec)
 static void CSDInit(decoder_t *p_dec, block_t *p_blocks, size_t i_count)
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
-    assert(i_count >= 0 && i_count <= 3);
+    assert(i_count <= MAX_CSD_COUNT);
 
     CSDFree(p_dec);
 
@@ -509,13 +509,18 @@ static int StartMediaCodec(decoder_t *p_dec)
     }
     else
     {
-        date_Set(&p_sys->audio.i_end_date, VLC_TS_INVALID);
+        date_Set(&p_sys->audio.i_end_date, VLC_TICK_INVALID);
 
         args.audio.i_sample_rate    = p_dec->fmt_in.audio.i_rate;
         args.audio.i_channel_count  = p_sys->audio.i_channels;
     }
 
-    return p_sys->api.start(&p_sys->api, &args);
+    if (p_sys->api.configure_decoder(&p_sys->api, &args) != 0)
+    {
+        return MC_API_ERROR;
+    }
+
+    return p_sys->api.start(&p_sys->api);
 }
 
 /*****************************************************************************
@@ -643,14 +648,14 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
         free(p_sys);
         return VLC_EGENERIC;
     }
-    if (p_sys->api.configure(&p_sys->api, i_profile) != 0)
+    if (p_sys->api.prepare(&p_sys->api, i_profile) != 0)
     {
         /* If the device can't handle video/wvc1,
          * it can probably handle video/x-ms-wmv */
         if (!strcmp(mime, "video/wvc1") && p_dec->fmt_in.i_codec == VLC_CODEC_VC1)
         {
             p_sys->api.psz_mime = "video/x-ms-wmv";
-            if (p_sys->api.configure(&p_sys->api, i_profile) != 0)
+            if (p_sys->api.prepare(&p_sys->api, i_profile) != 0)
             {
                 p_sys->api.clean(&p_sys->api);
                 free(p_sys);
@@ -700,7 +705,7 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
 
             if (p_sys->api.b_support_rotation)
             {
-                switch (p_dec->fmt_out.video.orientation)
+                switch (p_dec->fmt_in.video.orientation)
                 {
                     case ORIENT_ROTATED_90:
                         p_sys->video.i_angle = 90;
@@ -959,7 +964,7 @@ static int Video_ProcessOutput(decoder_t *p_dec, mc_api_out *p_out,
             return p_sys->api.release_out(&p_sys->api, p_out->buf.i_index, false);
         }
 
-        if (forced_ts == VLC_TS_INVALID)
+        if (forced_ts == VLC_TICK_INVALID)
             p_pic->date = p_out->buf.i_ts;
         else
             p_pic->date = forced_ts;
@@ -1559,7 +1564,7 @@ static int Video_OnNewBlock(decoder_t *p_dec, block_t **pp_block)
     block_t *p_block = *pp_block;
 
     timestamp_FifoPut(p_sys->video.timestamp_fifo,
-                      p_block->i_pts ? VLC_TS_INVALID : p_block->i_dts);
+                      p_block->i_pts ? VLC_TICK_INVALID : p_block->i_dts);
 
     return 1;
 }
@@ -1679,9 +1684,9 @@ static int Audio_OnNewBlock(decoder_t *p_dec, block_t **pp_block)
     block_t *p_block = *pp_block;
 
     /* We've just started the stream, wait for the first PTS. */
-    if (date_Get(&p_sys->audio.i_end_date) == VLC_TS_INVALID)
+    if (date_Get(&p_sys->audio.i_end_date) == VLC_TICK_INVALID)
     {
-        if (p_block->i_pts == VLC_TS_INVALID)
+        if (p_block->i_pts == VLC_TICK_INVALID)
             return 0;
         date_Set(&p_sys->audio.i_end_date, p_block->i_pts);
     }
@@ -1693,5 +1698,5 @@ static void Audio_OnFlush(decoder_t *p_dec)
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
 
-    date_Set(&p_sys->audio.i_end_date, VLC_TS_INVALID);
+    date_Set(&p_sys->audio.i_end_date, VLC_TICK_INVALID);
 }

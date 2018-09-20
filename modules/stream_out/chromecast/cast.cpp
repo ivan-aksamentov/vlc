@@ -49,10 +49,11 @@
 #define CC_ENABLE_SPU
 #endif
 
+namespace {
+
 struct sout_access_out_sys_t
 {
-    sout_access_out_sys_t(httpd_host_t *httpd_host, intf_sys_t * const intf,
-                          const char *psz_url);
+    sout_access_out_sys_t(httpd_host_t *httpd_host, intf_sys_t * const intf);
     ~sout_access_out_sys_t();
 
     void clear();
@@ -88,7 +89,7 @@ struct sout_stream_sys_t
 {
     sout_stream_sys_t(httpd_host_t *httpd_host, intf_sys_t * const intf, bool has_video, int port)
         : httpd_host(httpd_host)
-        , access_out_live(httpd_host, intf, "/stream")
+        , access_out_live(httpd_host, intf)
         , p_out(NULL)
         , p_intf(intf)
         , b_supports_video(has_video)
@@ -169,6 +170,8 @@ struct sout_stream_id_sys_t
     sout_stream_id_sys_t  *p_sub_id;
     bool                  flushed;
 };
+
+} // namespace
 
 #define SOUT_CFG_PREFIX "sout-chromecast-"
 
@@ -324,15 +327,15 @@ static int ProxySend(sout_stream_t *p_stream, void *_id, block_t *p_buffer)
             if (p_buffer->i_pts < p_sys->first_video_keyframe_pts
              || p_sys->first_video_keyframe_pts == -1)
             {
-                block_Release(p_buffer);
+                block_ChainRelease(p_buffer);
                 return VLC_SUCCESS;
             }
         }
 
         vlc_tick_t pause_delay = p_sys->p_intf->getPauseDelay();
-        if( p_buffer->i_pts != VLC_TS_INVALID )
+        if( p_buffer->i_pts != VLC_TICK_INVALID )
             p_buffer->i_pts -= pause_delay;
-        if( p_buffer->i_dts != VLC_TS_INVALID )
+        if( p_buffer->i_dts != VLC_TICK_INVALID )
             p_buffer->i_dts -= pause_delay;
 
         int ret = sout_StreamIdSend(p_stream->p_next, id, p_buffer);
@@ -347,7 +350,7 @@ static int ProxySend(sout_stream_t *p_stream, void *_id, block_t *p_buffer)
     }
     else
     {
-        block_Release(p_buffer);
+        block_ChainRelease(p_buffer);
         return VLC_SUCCESS;
     }
 }
@@ -382,8 +385,7 @@ static int httpd_url_cb(httpd_callback_sys_t *data, httpd_client_t *cl,
 }
 
 sout_access_out_sys_t::sout_access_out_sys_t(httpd_host_t *httpd_host,
-                                             intf_sys_t * const intf,
-                                             const char *psz_url)
+                                             intf_sys_t * const intf)
     : m_intf(intf)
     , m_client(NULL)
     , m_header(NULL)
@@ -393,7 +395,7 @@ sout_access_out_sys_t::sout_access_out_sys_t(httpd_host_t *httpd_host,
     m_fifo = block_FifoNew();
     if (!m_fifo)
         throw std::runtime_error( "block_FifoNew failed" );
-    m_url = httpd_UrlNew(httpd_host, psz_url, NULL, NULL);
+    m_url = httpd_UrlNew(httpd_host, intf->getHttpStreamPath().c_str(), NULL, NULL);
     if (m_url == NULL)
     {
         block_FifoRelease(m_fifo);
@@ -1016,26 +1018,22 @@ static std::string GetVencAvcodecVTOption( sout_stream_t * /* p_stream */,
                                            const video_format_t * p_vid,
                                            int i_quality )
 {
-    const bool b_hdres = p_vid == NULL || p_vid->i_height == 0 || p_vid->i_height >= 800;
     std::stringstream ssout;
     ssout << "venc=avcodec{codec=h264_videotoolbox,options{realtime=1}}";
-    if( b_hdres )
+    switch( i_quality )
     {
-        switch( i_quality )
-        {
-            /* Here, performances issues won't come from videotoolbox but from
-             * some old chromecast devices */
+        /* Here, performances issues won't come from videotoolbox but from
+         * some old chromecast devices */
 
-            case CONVERSION_QUALITY_HIGH:
-                break;
-            case CONVERSION_QUALITY_MEDIUM:
-                ssout << ",vb=8000000";
-                break;
-            case CONVERSION_QUALITY_LOW:
-            case CONVERSION_QUALITY_LOWCPU:
-                ssout << ",vb=3000000";
-                break;
-        }
+        case CONVERSION_QUALITY_HIGH:
+            break;
+        case CONVERSION_QUALITY_MEDIUM:
+            ssout << ",vb=8000000";
+            break;
+        case CONVERSION_QUALITY_LOW:
+        case CONVERSION_QUALITY_LOWCPU:
+            ssout << ",vb=3000000";
+            break;
     }
 
     return ssout.str();
@@ -1413,14 +1411,14 @@ static int Send(sout_stream_t *p_stream, void *_id, block_t *p_buffer)
 
     if( p_sys->isFlushing( p_stream ) )
     {
-        block_Release( p_buffer );
+        block_ChainRelease( p_buffer );
         return VLC_SUCCESS;
     }
 
     sout_stream_id_sys_t *next_id = p_sys->GetSubId( p_stream, id );
     if ( next_id == NULL )
     {
-        block_Release( p_buffer );
+        block_ChainRelease( p_buffer );
         return VLC_EGENERIC;
     }
 
@@ -1499,7 +1497,6 @@ static int Open(vlc_object_t *p_this)
     sout_stream_sys_t *p_sys = NULL;
     intf_sys_t *p_intf = NULL;
     char *psz_ip = NULL;
-    sout_stream_t *p_sout = NULL;
     httpd_host_t *httpd_host = NULL;
     bool b_supports_video = true;
     int i_local_server_port;
@@ -1541,15 +1538,6 @@ static int Open(vlc_object_t *p_this)
         p_intf = NULL;
         goto error;
     }
-
-    /* check if we can open the proper sout */
-    ss << "http{mux=" << DEFAULT_MUXER << "}";
-    p_sout = sout_StreamChainNew( p_stream->p_sout, ss.str().c_str(), NULL, NULL);
-    if (p_sout == NULL) {
-        msg_Dbg(p_stream, "could not create sout chain:%s", ss.str().c_str());
-        goto error;
-    }
-    sout_StreamChainDelete( p_sout, NULL );
 
     b_supports_video = var_GetBool(p_stream, SOUT_CFG_PREFIX "video");
 

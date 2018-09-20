@@ -208,7 +208,7 @@ static int Demux( demux_t *p_demux )
                                p_sys->pi_seektable[p_sys->i_currentframe] );
     if( p_data == NULL )
         return VLC_DEMUXER_EOF;
-    p_data->i_dts = p_data->i_pts = VLC_TS_0 + CLOCK_FREQ * p_sys->i_currentframe * TTA_FRAMETIME;
+    p_data->i_dts = p_data->i_pts = VLC_TICK_0 + vlc_tick_from_sec( p_sys->i_currentframe * TTA_FRAMETIME );
 
     p_sys->i_currentframe++;
 
@@ -226,7 +226,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
     double   f, *pf;
-    int64_t i64, *pi64;
+    int64_t i64;
 
     switch( i_query )
     {
@@ -265,13 +265,12 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         case DEMUX_GET_LENGTH:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = CLOCK_FREQ * p_sys->i_totalframes * TTA_FRAMETIME;
+            *va_arg( args, vlc_tick_t * ) =
+                vlc_tick_from_sec( p_sys->i_totalframes * TTA_FRAMETIME );
             return VLC_SUCCESS;
 
         case DEMUX_GET_TIME:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = CLOCK_FREQ * p_sys->i_currentframe * TTA_FRAMETIME;
+            *va_arg( args, vlc_tick_t * ) = vlc_tick_from_sec( p_sys->i_currentframe * TTA_FRAMETIME );
             return VLC_SUCCESS;
 
         case DEMUX_CAN_PAUSE:

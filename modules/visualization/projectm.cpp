@@ -132,6 +132,8 @@ vlc_module_end ()
 /*****************************************************************************
  * Local prototypes
  *****************************************************************************/
+namespace {
+
 struct filter_sys_t
 {
     /* */
@@ -151,6 +153,7 @@ struct filter_sys_t
     unsigned i_nb_samples;
 };
 
+} // namespace
 
 static block_t *DoWork( filter_t *, block_t * );
 static void *Thread( void * );
@@ -347,7 +350,7 @@ static void *Thread( void *p_data )
     /* */
     for( ;; )
     {
-        const vlc_tick_t i_deadline = vlc_tick_now() + CLOCK_FREQ / 50; /* 50 fps max */
+        const vlc_tick_t i_deadline = vlc_tick_now() + VLC_TICK_FROM_MS(20); /* 50 fps max */
 
         /* Manage the events */
         unsigned width, height;

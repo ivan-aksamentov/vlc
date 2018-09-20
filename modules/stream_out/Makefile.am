@@ -20,6 +20,12 @@ libstream_out_smem_plugin_la_SOURCES = stream_out/smem.c
 libstream_out_setid_plugin_la_SOURCES = stream_out/setid.c
 libstream_out_transcode_plugin_la_SOURCES = \
 	stream_out/transcode/transcode.c stream_out/transcode/transcode.h \
+	stream_out/transcode/encoder/encoder.c \
+        stream_out/transcode/encoder/encoder.h \
+        stream_out/transcode/encoder/encoder_priv.h \
+        stream_out/transcode/encoder/audio.c \
+        stream_out/transcode/encoder/spu.c \
+        stream_out/transcode/encoder/video.c \
 	stream_out/transcode/spu.c \
 	stream_out/transcode/audio.c stream_out/transcode/video.c
 libstream_out_transcode_plugin_la_CFLAGS = $(AM_CFLAGS)
@@ -43,6 +49,28 @@ sout_LTLIBRARIES = \
 	libstream_out_smem_plugin.la \
 	libstream_out_setid_plugin.la \
 	libstream_out_transcode_plugin.la
+
+if HAVE_DECKLINK
+libstream_out_sdi_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(CPPFLAGS_decklinkoutput)
+libstream_out_sdi_plugin_la_LIBADD = $(LIBS_decklink) $(LIBDL) -lpthread
+libstream_out_sdi_plugin_la_SOURCES = stream_out/sdi/sdiout.cpp \
+        stream_out/sdi/sdiout.hpp \
+        stream_out/sdi/Ancillary.cpp \
+        stream_out/sdi/Ancillary.hpp \
+        stream_out/sdi/AES3Audio.cpp \
+        stream_out/sdi/AES3Audio.hpp \
+        stream_out/sdi/DBMSDIOutput.cpp \
+        stream_out/sdi/DBMSDIOutput.hpp \
+        stream_out/sdi/SDIAudioMultiplex.cpp \
+        stream_out/sdi/SDIAudioMultiplex.hpp \
+        stream_out/sdi/SDIOutput.cpp \
+        stream_out/sdi/SDIOutput.hpp \
+        stream_out/sdi/SDIStream.cpp \
+        stream_out/sdi/SDIStream.hpp \
+        stream_out/sdi/V210.cpp \
+        stream_out/sdi/V210.hpp
+sout_LTLIBRARIES += libstream_out_sdi_plugin.la
+endif
 
 # RTP plugin
 sout_LTLIBRARIES += libstream_out_rtp_plugin.la

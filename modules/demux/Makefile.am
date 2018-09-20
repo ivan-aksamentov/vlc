@@ -41,9 +41,6 @@ demux_LTLIBRARIES += libwav_plugin.la
 libnsv_plugin_la_SOURCES = demux/nsv.c
 demux_LTLIBRARIES += libnsv_plugin.la
 
-libreal_plugin_la_SOURCES = demux/real.c
-demux_LTLIBRARIES += libreal_plugin.la
-
 libps_plugin_la_SOURCES = demux/mpeg/ps.c demux/mpeg/ps.h demux/mpeg/pes.h
 demux_LTLIBRARIES += libps_plugin.la
 
@@ -54,7 +51,7 @@ libmod_plugin_la_LIBADD = $(LIBS_mod)
 EXTRA_LTLIBRARIES += libmod_plugin.la
 demux_LTLIBRARIES += $(LTLIBmod)
 
-libpva_plugin_la_SOURCES = demux/pva.c
+libpva_plugin_la_SOURCES = demux/pva.c demux/mpeg/pes.h demux/mpeg/timestamps.h
 demux_LTLIBRARIES += libpva_plugin.la
 
 libaiff_plugin_la_SOURCES = demux/aiff.c
@@ -67,7 +64,8 @@ libsubtitle_plugin_la_SOURCES = demux/subtitle.c
 libsubtitle_plugin_la_LIBADD = $(LIBM)
 demux_LTLIBRARIES += libsubtitle_plugin.la
 
-libty_plugin_la_SOURCES = demux/ty.c codec/cc.h
+libty_plugin_la_SOURCES = demux/ty.c codec/cc.h \
+                          demux/mpeg/pes.h demux/mpeg/timestamps.h
 demux_LTLIBRARIES += libty_plugin.la
 
 libvobsub_plugin_la_SOURCES = demux/vobsub.c demux/vobsub.h \
@@ -131,7 +129,8 @@ libasf_plugin_la_SOURCES = demux/asf/asf.c demux/asf/libasf.c demux/asf/libasf.h
                            demux/asf/libasf_guid.h
 demux_LTLIBRARIES += libasf_plugin.la
 
-libavi_plugin_la_SOURCES = demux/avi/avi.c demux/avi/libavi.c demux/avi/libavi.h
+libavi_plugin_la_SOURCES = demux/avi/avi.c demux/avi/libavi.c demux/avi/libavi.h \
+                           demux/avi/bitmapinfoheader.h
 demux_LTLIBRARIES += libavi_plugin.la
 
 libcaf_plugin_la_SOURCES = demux/caf.c
@@ -171,15 +170,18 @@ demux_LTLIBRARIES += libes_plugin.la
 
 libh26x_plugin_la_SOURCES = demux/mpeg/h26x.c \
                             packetizer/h264_nal.c packetizer/hevc_nal.h
+libh26x_plugin_la_LIBADD = $(LIBM)
 demux_LTLIBRARIES += libh26x_plugin.la
 
 libmkv_plugin_la_SOURCES = \
 	demux/mkv/util.hpp demux/mkv/util.cpp \
+	demux/mkv/dvd_types.hpp \
 	demux/mkv/virtual_segment.hpp demux/mkv/virtual_segment.cpp \
 	demux/mkv/matroska_segment.hpp demux/mkv/matroska_segment.cpp \
 	demux/mkv/matroska_segment_parse.cpp \
 	demux/mkv/matroska_segment_seeker.hpp demux/mkv/matroska_segment_seeker.cpp \
 	demux/mkv/demux.hpp demux/mkv/demux.cpp \
+	demux/mkv/events.hpp demux/mkv/events.cpp \
 	demux/mkv/dispatcher.hpp \
 	demux/mkv/string_dispatcher.hpp \
 	demux/mkv/Ebml_parser.hpp demux/mkv/Ebml_parser.cpp \
@@ -206,9 +208,9 @@ libmp4_plugin_la_SOURCES = demux/mp4/mp4.c demux/mp4/mp4.h \
                            demux/mp4/languages.h \
                            demux/mp4/heif.c demux/mp4/heif.h \
                            demux/mp4/avci.h \
-                           demux/mp4/color_config.h \
                            demux/mp4/essetup.c demux/mp4/meta.c \
                            demux/asf/asfpacket.c demux/asf/asfpacket.h \
+                           packetizer/iso_color_tables.h \
                            meta_engine/ID3Genres.h
 libmp4_plugin_la_LIBADD = $(LIBM)
 libmp4_plugin_la_LDFLAGS = $(AM_LDFLAGS)
@@ -257,6 +259,7 @@ libts_plugin_la_SOURCES = demux/mpeg/ts.c demux/mpeg/ts.h \
         demux/mpeg/ts_strings.h demux/mpeg/ts_streams_private.h \
         demux/mpeg/pes.h \
         demux/mpeg/timestamps.h \
+	demux/mpeg/ts_descriptions.h \
         demux/dvb-text.h \
         demux/opus.h \
 	mux/mpeg/csa.c \
@@ -403,8 +406,8 @@ libadaptive_dash_SOURCES = \
     demux/dash/mpd/ProgramInformation.h \
     demux/dash/mpd/Representation.cpp \
     demux/dash/mpd/Representation.h \
-    demux/dash/mpd/TrickModeType.cpp \
-    demux/dash/mpd/TrickModeType.h \
+    demux/dash/mpd/TemplatedUri.cpp \
+    demux/dash/mpd/TemplatedUri.hpp \
     demux/dash/mp4/IndexReader.cpp \
     demux/dash/mp4/IndexReader.hpp \
     demux/dash/DASHManager.cpp \
@@ -426,7 +429,8 @@ libadaptive_hls_SOURCES = \
     demux/hls/HLSManager.hpp \
     demux/hls/HLSManager.cpp \
     demux/hls/HLSStreams.hpp \
-    demux/hls/HLSStreams.cpp
+    demux/hls/HLSStreams.cpp \
+    demux/mpeg/timestamps.h
 libadaptive_hls_SOURCES += meta_engine/ID3Tag.h \
                            meta_engine/ID3Meta.h
 

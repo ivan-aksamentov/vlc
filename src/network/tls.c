@@ -145,7 +145,7 @@ static vlc_tls_t *vlc_tls_SessionCreate(vlc_tls_creds_t *crd,
 void vlc_tls_SessionDelete (vlc_tls_t *session)
 {
     int canc = vlc_savecancel();
-    session->close(session);
+    session->ops->close(session);
     vlc_restorecancel(canc);
 }
 
@@ -168,7 +168,7 @@ vlc_tls_t *vlc_tls_ClientSessionCreate(vlc_tls_creds_t *crd, vlc_tls_t *sock,
 
     int canc = vlc_savecancel();
     vlc_tick_t deadline = vlc_tick_now ();
-    deadline += var_InheritInteger (crd, "ipv4-timeout") * 1000;
+    deadline += VLC_TICK_FROM_MS( var_InheritInteger (crd, "ipv4-timeout") );
 
     struct pollfd ufd[1];
     ufd[0].fd = vlc_tls_GetFD(sock);
@@ -194,7 +194,7 @@ error:
         ufd[0] .events = (val == 1) ? POLLIN : POLLOUT;
 
         vlc_restorecancel(canc);
-        val = vlc_poll_i11e(ufd, 1, (deadline - now) / 1000);
+        val = vlc_poll_i11e(ufd, 1, MS_FROM_VLC_TICK(deadline - now));
         canc = vlc_savecancel();
         if (val == 0)
         {

@@ -199,7 +199,7 @@ void M3U8Parser::parseSegments(vlc_object_t *, Representation *rep, const std::l
 
     vlc_tick_t totalduration = 0;
     vlc_tick_t nzStartTime = 0;
-    vlc_tick_t absReferenceTime = VLC_TS_INVALID;
+    vlc_tick_t absReferenceTime = VLC_TICK_INVALID;
     uint64_t sequenceNumber = 0;
     bool discontinuity = false;
     std::size_t prevbyterangeoffset = 0;
@@ -253,12 +253,12 @@ void M3U8Parser::parseSegments(vlc_object_t *, Representation *rep, const std::l
                         duration = durAttribute->floatingPoint();
                     ctx_extinf = NULL;
                 }
-                const vlc_tick_t nzDuration = CLOCK_FREQ * duration;
+                const vlc_tick_t nzDuration = vlc_tick_from_sec( duration );
                 segment->duration.Set(duration * (uint64_t) rep->getTimescale());
                 segment->startTime.Set(rep->getTimescale().ToScaled(nzStartTime));
                 nzStartTime += nzDuration;
                 totalduration += nzDuration;
-                if(absReferenceTime != VLC_TS_INVALID)
+                if(absReferenceTime != VLC_TICK_INVALID)
                 {
                     segment->utcTime = absReferenceTime;
                     absReferenceTime += nzDuration;
@@ -301,7 +301,7 @@ void M3U8Parser::parseSegments(vlc_object_t *, Representation *rep, const std::l
 
             case SingleValueTag::EXTXPROGRAMDATETIME:
                 rep->b_consistent = false;
-                absReferenceTime = VLC_TS_0 +
+                absReferenceTime = VLC_TICK_0 +
                         UTCTime(static_cast<const SingleValueTag *>(tag)->getValue().value).mtime();
                 break;
 

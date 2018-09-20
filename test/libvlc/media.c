@@ -127,19 +127,21 @@ static void test_media_preparsed(libvlc_instance_t *vlc, const char *path,
     libvlc_media_release (media);
 }
 
-static void input_item_preparse_timeout( const vlc_event_t *p_event,
+static void input_item_preparse_timeout( input_item_t *item,
+                                         enum input_item_preparse_status status,
                                          void *user_data )
 {
+    VLC_UNUSED(item);
     vlc_sem_t *p_sem = user_data;
 
-    assert( p_event->u.input_item_preparse_ended.new_status == ITEM_PREPARSE_TIMEOUT );
+    assert( status == ITEM_PREPARSE_TIMEOUT );
     vlc_sem_post(p_sem);
 }
 
 static void test_input_metadata_timeout(libvlc_instance_t *vlc, int timeout,
                                         int wait_and_cancel)
 {
-    log ("test_input_metadata_timeout: timeout: %d, wait_and_cancel: %d\n",
+    log ("test_input_metadata_timeout: timeout: %d, wait_and_cancel: %d ms\n",
          timeout, wait_and_cancel);
 
     int i_ret, p_pipe[2];
@@ -154,16 +156,17 @@ static void test_input_metadata_timeout(libvlc_instance_t *vlc, int timeout,
 
     vlc_sem_t sem;
     vlc_sem_init (&sem, 0);
-    i_ret = vlc_event_attach(&p_item->event_manager, vlc_InputItemPreparseEnded,
-                             input_item_preparse_timeout, &sem);
-    assert(i_ret == 0);
+    const struct input_preparser_callbacks_t cbs = {
+        .on_preparse_ended = input_item_preparse_timeout,
+    };
     i_ret = libvlc_MetadataRequest(vlc->p_libvlc_int, p_item,
-                                   META_REQUEST_OPTION_SCOPE_LOCAL, timeout, vlc);
+                                   META_REQUEST_OPTION_SCOPE_LOCAL,
+                                   &cbs, &sem, timeout, vlc);
     assert(i_ret == 0);
 
     if (wait_and_cancel > 0)
     {
-        vlc_tick_sleep(wait_and_cancel * 1000);
+        vlc_tick_sleep( VLC_TICK_FROM_MS(wait_and_cancel) );
         libvlc_MetadataCancel(vlc->p_libvlc_int, vlc);
 
     }

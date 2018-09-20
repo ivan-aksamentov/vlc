@@ -89,8 +89,8 @@ uint64_t MediaSegmentTemplate::getCurrentLiveTemplateNumber() const
         const Timescale timescale = inheritTimescale();
         time_t streamstart = parentSegmentInformation->getPlaylist()->availabilityStartTime.Get();
         streamstart += parentSegmentInformation->getPeriodStart();
-        stime_t elapsed = timescale.ToScaled(CLOCK_FREQ * (playbacktime - streamstart));
-        number += elapsed / dur - 2;
+        stime_t elapsed = timescale.ToScaled(vlc_tick_from_sec(playbacktime - streamstart));
+        number += elapsed / dur;
     }
 
     return number;

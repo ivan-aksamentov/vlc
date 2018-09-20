@@ -17,7 +17,6 @@ $Id$
  * access_output_srt: SRT (Secure Reliable Transport) access_output module
  * access_output_udp: UDP Network access_output module
  * access_qtsound: Quicktime Audio Capture
- * access_realrtsp: Real RTSP access
  * access_srt: SRT(Secure Reliable Transport) access module
  * access_wasapi: WASAPI audio input
  * accesstweaks: access control tweaking module (dev tool)
@@ -46,7 +45,6 @@ $Id$
  * aribcam: ARIB STD-B25 decoder/virtual CAM
  * aribsub: ARIB subtitles decoder
  * asf: ASF demuxer
- * attachment: Attachment access module
  * au: AU file demuxer
  * audio_format: helper module for audio transcoding
  * audiobargraph_a: audiobargraph audio plugin
@@ -209,6 +207,7 @@ $Id$
  * karaoke: simple karaoke audio filter
  * kate: kate text bitstream decoder
  * keychain: Keystore for iOS, Mac OS X and tvOS
+ * kms: Kernel mode setting video output
  * kva: OS/2 video output
  * kwallet: store secrets via KDE Kwallet
  * libass: Subtitle renderers using libass
@@ -218,7 +217,6 @@ $Id$
  * linsys_sdi: Linsys SDI cards access module
  * lirc: Linux infrared control module
  * live555: rtp demux based on liveMedia (live555.com)
- * logger: file logger plugin
  * logo: video filter to put a logo on the video
  * lpcm: LPCM decoder
  * lua: Lua scripting inteface
@@ -228,6 +226,7 @@ $Id$
  * marq: Overlays a marquee on the video
  * mediacodec: Android Jelly Bean MediaCodec decoder module
  * mediadirs: Picture/Music/Video user directories as service discoveries
+ * medialibrary: Media collection management
  * memory_keystore: store secrets in memory
  * mft: Media Foundation Transform audio/video decoder
  * microdns: mDNS services discovery
@@ -319,7 +318,6 @@ $Id$
  * rawvid: raw video input module for vlc
  * rawvideo: Pseudo audio-decoder for raw video
  * rdp: Remote Desktop view only access
- * real: partial Real audio/video demuxer
  * record: record any stream instantly
  * remap: audio channel remapping filter
  * remoteosd: Remote-OSD over VNC
@@ -329,7 +327,6 @@ $Id$
  * rtp: rtp demux module
  * rtpvideo: encoder for raw video over RTP
  * rv32: RV32 image format conversion module
- * samba: Samba / libsmbclient input
  * samplerate: Secret Rabbit Code (libsamplerate) audio resampler
  * sap: Interface module to read SAP/SDP announcements
  * sapi: Windows Text to Speech Synthetizer using the SAPI 5.1 API
@@ -343,6 +340,7 @@ $Id$
  * scte18: SCTE-18/Emergency Alert Messaging for Cable decoder
  * scte27: SCTE-27/Digicipher subtitles decoder
  * sd_journal: logger output to SystemD journal
+ * sdiout: SDI stream output
  * sdl_image: SDL-based image decoder
  * sdp: SDP fake access
  * secret: store secrets via Gnome libsecret
@@ -356,6 +354,8 @@ $Id$
  * simple_channel_mixer: channel mixer
  * skins2: Skinnable interface, new generation
  * skiptags: APE & ID3 tags-skipping stream filter
+ * smb2: SMB2/3 access module
+ * smbc: Samba / libsmbclient input
  * smf: Standard MIDI file demuxer
  * sndio: OpenBSD sndio audio output
  * soxr: SoX Resampler library audio filter

@@ -45,7 +45,7 @@
  * Module descriptor
  *****************************************************************************/
 #define INDEXINTVL_TEXT N_("Index interval")
-#define INDEXINTVL_LONGTEXT N_("Minimal index interval, in microseconds. " \
+#define INDEXINTVL_LONGTEXT N_("Minimal index interval, in milliseconds. " \
     "Set to 0 to disable index creation.")
 #define INDEXRATIO_TEXT N_("Index size ratio")
 #define INDEXRATIO_LONGTEXT N_(\
@@ -177,7 +177,7 @@ typedef struct
          int i_index_pageno;
          /* index creation tracking values */
          uint64_t i_last_keyframe_pos;
-         uint64_t i_last_keyframe_time;
+         vlc_tick_t i_last_keyframe_time;
     } skeleton;
 
     int             i_dirac_last_pt;
@@ -211,7 +211,7 @@ typedef struct
         bool b_head_done;
         /* backup values for rewriting fishead page later */
         uint64_t i_fishead_offset;  /* sout offset of the fishead page */
-        int i_index_intvl;
+        vlc_tick_t i_index_intvl;
         float i_index_ratio;
     } skeleton;
 
@@ -249,7 +249,7 @@ static int Open( vlc_object_t *p_this )
     p_sys->skeleton.b_create = false;
     p_sys->skeleton.b_head_done = false;
     p_sys->skeleton.i_index_intvl =
-            var_InheritInteger( p_this, SOUT_CFG_PREFIX "indexintvl" );
+            VLC_TICK_FROM_MS(var_InheritInteger( p_this, SOUT_CFG_PREFIX "indexintvl" ));
     p_sys->skeleton.i_index_ratio =
             var_InheritFloat( p_this, SOUT_CFG_PREFIX "indexratio" );
     p_sys->i_data_start = 0;
@@ -419,7 +419,7 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             }
             p_stream->p_oggds_header->i_size = 0 ;
             p_stream->p_oggds_header->i_time_unit =
-                     INT64_C(10000000) * p_stream->fmt.video.i_frame_rate_base /
+                     MSFTIME_FROM_SEC(1) * p_stream->fmt.video.i_frame_rate_base /
                      (int64_t)p_stream->fmt.video.i_frame_rate;
             p_stream->p_oggds_header->i_samples_per_unit = 1;
             p_stream->p_oggds_header->i_default_len = 1 ; /* ??? */
@@ -505,7 +505,7 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             snprintf( buf, sizeof(buf), "%"PRIx16, i_tag );
             strncpy( p_stream->p_oggds_header->sub_type, buf, 4 );
 
-            p_stream->p_oggds_header->i_time_unit = INT64_C(10000000);
+            p_stream->p_oggds_header->i_time_unit = MSFTIME_FROM_SEC(1);
             p_stream->p_oggds_header->i_default_len = 1;
             p_stream->p_oggds_header->i_buffer_size = 30*1024 ;
             p_stream->p_oggds_header->i_samples_per_unit = p_input->p_fmt->audio.i_rate;
@@ -624,12 +624,12 @@ static int WriteQWVariableLE( uint64_t i_64, uint64_t i_offset,
     }
 }
 
-static bool AddIndexEntry( sout_mux_t *p_mux, uint64_t i_time, sout_input_t *p_input )
+static bool AddIndexEntry( sout_mux_t *p_mux, vlc_tick_t i_time, sout_input_t *p_input )
 {
     sout_mux_sys_t *p_sys = p_mux->p_sys;
     ogg_stream_t *p_stream = (ogg_stream_t *) p_input->p_sys;
     uint64_t i_posdelta;
-    uint64_t i_timedelta;
+    vlc_tick_t i_timedelta;
     if ( !p_sys->skeleton.b_create || p_sys->skeleton.i_index_intvl == 0
          || !p_stream->skeleton.p_index )
         return false;
@@ -639,8 +639,7 @@ static bool AddIndexEntry( sout_mux_t *p_mux, uint64_t i_time, sout_input_t *p_i
     i_posdelta = p_sys->i_pos - p_stream->skeleton.i_last_keyframe_pos;
     i_timedelta = i_time - p_stream->skeleton.i_last_keyframe_time;
 
-    if ( i_timedelta <= ( (uint64_t) p_sys->skeleton.i_index_intvl * 1000 )
-         || i_posdelta <= 0xFFFF )
+    if ( i_timedelta <= p_sys->skeleton.i_index_intvl || i_posdelta <= 0xFFFF )
         return false;
 
     /* do inserts */
@@ -718,7 +717,7 @@ static void OggGetSkeletonIndex( uint8_t **pp_buffer, long *pi_size, ogg_stream_
     memcpy( p_buffer, "index", 6 );
     SetDWLE( &p_buffer[6], p_stream->i_serial_no );
     SetQWLE( &p_buffer[10], p_stream->skeleton.i_index_count ); /* num keypoints */
-    SetQWLE( &p_buffer[18], 1000000 );
+    SetQWLE( &p_buffer[18], CLOCK_FREQ );
     SetQWLE( &p_buffer[34], p_stream->i_length );
     memcpy( p_buffer + INDEX_BASE_SIZE, p_stream->skeleton.p_index, p_stream->skeleton.i_index_payload );
     *pi_size = INDEX_BASE_SIZE + p_stream->skeleton.i_index_size;
@@ -1430,15 +1429,15 @@ static bool AllocateIndex( sout_mux_t *p_mux, sout_input_t *p_input )
 
     if ( p_stream->i_length )
     {
-        uint64_t i_interval = (uint64_t)p_sys->skeleton.i_index_intvl * 1000;
+        vlc_tick_t i_interval = p_sys->skeleton.i_index_intvl;
         uint64_t i;
 
         if( p_input->p_fmt->i_cat == VIDEO_ES &&
                 p_stream->fmt.video.i_frame_rate )
         {
             /* optimize for fps < 1 */
-            i_interval= __MAX( p_sys->skeleton.i_index_intvl * 1000,
-                       INT64_C(10000000) *
+            i_interval= __MAX( i_interval,
+                       VLC_TICK_FROM_SEC(10) *
                        p_stream->fmt.video.i_frame_rate_base /
                        p_stream->fmt.video.i_frame_rate );
         }
@@ -1447,7 +1446,7 @@ static bool AllocateIndex( sout_mux_t *p_mux, sout_input_t *p_input )
         /* estimate length of pos value */
         if ( p_input->p_fmt->i_bitrate )
         {
-            i = i_interval * p_input->p_fmt->i_bitrate / 1000000;
+            i = i_interval * p_input->p_fmt->i_bitrate / CLOCK_FREQ;
             while ( i <<= 1 ) i_tuple_size++;
         }
         else
@@ -1465,7 +1464,7 @@ static bool AllocateIndex( sout_mux_t *p_mux, sout_input_t *p_input )
     }
     else
     {
-        i_size = ( INT64_C(3600) * 11.2 * 1000 / p_sys->skeleton.i_index_intvl )
+        i_size = ( INT64_C(3600) * 11.2 * CLOCK_FREQ / p_sys->skeleton.i_index_intvl )
                 * p_sys->skeleton.i_index_ratio;
         msg_Dbg( p_mux, "No stream length, using default allocation for index" );
     }
@@ -1692,8 +1691,7 @@ static int MuxBlock( sout_mux_t *p_mux, sout_input_t *p_input )
                 dt *=2;
             }
 
-            int64_t delay = pt - dt;
-            if ( delay < 0 ) delay *= -1;
+            int64_t delay = llabs(pt - dt);
 
             op.granulepos = (pt - delay) << 31 | (dist&0xff00) << 14
                           | (delay&0x1fff) << 9 | (dist&0xff);
@@ -1723,13 +1721,13 @@ static int MuxBlock( sout_mux_t *p_mux, sout_input_t *p_input )
             ( ( ( p_stream->i_num_frames - p_stream->i_last_keyframe ) & 0x07FFFFFF ) << 3 );
         }
         else if( p_stream->p_oggds_header )
-            op.granulepos = ( p_data->i_dts - p_sys->i_start_dts ) * INT64_C(10) /
+            op.granulepos = MSFTIME_FROM_VLC_TICK( p_data->i_dts - p_sys->i_start_dts ) /
                 p_stream->p_oggds_header->i_time_unit;
     }
     else if( p_stream->fmt.i_cat == SPU_ES )
     {
         /* granulepos is in millisec */
-        op.granulepos = ( p_data->i_dts - p_sys->i_start_dts ) / 1000;
+        op.granulepos = MS_FROM_VLC_TICK( p_data->i_dts - p_sys->i_start_dts );
     }
     else
         return VLC_EGENERIC;

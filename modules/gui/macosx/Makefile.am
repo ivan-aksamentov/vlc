@@ -1,8 +1,20 @@
-SUFFIXES += .xib
+SUFFIXES += .xib .nib
+
+xib_verbose = $(xib_verbose_$(V))
+xib_verbose_ = $(xib_verbose__$(AM_DEFAULT_VERBOSITY))
+xib_verbose_0 = @echo "  XIB     " $@;
+xib_verbose__0 = $(xib_verbose_0)
+
+.xib.nib:
+	$(AM_V_at)mkdir -p -- gui/macosx/UI
+	$(xib_verbose)$(XIB) --errors --warnings --notices \
+	  --module VLC --auto-activate-custom-fonts --target-device mac \
+	  --minimum-deployment-target 10.10 --output-format human-readable-text \
+	  --compile $@ $<
 
 libmacosx_plugin_la_OBJCFLAGS = $(AM_OBJCFLAGS) -fobjc-exceptions -fobjc-arc
 libmacosx_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(guidir)' \
-	-Wl,-framework,Cocoa -Wl,-framework,Carbon -Wl,-framework,CoreServices \
+	-Wl,-framework,Cocoa -Wl,-framework,CoreServices \
 	-Wl,-framework,AVFoundation -Wl,-framework,CoreMedia -Wl,-framework,IOKit \
 	-Wl,-framework,AddressBook -Wl,-framework,WebKit -Wl,-framework,CoreAudio \
 	-Wl,-framework,SystemConfiguration -Wl,-framework,ScriptingBridge \
@@ -48,15 +60,11 @@ libmacosx_plugin_la_SOURCES = \
 	gui/macosx/VLCPLModel.h gui/macosx/VLCPLModel.m \
 	gui/macosx/prefs.h gui/macosx/prefs.m \
 	gui/macosx/prefs_widgets.h gui/macosx/prefs_widgets.m \
-	gui/macosx/PXSourceList.h gui/macosx/PXSourceList.m \
-	gui/macosx/PXSourceListDataSource.h gui/macosx/PXSourceListDelegate.h \
-	gui/macosx/SideBarItem.h gui/macosx/SideBarItem.m \
 	gui/macosx/VLCPopupPanelController.h gui/macosx/VLCPopupPanelController.m \
 	gui/macosx/VLCTextfieldPanelController.h gui/macosx/VLCTextfieldPanelController.m \
 	gui/macosx/VLCSimplePrefsController.h gui/macosx/VLCSimplePrefsController.m \
 	gui/macosx/VLCSimplePrefsWindow.h gui/macosx/VLCSimplePrefsWindow.m \
 	gui/macosx/VLCHotkeyChangeWindow.h gui/macosx/VLCHotkeyChangeWindow.m \
-	gui/macosx/SPInvocationGrabbing.h gui/macosx/SPInvocationGrabbing.m \
 	gui/macosx/SPMediaKeyTap.h gui/macosx/SPMediaKeyTap.m \
 	gui/macosx/Spotify.h \
 	gui/macosx/VLCStringUtility.h gui/macosx/VLCStringUtility.m \
@@ -84,6 +92,9 @@ libmacosx_plugin_la_SOURCES = \
 	gui/macosx/VLCRendererItem.h gui/macosx/VLCRendererItem.m \
 	gui/macosx/VLCRendererMenuController.h gui/macosx/VLCRendererMenuController.m \
 	gui/macosx/VLCResumeDialogController.h gui/macosx/VLCResumeDialogController.m \
+	gui/macosx/VLCSourceListItem.h gui/macosx/VLCSourceListItem.m \
+	gui/macosx/VLCSourceListTableCellView.h gui/macosx/VLCSourceListTableCellView.m \
+	gui/macosx/VLCSourceListBadgeButton.h gui/macosx/VLCSourceListBadgeButton.m \
 	gui/macosx/VLCTrackSynchronizationWindowController.h gui/macosx/VLCTrackSynchronizationWindowController.m \
 	gui/macosx/VLCVideoEffectsWindowController.h gui/macosx/VLCVideoEffectsWindowController.m \
 	gui/macosx/VLCFSPanelController.h gui/macosx/VLCFSPanelController.m \
@@ -99,39 +110,29 @@ libmacosx_plugin_la_SOURCES = \
 	gui/macosx/VLCVolumeSliderCell.h gui/macosx/VLCVolumeSliderCell.m \
 	gui/macosx/VLCWrappableTextField.h gui/macosx/VLCWrappableTextField.m
 
+# PXSourceList sources
+libmacosx_plugin_la_SOURCES += \
+	gui/macosx/PXSourceList/PXSourceList.h \
+	gui/macosx/PXSourceList/PXSourceList.m \
+	gui/macosx/PXSourceList/PXSourceListBadgeCell.h \
+	gui/macosx/PXSourceList/PXSourceListBadgeCell.m \
+	gui/macosx/PXSourceList/PXSourceListBadgeView.h \
+	gui/macosx/PXSourceList/PXSourceListBadgeView.m \
+	gui/macosx/PXSourceList/PXSourceListItem.h \
+	gui/macosx/PXSourceList/PXSourceListItem.m \
+	gui/macosx/PXSourceList/PXSourceListTableCellView.h \
+	gui/macosx/PXSourceList/PXSourceListTableCellView.m \
+	gui/macosx/PXSourceList/Internal/PXSourceListDelegateDataSourceProxy.h \
+	gui/macosx/PXSourceList/Internal/PXSourceListDelegateDataSourceProxy.m \
+	gui/macosx/PXSourceList/Internal/PXSourceListRuntimeAdditions.h \
+	gui/macosx/PXSourceList/Internal/PXSourceListRuntimeAdditions.m \
+	gui/macosx/PXSourceList/Internal/PXSourceListPrivateConstants.h \
+	gui/macosx/PXSourceList/PXSourceListDataSource.h \
+	gui/macosx/PXSourceList/PXSourceListDelegate.h
 
 # User interface compilation
 
-nodist_libmacosx_plugin_la_SOURCES = \
-	gui/macosx/UI/About.nib \
-	gui/macosx/UI/AddonManager.nib \
-	gui/macosx/UI/AudioEffects.nib \
-	gui/macosx/UI/Bookmarks.nib \
-	gui/macosx/UI/ConvertAndSave.nib \
-	gui/macosx/UI/CoreDialogs.nib \
-	gui/macosx/UI/DetachedVideoWindow.nib \
-	gui/macosx/UI/ErrorPanel.nib \
-	gui/macosx/UI/Help.nib \
-	gui/macosx/UI/LogMessageWindow.nib \
-	gui/macosx/UI/MainMenu.nib \
-	gui/macosx/UI/MainWindow.nib \
-	gui/macosx/UI/MediaInfo.nib \
-	gui/macosx/UI/Open.nib \
-	gui/macosx/UI/PlaylistAccessoryView.nib \
-	gui/macosx/UI/PlaylistMenu.nib \
-	gui/macosx/UI/PopupPanel.nib \
-	gui/macosx/UI/Preferences.nib \
-	gui/macosx/UI/ResumeDialog.nib \
-	gui/macosx/UI/SimplePreferences.nib \
-	gui/macosx/UI/StreamOutput.nib \
-	gui/macosx/UI/SyncTracks.nib \
-	gui/macosx/UI/TextfieldPanel.nib \
-	gui/macosx/UI/TimeSelectionPanel.nib \
-	gui/macosx/UI/VideoEffects.nib \
-	gui/macosx/UI/VLCFullScreenPanel.nib \
-	gui/macosx/UI/VLCStatusBarIconMainMenu.nib
-
-EXTRA_DIST += \
+libmacosx_plugin_la_XIB_SOURCES = \
 	gui/macosx/UI/About.xib \
 	gui/macosx/UI/AddonManager.xib \
 	gui/macosx/UI/AudioEffects.xib \
@@ -160,21 +161,11 @@ EXTRA_DIST += \
 	gui/macosx/UI/VLCFullScreenPanel.xib \
 	gui/macosx/UI/VLCStatusBarIconMainMenu.xib
 
-xib_verbose = $(xib_verbose_$(V))
-xib_verbose_ = $(xib_verbose__$(AM_DEFAULT_VERBOSITY))
-xib_verbose_0 = @echo "  XIB   " $@;
-xib_verbose__0 = $(xib_verbose_0)
-
-.xib.nib:
-	$(AM_V_at)mkdir -p -- gui/macosx/UI
-	$(xib_verbose)$(XIB) --errors --warnings --notices \
-	  --module VLC --auto-activate-custom-fonts --target-device mac \
-	  --minimum-deployment-target 10.10 --output-format human-readable-text \
-	  --compile $@ $<
+libmacosx_plugin_la_SOURCES += $(libmacosx_plugin_la_XIB_SOURCES)
 
 if ENABLE_MACOSX_UI
 gui_LTLIBRARIES += libmacosx_plugin.la
-BUILT_SOURCES += $(nodist_libmacosx_plugin_la_SOURCES)
+BUILT_SOURCES += $(libmacosx_plugin_la_XIB_SOURCES:.xib=.nib)
 endif
 
 

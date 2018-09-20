@@ -243,10 +243,9 @@ static HRESULT CompileTargetShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool l
 #undef D3D11_CompilePixelShader
 HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool legacy_shader,
                                  d3d11_device_t *d3d_dev,
-                                 const d3d_format_t *format, const display_info_t *display,
+                                 const display_info_t *display,
                                  video_transfer_func_t transfer, bool src_full_range,
-                                 ID3D11PixelShader *output[D3D11_MAX_SHADER_VIEW],
-                                 ID3D11SamplerState *d3dsampState[2])
+                                 d3d_quad_t *quad)
 {
     static const char *DEFAULT_NOOP = "return rgb";
     const char *psz_sampler[2] = {NULL, NULL};
@@ -257,39 +256,36 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
     const char *psz_move_planes[2]    = {DEFAULT_NOOP, DEFAULT_NOOP};
     char *psz_range = NULL;
 
-    if (d3dsampState)
-    {
-        D3D11_SAMPLER_DESC sampDesc;
-        memset(&sampDesc, 0, sizeof(sampDesc));
-        sampDesc.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
-        sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampDesc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
-        sampDesc.MinLOD = 0;
-        sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
+    D3D11_SAMPLER_DESC sampDesc;
+    memset(&sampDesc, 0, sizeof(sampDesc));
+    sampDesc.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+    sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampDesc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
+    sampDesc.MinLOD = 0;
+    sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
 
-        HRESULT hr;
-        hr = ID3D11Device_CreateSamplerState(d3d_dev->d3ddevice, &sampDesc, &d3dsampState[0]);
-        if (FAILED(hr)) {
-            msg_Err(o, "Could not Create the D3d11 Sampler State. (hr=0x%lX)", hr);
-            return hr;
-        }
+    HRESULT hr;
+    hr = ID3D11Device_CreateSamplerState(d3d_dev->d3ddevice, &sampDesc, &quad->d3dsampState[0]);
+    if (FAILED(hr)) {
+        msg_Err(o, "Could not Create the D3d11 Sampler State. (hr=0x%lX)", hr);
+        return hr;
+    }
 
-        sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-        hr = ID3D11Device_CreateSamplerState(d3d_dev->d3ddevice, &sampDesc, &d3dsampState[1]);
-        if (FAILED(hr)) {
-            msg_Err(o, "Could not Create the D3d11 Sampler State. (hr=0x%lX)", hr);
-            ID3D11SamplerState_Release(d3dsampState[0]);
-            return hr;
-        }
+    sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    hr = ID3D11Device_CreateSamplerState(d3d_dev->d3ddevice, &sampDesc, &quad->d3dsampState[1]);
+    if (FAILED(hr)) {
+        msg_Err(o, "Could not Create the D3d11 Sampler State. (hr=0x%lX)", hr);
+        ID3D11SamplerState_Release(quad->d3dsampState[0]);
+        return hr;
     }
 
     if ( display->pixelFormat->formatTexture == DXGI_FORMAT_NV12 ||
          display->pixelFormat->formatTexture == DXGI_FORMAT_P010 )
     {
         /* we need 2 shaders, one for the Y target, one for the UV target */
-        switch (format->formatTexture)
+        switch (quad->textureFormat->formatTexture)
         {
         case DXGI_FORMAT_NV12:
         case DXGI_FORMAT_P010:
@@ -307,6 +303,7 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
         case DXGI_FORMAT_B8G8R8A8_UNORM:
         case DXGI_FORMAT_B8G8R8X8_UNORM:
         case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
         case DXGI_FORMAT_B5G6R5_UNORM:
             /* Y */
             psz_sampler[0] =
@@ -322,7 +319,7 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
                     "return rgb";
             break;
         case DXGI_FORMAT_UNKNOWN:
-            switch (format->fourcc)
+            switch (quad->textureFormat->fourcc)
             {
             case VLC_CODEC_YUVA:
                 /* Y */
@@ -348,7 +345,7 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
     }
     else
     {
-        switch (format->formatTexture)
+        switch (quad->textureFormat->formatTexture)
         {
         case DXGI_FORMAT_NV12:
         case DXGI_FORMAT_P010:
@@ -366,21 +363,22 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
             break;
         case DXGI_FORMAT_AYUV:
             psz_sampler[0] =
-                    "sample.x  = shaderTexture[0].Sample(SampleType, In.Texture).z;\
-                    sample.y  = shaderTexture[0].Sample(SampleType, In.Texture).y;\
-                    sample.z  = shaderTexture[0].Sample(SampleType, In.Texture).x;\
-                    sample.a  = shaderTexture[0].Sample(SampleType, In.Texture).a;";
+                    "sample.x  = shaderTexture[0].Sample(SampleType, coords).z;\
+                    sample.y  = shaderTexture[0].Sample(SampleType, coords).y;\
+                    sample.z  = shaderTexture[0].Sample(SampleType, coords).x;\
+                    sample.a  = shaderTexture[0].Sample(SampleType, coords).a;";
             break;
         case DXGI_FORMAT_R8G8B8A8_UNORM:
         case DXGI_FORMAT_B8G8R8A8_UNORM:
         case DXGI_FORMAT_B8G8R8X8_UNORM:
         case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
         case DXGI_FORMAT_B5G6R5_UNORM:
             psz_sampler[0] =
                     "sample = shaderTexture[0].Sample(samplerState, coords);";
             break;
         case DXGI_FORMAT_UNKNOWN:
-            switch (format->fourcc)
+            switch (quad->textureFormat->fourcc)
             {
             case VLC_CODEC_I420_10L:
                 psz_sampler[0] =
@@ -506,7 +504,7 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
         if (src_full_range)
             range_adjust = -1; /* lower the source to studio range */
     }
-    if (!IsRGBShader(format) && !src_full_range)
+    if (!IsRGBShader(quad->textureFormat) && !src_full_range)
         range_adjust--; /* the YUV->RGB conversion already output full range */
 
     if (range_adjust != 0)
@@ -517,7 +515,7 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
             FLOAT itu_black_level;
             FLOAT itu_range_factor;
             FLOAT itu_white_level;
-            switch (format->bitsPerChannel)
+            switch (quad->textureFormat->bitsPerChannel)
             {
             case 8:
                 /* Rec. ITU-R BT.709-6 §4.6 */
@@ -573,18 +571,30 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *o, d3d11_handle_t *hd3d, bool leg
         }
     }
 
-    HRESULT hr = CompileTargetShader(o, hd3d, legacy_shader, d3d_dev,
+    hr = CompileTargetShader(o, hd3d, legacy_shader, d3d_dev,
                                      psz_sampler[0], psz_src_transform,
                                      psz_display_transform, psz_tone_mapping,
-                                     psz_adjust_range, psz_move_planes[0], &output[0]);
+                                     psz_adjust_range, psz_move_planes[0], &quad->d3dpixelShader[0]);
     if (!FAILED(hr) && psz_sampler[1])
         hr = CompileTargetShader(o, hd3d, legacy_shader, d3d_dev,
                                  psz_sampler[1], psz_src_transform,
                                  psz_display_transform, psz_tone_mapping,
-                                 psz_adjust_range, psz_move_planes[1], &output[1]);
+                                 psz_adjust_range, psz_move_planes[1], &quad->d3dpixelShader[1]);
     free(psz_range);
 
     return hr;
+}
+
+void D3D11_ReleasePixelShader(d3d_quad_t *quad)
+{
+    for (size_t i=0; i<D3D11_MAX_SHADER_VIEW; i++)
+    {
+        if (quad->d3dpixelShader[i])
+        {
+            ID3D11PixelShader_Release(quad->d3dpixelShader[i]);
+            quad->d3dpixelShader[i] = NULL;
+        }
+    }
 }
 
 #undef D3D11_CompileShader
@@ -702,4 +712,77 @@ void D3D11_ClearRenderTargets(d3d11_device_t *d3d_dev, const d3d_format_t *cfg,
     default:
         vlc_assert_unreachable();
     }
+}
+
+static HRESULT D3D11_CompileVertexShader(vlc_object_t *obj, d3d11_handle_t *hd3d,
+                                         d3d11_device_t *d3d_dev, const char *psz_shader,
+                                         d3d_vshader_t *output)
+{
+   HRESULT hr = E_FAIL;
+   ID3DBlob *pVSBlob = D3D11_CompileShader(obj, hd3d, d3d_dev, psz_shader, false);
+   if (!pVSBlob)
+       goto error;
+
+   hr = ID3D11Device_CreateVertexShader(d3d_dev->d3ddevice, (void *)ID3D10Blob_GetBufferPointer(pVSBlob),
+                                        ID3D10Blob_GetBufferSize(pVSBlob), NULL, &output->shader);
+
+   if(FAILED(hr)) {
+       msg_Err(obj, "Failed to create the flat vertex shader. (hr=0x%lX)", hr);
+       goto error;
+   }
+
+   static D3D11_INPUT_ELEMENT_DESC layout[] = {
+   { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
+   { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
+   };
+
+   hr = ID3D11Device_CreateInputLayout(d3d_dev->d3ddevice, layout, 2, (void *)ID3D10Blob_GetBufferPointer(pVSBlob),
+                                       ID3D10Blob_GetBufferSize(pVSBlob), &output->layout);
+
+   ID3D10Blob_Release(pVSBlob);
+   pVSBlob = NULL;
+   if(FAILED(hr)) {
+       msg_Err(obj, "Failed to create the vertex input layout. (hr=0x%lX)", hr);
+       goto error;
+   }
+
+   return S_OK;
+error:
+   return hr;
+}
+
+void D3D11_SetVertexShader(d3d_vshader_t *dst, d3d_vshader_t *src)
+{
+    dst->layout = src->layout;
+    ID3D11InputLayout_AddRef(dst->layout);
+    dst->shader = src->shader;
+    ID3D11VertexShader_AddRef(dst->shader);
+}
+
+void D3D11_ReleaseVertexShader(d3d_vshader_t *shader)
+{
+    if (shader->layout)
+    {
+        ID3D11InputLayout_Release(shader->layout);
+        shader->layout = NULL;
+    }
+    if (shader->shader)
+    {
+        ID3D11VertexShader_Release(shader->shader);
+        shader->shader = NULL;
+    }
+}
+
+#undef D3D11_CompileFlatVertexShader
+HRESULT D3D11_CompileFlatVertexShader(vlc_object_t *obj, d3d11_handle_t *hd3d,
+                                      d3d11_device_t *d3d_dev, d3d_vshader_t *output)
+{
+    return D3D11_CompileVertexShader(obj, hd3d, d3d_dev, globVertexShaderFlat, output);
+}
+
+#undef D3D11_CompileProjectionVertexShader
+HRESULT D3D11_CompileProjectionVertexShader(vlc_object_t *obj, d3d11_handle_t *hd3d,
+                                            d3d11_device_t *d3d_dev, d3d_vshader_t *output)
+{
+    return D3D11_CompileVertexShader(obj, hd3d, d3d_dev, globVertexShaderProjection, output);
 }

@@ -55,8 +55,8 @@
 #define SDI_MODE_FILE     "/sys/class/sdi/sdirx%u/mode"
 #define READ_TIMEOUT      80000
 #define RESYNC_TIMEOUT    500000
-#define CLOCK_GAP         (CLOCK_FREQ/2)
-#define START_DATE        INT64_C(4294967296)
+#define CLOCK_GAP         VLC_TICK_FROM_MS(500)
+#define START_DATE        INT64_C(0x100000000)
 
 #define DEMUX_BUFFER_SIZE 1350000
 #define MAX_AUDIOS        4
@@ -179,7 +179,7 @@ typedef struct
     bool             b_hd, b_vbi;
     vbi_raw_decoder  rd_wss, rd_telx;
     vlc_tick_t       i_next_date;
-    int              i_incr;
+    vlc_tick_t       i_incr;
 
     /* ES stuff */
     int              i_id_video;
@@ -365,7 +365,6 @@ static int DemuxControl( demux_t *p_demux, int i_query, va_list args )
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     bool *pb;
-    int64_t *pi64;
 
     switch( i_query )
     {
@@ -378,9 +377,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = INT64_C(1000)
-                  * var_InheritInteger( p_demux, "live-caching" );
+            *va_arg( args, vlc_tick_t * ) =
+                VLC_TICK_FROM_MS(var_InheritInteger( p_demux, "live-caching" ));
             return VLC_SUCCESS;
 
         /* TODO implement others */

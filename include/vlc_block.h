@@ -49,7 +49,7 @@
  * - i_flags may not always be set (ie could be 0, even for a key frame
  *      it depends where you receive the buffer (before/after a packetizer
  *      and the demux/packetizer implementations.
- * - i_dts/i_pts could be VLC_TS_INVALID, it means no pts/dts
+ * - i_dts/i_pts could be VLC_TICK_INVALID, it means no pts/dts
  * - i_length: length in microseond of the packet, can be null except in the
  *      sout where it is mandatory.
  *
@@ -107,7 +107,10 @@
 #define BLOCK_FLAG_PRIVATE_MASK  0xff000000
 #define BLOCK_FLAG_PRIVATE_SHIFT 24
 
-typedef void (*block_free_t) (block_t *);
+struct vlc_block_callbacks
+{
+    void (*free)(block_t *);
+};
 
 struct block_t
 {
@@ -125,11 +128,28 @@ struct block_t
     vlc_tick_t  i_dts;
     vlc_tick_t  i_length;
 
-    /* Rudimentary support for overloading block (de)allocation. */
-    block_free_t pf_release;
+    const struct vlc_block_callbacks *cbs;
 };
 
-VLC_API void block_Init( block_t *, void *, size_t );
+/**
+ * Initializes a custom block.
+ *
+ * This function initialize a block of timed data allocated by custom means.
+ * This allows passing data with copying even if the data has been allocated
+ * with unusual means or outside of LibVLC.
+ *
+ * Normally, blocks are allocated and initialized by block_Alloc() instead.
+ *
+ * @param block allocated block structure to initialize
+ * @param cbs structure of custom callbacks to handle the block [IN]
+ * @param base start address of the block data
+ * @param length byte length of the block data
+ *
+ * @return @c block (this function cannot fail)
+ */
+VLC_API block_t *block_Init(block_t *block,
+                            const struct vlc_block_callbacks *cbs,
+                            void *base, size_t length);
 
 /**
  * Allocates a block.
@@ -175,14 +195,11 @@ VLC_API block_t *block_Realloc(block_t *, ssize_t pre, size_t body) VLC_USED;
  *
  * @note
  * If the block is in a chain, this function does <b>not</b> release any
- * subsequent block in the chain. Use block_ChainRelease() for that purpose. 
+ * subsequent block in the chain. Use block_ChainRelease() for that purpose.
  *
  * @param block block to release (cannot be NULL)
  */
-static inline void block_Release(block_t *block)
-{
-    block->pf_release(block);
-}
+VLC_API void block_Release(block_t *block);
 
 static inline void block_CopyProperties( block_t *dst, block_t *src )
 {

@@ -39,17 +39,11 @@
 
 #include "../codec/avcodec/va_surface.h"
 
-picture_sys_t *ActivePictureSys(picture_t *p_pic)
-{
-    struct va_pic_context *pic_ctx = (struct va_pic_context*)p_pic->context;
-    return pic_ctx ? &pic_ctx->picsys : p_pic->p_sys;
-}
-
 void AcquirePictureSys(picture_sys_t *p_sys)
 {
     for (int i=0; i<D3D11_MAX_SHADER_VIEW; i++) {
-        if (p_sys->resourceView[i])
-            ID3D11ShaderResourceView_AddRef(p_sys->resourceView[i]);
+        if (p_sys->renderSrc[i])
+            ID3D11ShaderResourceView_AddRef(p_sys->renderSrc[i]);
         if (p_sys->texture[i])
             ID3D11Texture2D_AddRef(p_sys->texture[i]);
     }
@@ -66,8 +60,8 @@ void AcquirePictureSys(picture_sys_t *p_sys)
 void ReleasePictureSys(picture_sys_t *p_sys)
 {
     for (int i=0; i<D3D11_MAX_SHADER_VIEW; i++) {
-        if (p_sys->resourceView[i])
-            ID3D11ShaderResourceView_Release(p_sys->resourceView[i]);
+        if (p_sys->renderSrc[i])
+            ID3D11ShaderResourceView_Release(p_sys->renderSrc[i]);
         if (p_sys->texture[i])
             ID3D11Texture2D_Release(p_sys->texture[i]);
     }
@@ -82,11 +76,11 @@ void ReleasePictureSys(picture_sys_t *p_sys)
 }
 
 /* map texture planes to resource views */
-#undef D3D11_AllocateShaderView
-int D3D11_AllocateShaderView(vlc_object_t *obj, ID3D11Device *d3ddevice,
+#undef D3D11_AllocateResourceView
+int D3D11_AllocateResourceView(vlc_object_t *obj, ID3D11Device *d3ddevice,
                               const d3d_format_t *format,
                               ID3D11Texture2D *p_texture[D3D11_MAX_SHADER_VIEW], UINT slice_index,
-                              ID3D11ShaderResourceView *resourceView[D3D11_MAX_SHADER_VIEW])
+                              ID3D11ShaderResourceView *renderSrc[D3D11_MAX_SHADER_VIEW])
 {
     HRESULT hr;
     int i;
@@ -112,10 +106,10 @@ int D3D11_AllocateShaderView(vlc_object_t *obj, ID3D11Device *d3ddevice,
     {
         resviewDesc.Format = format->resourceFormat[i];
         if (resviewDesc.Format == DXGI_FORMAT_UNKNOWN)
-            resourceView[i] = NULL;
+            renderSrc[i] = NULL;
         else
         {
-            hr = ID3D11Device_CreateShaderResourceView(d3ddevice, (ID3D11Resource*)p_texture[i], &resviewDesc, &resourceView[i]);
+            hr = ID3D11Device_CreateShaderResourceView(d3ddevice, (ID3D11Resource*)p_texture[i], &resviewDesc, &renderSrc[i]);
             if (FAILED(hr)) {
                 msg_Err(obj, "Could not Create the Texture ResourceView %d slice %d. (hr=0x%lX)", i, slice_index, hr);
                 break;
@@ -127,8 +121,8 @@ int D3D11_AllocateShaderView(vlc_object_t *obj, ID3D11Device *d3ddevice,
     {
         while (--i >= 0)
         {
-            ID3D11ShaderResourceView_Release(resourceView[i]);
-            resourceView[i] = NULL;
+            ID3D11ShaderResourceView_Release(renderSrc[i]);
+            renderSrc[i] = NULL;
         }
         return VLC_EGENERIC;
     }
@@ -225,6 +219,13 @@ void D3D11_ReleaseDevice(d3d11_device_t *d3d_dev)
         ID3D11Device_Release(d3d_dev->d3ddevice);
         d3d_dev->d3ddevice = NULL;
     }
+#if defined(HAVE_ID3D11VIDEODECODER)
+    if( d3d_dev->owner && d3d_dev->context_mutex != INVALID_HANDLE_VALUE )
+    {
+        CloseHandle( d3d_dev->context_mutex );
+        d3d_dev->context_mutex = INVALID_HANDLE_VALUE;
+    }
+#endif
 }
 
 #undef D3D11_CreateDevice
@@ -295,7 +296,15 @@ HRESULT D3D11_CreateDevice(vlc_object_t *obj, d3d11_handle_t *hd3d,
     }
 
     if (SUCCEEDED(hr))
+    {
+#if defined(HAVE_ID3D11VIDEODECODER)
+        out->context_mutex = CreateMutexEx( NULL, NULL, 0, SYNCHRONIZE );
+        ID3D11DeviceContext_SetPrivateData( out->d3dcontext, &GUID_CONTEXT_MUTEX,
+                                            sizeof( out->context_mutex ), &out->context_mutex );
+#endif
+
         out->owner = true;
+    }
 
     return hr;
 }
@@ -409,7 +418,76 @@ int D3D11CheckDriverVersion(d3d11_device_t *d3d_dev, UINT vendorId, const struct
     return VLC_SUCCESS;
 }
 
-const d3d_format_t *FindD3D11Format(ID3D11Device *d3ddevice,
+/* test formats that should work but sometimes have issues on some platforms */
+static bool CanReallyUseFormat(vlc_object_t *obj, d3d11_device_t *d3d_dev,
+                               vlc_fourcc_t i_chroma, DXGI_FORMAT dxgi)
+{
+    bool result = true;
+    if (dxgi == DXGI_FORMAT_UNKNOWN)
+        return true;
+
+    if (is_d3d11_opaque(i_chroma))
+        return true;
+
+    ID3D11Texture2D *texture = NULL;
+    D3D11_TEXTURE2D_DESC texDesc;
+    ZeroMemory(&texDesc, sizeof(texDesc));
+    texDesc.MipLevels = 1;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.MiscFlags = 0; //D3D11_RESOURCE_MISC_SHARED;
+    texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    texDesc.Usage = D3D11_USAGE_DYNAMIC;
+    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    texDesc.ArraySize = 1;
+    texDesc.Format = dxgi;
+    texDesc.Height = 144;
+    texDesc.Width = 176;
+    HRESULT hr = ID3D11Device_CreateTexture2D( d3d_dev->d3ddevice, &texDesc, NULL, &texture );
+    if (FAILED(hr))
+    {
+        msg_Dbg(obj, "cannot allocate a writable texture type %s. (hr=0x%lX)", DxgiFormatToStr(dxgi), hr);
+        return false;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = ID3D11DeviceContext_Map(d3d_dev->d3dcontext, (ID3D11Resource*)texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+    if (FAILED(hr))
+    {
+        msg_Err(obj, "The texture type %s cannot be mapped. (hr=0x%lX)", DxgiFormatToStr(dxgi), hr);
+        result = false;
+        goto done;
+    }
+    ID3D11DeviceContext_Unmap(d3d_dev->d3dcontext, (ID3D11Resource*)texture, 0);
+
+    if (dxgi == DXGI_FORMAT_YUY2)
+    {
+        const vlc_chroma_description_t *p_chroma_desc = vlc_fourcc_GetChromaDescription( i_chroma );
+        if( !p_chroma_desc )
+        {
+            msg_Err(obj, "No pixel format for %4.4s", (const char*)&i_chroma);
+            result = false;
+            goto done;
+        }
+
+        if (mappedResource.RowPitch >= 2 * (texDesc.Width * p_chroma_desc->p[0].w.num / p_chroma_desc->p[0].w.den * p_chroma_desc->pixel_size))
+        {
+            msg_Err(obj, "Bogus %4.4s pitch detected type %s. %d should be %d", (const char*)&i_chroma,
+                          DxgiFormatToStr(dxgi), mappedResource.RowPitch,
+                          (texDesc.Width * p_chroma_desc->p[0].w.num / p_chroma_desc->p[0].w.den * p_chroma_desc->pixel_size));
+            result = false;
+            goto done;
+        }
+
+    }
+done:
+    ID3D11Texture2D_Release(texture);
+
+    return result;
+}
+
+#undef FindD3D11Format
+const d3d_format_t *FindD3D11Format(vlc_object_t *o,
+                                    d3d11_device_t *d3d_dev,
                                     vlc_fourcc_t i_src_chroma,
                                     bool rgb_only,
                                     uint8_t bits_per_channel,
@@ -435,7 +513,8 @@ const d3d_format_t *FindD3D11Format(ID3D11Device *d3ddevice,
         else
             textureFormat = output_format->formatTexture;
 
-        if( DeviceSupportsFormat( d3ddevice, textureFormat, supportFlags ) )
+        if( DeviceSupportsFormat( d3d_dev->d3ddevice, textureFormat, supportFlags ) &&
+            CanReallyUseFormat(o, d3d_dev, output_format->fourcc, output_format->formatTexture) )
             return output_format;
     }
     return NULL;
@@ -530,30 +609,6 @@ int AllocateTextures( vlc_object_t *obj, d3d11_device_t *d3d_dev,
                 textures[picture_count * D3D11_MAX_SHADER_VIEW + plane] = textures[picture_count * D3D11_MAX_SHADER_VIEW];
                 ID3D11Texture2D_AddRef(textures[picture_count * D3D11_MAX_SHADER_VIEW + plane]);
             }
-        }
-    }
-
-    if (!is_d3d11_opaque(fmt->i_chroma) && cfg->formatTexture != DXGI_FORMAT_UNKNOWN) {
-        D3D11_MAPPED_SUBRESOURCE mappedResource;
-        hr = ID3D11DeviceContext_Map(d3d_dev->d3dcontext, (ID3D11Resource*)textures[0], 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
-        if( FAILED(hr) ) {
-            msg_Err(obj, "The texture cannot be mapped. (hr=0x%lX)", hr);
-            goto error;
-        }
-        ID3D11DeviceContext_Unmap(d3d_dev->d3dcontext, (ID3D11Resource*)textures[0], 0);
-        if (mappedResource.RowPitch < p_chroma_desc->pixel_size * texDesc.Width) {
-            msg_Err( obj, "The texture row pitch is too small (%d instead of %d)", mappedResource.RowPitch,
-                     p_chroma_desc->pixel_size * texDesc.Width );
-            goto error;
-        }
-        if ( fmt->i_width > 64 &&
-             mappedResource.RowPitch >=
-             2* (fmt->i_width * p_chroma_desc->p[0].w.num / p_chroma_desc->p[0].w.den * p_chroma_desc->pixel_size) )
-        {
-            msg_Err(obj, "Bogus %4.4s pitch detected. %d vs %d", (const char*)&fmt->i_chroma,
-                    mappedResource.RowPitch,
-                    (fmt->i_width * p_chroma_desc->p[0].w.num / p_chroma_desc->p[0].w.den * p_chroma_desc->pixel_size));
-            goto error;
         }
     }
 

@@ -220,7 +220,7 @@ static subpicture_t *DecodeBlock(decoder_t *dec, block_t **block_ptr)
     av_init_packet(&pkt);
     pkt.data = block->p_buffer;
     pkt.size = block->i_buffer;
-    pkt.pts  = block->i_pts;
+    pkt.pts  = TO_AV_TS(block->i_pts);
 
     int has_subtitle = 0;
     int used = avcodec_decode_subtitle2(sys->p_context,
@@ -243,7 +243,7 @@ static subpicture_t *DecodeBlock(decoder_t *dec, block_t **block_ptr)
     subpicture_t *spu = NULL;
     if (has_subtitle)
         spu = ConvertSubtitle(dec, &subtitle,
-                              subtitle.pts,
+                              FROM_AV_TS(subtitle.pts),
                               sys->p_context);
 
     /* */
@@ -322,8 +322,8 @@ static subpicture_t *ConvertSubtitle(decoder_t *dec, AVSubtitle *ffsub, vlc_tick
 
     //msg_Err(dec, "%lld %d %d",
     //        pts, ffsub->start_display_time, ffsub->end_display_time);
-    spu->i_start    = pts + ffsub->start_display_time * INT64_C(1000);
-    spu->i_stop     = pts + ffsub->end_display_time * INT64_C(1000);
+    spu->i_start    = pts + VLC_TICK_FROM_MS(ffsub->start_display_time);
+    spu->i_stop     = pts + VLC_TICK_FROM_MS(ffsub->end_display_time);
     spu->b_absolute = true; /* We have offset and size for subtitle */
     spu->b_ephemer  = p_sys->b_need_ephemer;
                     /* We only show subtitle for i_stop time only */

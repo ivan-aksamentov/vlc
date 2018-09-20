@@ -135,6 +135,8 @@ int screen_InitCapture( demux_t *p_demux )
     p_sys->fmt.video.i_bits_per_pixel = i_bits_per_pixel;
     p_sys->fmt.video.i_sar_num = p_sys->fmt.video.i_sar_den = 1;
     p_sys->fmt.video.i_chroma         = i_chroma;
+    p_sys->fmt.video.transfer         = TRANSFER_FUNC_SRGB;
+    p_sys->fmt.video.b_color_range_full = true;
 
     switch( i_chroma )
     {
@@ -193,6 +195,11 @@ static void CaptureBlockRelease( block_t *p_block )
     free( p_block );
 }
 
+static const struct vlc_block_callbacks CaptureBlockCallbacks =
+{
+    CaptureBlockRelease,
+};
+
 static block_t *CaptureBlockNew( demux_t *p_demux )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
@@ -224,7 +231,7 @@ static block_t *CaptureBlockNew( demux_t *p_demux )
                                             (int)p_sys->fmt.video.i_height :
                                             p_data->i_fragment_size;
         p_sys->f_fps *= (p_sys->fmt.video.i_height/p_data->i_fragment_size);
-        p_sys->i_incr = CLOCK_FREQ / p_sys->f_fps;
+        p_sys->i_incr = vlc_tick_rate_duration( p_sys->f_fps );
         p_data->i_fragment = 0;
         p_data->p_block = 0;
     }
@@ -259,8 +266,7 @@ static block_t *CaptureBlockNew( demux_t *p_demux )
     int i_stride =
         ( ( ( ( p_sys->fmt.video.i_width * p_sys->fmt.video.i_bits_per_pixel ) + 31 ) & ~31 ) >> 3 );
     i_buffer = i_stride * p_sys->fmt.video.i_height;
-    block_Init( &p_block->self, p_buffer, i_buffer );
-    p_block->self.pf_release = CaptureBlockRelease;
+    block_Init( &p_block->self, &CaptureBlockCallbacks, p_buffer, i_buffer );
     p_block->hbmp            = hbmp;
 
     return &p_block->self;

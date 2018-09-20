@@ -155,7 +155,7 @@ static int Open( vlc_object_t *p_this )
         return VLC_ENOMEM;
 
     p_sys->f_fps = var_CreateGetFloat( p_demux, "screen-fps" );
-    p_sys->i_incr = CLOCK_FREQ / p_sys->f_fps;
+    p_sys->i_incr = vlc_tick_rate_duration( p_sys->f_fps );
     p_sys->i_next_date = 0;
 
 #ifdef SCREEN_SUBSCREEN
@@ -263,6 +263,11 @@ static void Close( vlc_object_t *p_this )
 #ifdef SCREEN_MOUSE
     if( p_sys->p_mouse )
         picture_Release( p_sys->p_mouse );
+    if( p_sys->p_blend )
+    {
+        module_unneed( p_sys->p_blend, p_sys->p_blend->p_module );
+        vlc_object_release( p_sys->p_blend );
+    }
 #endif
     free( p_sys );
 }
@@ -305,7 +310,6 @@ static int Demux( demux_t *p_demux )
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     bool *pb;
-    int64_t *pi64;
     demux_sys_t *p_sys = p_demux->p_sys;
 
     switch( i_query )
@@ -320,14 +324,12 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = INT64_C(1000)
-                  * var_InheritInteger( p_demux, "live-caching" );
+            *va_arg( args, vlc_tick_t * ) =
+                VLC_TICK_FROM_MS(var_InheritInteger( p_demux, "live-caching" ));
             return VLC_SUCCESS;
 
         case DEMUX_GET_TIME:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = vlc_tick_now() - p_sys->i_start;
+            *va_arg( args, vlc_tick_t * ) = vlc_tick_now() - p_sys->i_start;
             return VLC_SUCCESS;
 
         /* TODO implement others */

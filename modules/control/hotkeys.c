@@ -58,8 +58,8 @@ struct intf_sys_t
     /*subtitle_delaybookmarks: placeholder for storing subtitle sync timestamps*/
     struct
     {
-        int64_t i_time_subtitle;
-        int64_t i_time_audio;
+        vlc_tick_t i_time_subtitle;
+        vlc_tick_t i_time_audio;
     } subtitle_delaybookmarks;
 
     struct
@@ -345,8 +345,8 @@ static int Open( vlc_object_t *p_this )
     p_sys->p_input = NULL;
     p_sys->vrnav.b_can_change = false;
     p_sys->vrnav.b_button_pressed = false;
-    p_sys->subtitle_delaybookmarks.i_time_audio = 0;
-    p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+    p_sys->subtitle_delaybookmarks.i_time_audio = VLC_TICK_INVALID;
+    p_sys->subtitle_delaybookmarks.i_time_subtitle = VLC_TICK_INVALID;
 
     vlc_mutex_init( &p_sys->lock );
 
@@ -679,22 +679,22 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
              * (This problem is also present in the "Track synchronization" window) */
             if ( p_input )
             {
-                if ( (p_sys->subtitle_delaybookmarks.i_time_audio == 0) || (p_sys->subtitle_delaybookmarks.i_time_subtitle == 0) )
+                if ( (p_sys->subtitle_delaybookmarks.i_time_audio == VLC_TICK_INVALID) || (p_sys->subtitle_delaybookmarks.i_time_subtitle == VLC_TICK_INVALID) )
                 {
                     DisplayMessage( p_vout, _( "Sub sync: set bookmarks first!" ) );
                 }
                 else
                 {
-                    int64_t i_current_subdelay = var_GetInteger( p_input, "spu-delay" );
-                    int64_t i_additional_subdelay = p_sys->subtitle_delaybookmarks.i_time_audio - p_sys->subtitle_delaybookmarks.i_time_subtitle;
-                    int64_t i_total_subdelay = i_current_subdelay + i_additional_subdelay;
+                    vlc_tick_t i_current_subdelay = var_GetInteger( p_input, "spu-delay" );
+                    vlc_tick_t i_additional_subdelay = p_sys->subtitle_delaybookmarks.i_time_audio - p_sys->subtitle_delaybookmarks.i_time_subtitle;
+                    vlc_tick_t i_total_subdelay = i_current_subdelay + i_additional_subdelay;
                     var_SetInteger( p_input, "spu-delay", i_total_subdelay);
                     ClearChannels( p_vout, slider_chan );
-                    DisplayMessage( p_vout, _( "Sub sync: corrected %i ms (total delay = %i ms)" ),
-                                            (int)(i_additional_subdelay / 1000),
-                                            (int)(i_total_subdelay / 1000) );
-                    p_sys->subtitle_delaybookmarks.i_time_audio = 0;
-                    p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+                    DisplayMessage( p_vout, _( "Sub sync: corrected %"PRId64" ms (total delay = %"PRId64" ms)" ),
+                                            MS_FROM_VLC_TICK( i_additional_subdelay ),
+                                            MS_FROM_VLC_TICK( i_total_subdelay ) );
+                    p_sys->subtitle_delaybookmarks.i_time_audio = VLC_TICK_INVALID;
+                    p_sys->subtitle_delaybookmarks.i_time_subtitle = VLC_TICK_INVALID;
                 }
             }
             break;
@@ -704,15 +704,15 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
             var_SetInteger( p_input, "spu-delay", 0);
             ClearChannels( p_vout, slider_chan );
             DisplayMessage( p_vout, _( "Sub sync: delay reset" ) );
-            p_sys->subtitle_delaybookmarks.i_time_audio = 0;
-            p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+            p_sys->subtitle_delaybookmarks.i_time_audio = VLC_TICK_INVALID;
+            p_sys->subtitle_delaybookmarks.i_time_subtitle = VLC_TICK_INVALID;
             break;
         }
 
         case ACTIONID_SUBDELAY_DOWN:
         case ACTIONID_SUBDELAY_UP:
         {
-            vlc_tick_t diff = (i_action == ACTIONID_SUBDELAY_UP) ? 50000 : -50000;
+            vlc_tick_t diff = (i_action == ACTIONID_SUBDELAY_UP) ? VLC_TICK_FROM_MS(50) : VLC_TICK_FROM_MS(-50);
             if( p_input )
             {
                 vlc_value_t val;
@@ -734,7 +734,7 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
                 var_SetInteger( p_input, "spu-delay", i_delay );
                 ClearChannels( p_vout, slider_chan );
                 DisplayMessage( p_vout, _( "Subtitle delay %i ms" ),
-                                (int)(i_delay/1000) );
+                                (int)MS_FROM_VLC_TICK(i_delay) );
                 free(list);
             }
             break;
@@ -742,7 +742,7 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
         case ACTIONID_AUDIODELAY_DOWN:
         case ACTIONID_AUDIODELAY_UP:
         {
-            vlc_tick_t diff = (i_action == ACTIONID_AUDIODELAY_UP) ? 50000 : -50000;
+            vlc_tick_t diff = (i_action == ACTIONID_AUDIODELAY_UP) ? VLC_TICK_FROM_MS(50) : VLC_TICK_FROM_MS(-50);
             if( p_input )
             {
                 vlc_tick_t i_delay = var_GetInteger( p_input, "audio-delay" )
@@ -751,7 +751,7 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
                 var_SetInteger( p_input, "audio-delay", i_delay );
                 ClearChannels( p_vout, slider_chan );
                 DisplayMessage( p_vout, _( "Audio delay %i ms" ),
-                                 (int)(i_delay/1000) );
+                                 (int)MS_FROM_VLC_TICK(i_delay) );
             }
             break;
         }
@@ -978,10 +978,10 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
                     break;
             }
 
-            vlc_tick_t it = var_InheritInteger( p_input, varname );
+            int it = var_InheritInteger( p_input, varname );
             if( it < 0 )
                 break;
-            var_SetInteger( p_input, "time-offset", it * sign * CLOCK_FREQ );
+            var_SetInteger( p_input, "time-offset", vlc_tick_from_sec( it * sign ) );
             DisplayPosition( p_vout, slider_chan, p_input );
             break;
         }
@@ -1470,7 +1470,9 @@ static void PlayBookmark( intf_thread_t *p_intf, int i_num )
     char *psz_bookmark = var_CreateGetString( p_intf, psz_bookmark_name );
 
     PL_LOCK;
-    FOREACH_ARRAY( playlist_item_t *p_item, p_playlist->items )
+    playlist_item_t *p_item;
+    ARRAY_FOREACH( p_item, p_playlist->items )
+    {
         char *psz_uri = input_item_GetURI( p_item->p_input );
         if( !strcmp( psz_bookmark, psz_uri ) )
         {
@@ -1480,7 +1482,7 @@ static void PlayBookmark( intf_thread_t *p_intf, int i_num )
         }
         else
             free( psz_uri );
-    FOREACH_END();
+    }
     PL_UNLOCK;
 
     free( psz_bookmark );
@@ -1523,8 +1525,8 @@ static void DisplayPosition( vout_thread_t *p_vout, int slider_chan,
 
     ClearChannels( p_vout, slider_chan );
 
-    int64_t t = var_GetInteger( p_input, "time" ) / CLOCK_FREQ;
-    int64_t l = var_GetInteger( p_input, "length" ) / CLOCK_FREQ;
+    int64_t t = SEC_FROM_VLC_TICK(var_GetInteger( p_input, "time" ));
+    int64_t l = SEC_FROM_VLC_TICK(var_GetInteger( p_input, "length" ));
 
     secstotimestr( psz_time, t );
 

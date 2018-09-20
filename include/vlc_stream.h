@@ -52,6 +52,7 @@ struct stream_t
     const char  *psz_location; /**< Location (URL with the scheme stripped) */
     char        *psz_filepath; /**< Local file path (if applicable) */
     bool         b_preparsing; /**< True if this access is used to preparse */
+    input_item_t *p_input_item;/**< Input item (can be NULL) */
 
     union {
         /**
@@ -144,9 +145,6 @@ struct stream_t
      * Private data pointer
      */
     void *p_sys;
-
-    /* Weak link to parent input */
-    input_thread_t *p_input;
 };
 
 /**
@@ -163,7 +161,7 @@ enum stream_query_e
     STREAM_GET_SIZE=6,          /**< arg1= uint64_t *     res=can fail */
 
     /* */
-    STREAM_GET_PTS_DELAY = 0x101,/**< arg1= int64_t* res=cannot fail */
+    STREAM_GET_PTS_DELAY = 0x101,/**< arg1= vlc_tick_t* res=cannot fail */
     STREAM_GET_TITLE_INFO, /**< arg1=input_title_t*** arg2=int* res=can fail */
     STREAM_GET_TITLE,       /**< arg1=unsigned * res=can fail */
     STREAM_GET_SEEKPOINT,   /**< arg1=unsigned * res=can fail */

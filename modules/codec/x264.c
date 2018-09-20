@@ -762,8 +762,6 @@ typedef struct
     x264_t          *h;
     x264_param_t    param;
 
-    vlc_tick_t      i_initial_delay;
-
     char            *psz_stat_name;
     int             i_sei_size;
     uint32_t         i_colorspace;
@@ -813,7 +811,7 @@ static int  Open ( vlc_object_t *p_this )
 #else
     p_enc->fmt_out.i_codec = VLC_CODEC_H264;
 #endif
-    p_enc->p_sys = p_sys = malloc( sizeof( encoder_sys_t ) );
+    p_enc->p_sys = p_sys = vlc_obj_malloc( p_this, sizeof( encoder_sys_t ) );
     if( !p_sys )
         return VLC_ENOMEM;
 
@@ -849,6 +847,7 @@ static int  Open ( vlc_object_t *p_this )
         else
         {
             msg_Err( p_enc, "Only high-profiles and 10-bit are supported");
+            free( psz_profile );
             return VLC_EGENERIC;
         }
 # endif
@@ -856,15 +855,14 @@ static int  Open ( vlc_object_t *p_this )
 # ifdef MODULE_NAME_IS_x26410b
     else
     {
-            msg_Err( p_enc, "Only high-profiles and 10-bit are supported");
-            return VLC_EGENERIC;
+        msg_Err( p_enc, "Only high-profiles and 10-bit are supported");
+        return VLC_EGENERIC;
     }
 # endif
     free( psz_profile );
 
     p_enc->pf_encode_video = Encode;
     p_enc->pf_encode_audio = NULL;
-    p_sys->i_initial_delay = 0;
     p_sys->psz_stat_name = NULL;
     p_sys->i_sei_size = 0;
     p_sys->p_sei = NULL;
@@ -1503,7 +1501,7 @@ static block_t *Encode( encoder_t *p_enc, picture_t *p_pict )
 
        x264_encoder_encode( p_sys->h, &nal, &i_nal, &pic, &pic );
     } else {
-       if( x264_encoder_delayed_frames( p_sys->h ) ) {
+       while( x264_encoder_delayed_frames( p_sys->h ) && i_nal == 0 ) {
            x264_encoder_encode( p_sys->h, &nal, &i_nal, NULL, &pic );
        }
     }
@@ -1586,6 +1584,4 @@ static void Close( vlc_object_t *p_this )
 
     vlc_mutex_unlock( &pthread_win32_mutex );
 #endif
-
-    free( p_sys );
 }

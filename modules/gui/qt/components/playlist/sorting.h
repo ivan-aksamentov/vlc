@@ -86,7 +86,7 @@ static inline char * psz_column_meta( input_item_t *p_item, uint32_t i_column )
     case COLUMN_TITLE:
         return input_item_GetTitleFbName( p_item );
     case COLUMN_DURATION:
-        i_duration = input_item_GetDuration( p_item ) / CLOCK_FREQ;
+        i_duration = SEC_FROM_VLC_TICK( input_item_GetDuration( p_item ) );
         if( i_duration == 0 ) return NULL;
         secstotimestr( psz_duration, i_duration );
         return strdup( psz_duration );
@@ -132,28 +132,6 @@ static inline int i_column_sorting( uint32_t i_column )
     case COLUMN_RATING:         return SORT_RATING;
     case COLUMN_DISC_NUMBER:    return SORT_DISC_NUMBER;
     case COLUMN_DATE:           return SORT_DATE;
-    default: abort();
-    }
-}
-
-/* Return the media library query select type */
-static inline ml_select_e meta_to_mlmeta( uint32_t i_column )
-{
-    switch( i_column )
-    {
-    case COLUMN_NUMBER:         return ML_ID;
-    case COLUMN_TITLE:          return ML_TITLE;
-    case COLUMN_DURATION:       return ML_DURATION;
-    case COLUMN_ARTIST:         return ML_ARTIST;
-    case COLUMN_GENRE:          return ML_GENRE;
-    case COLUMN_ALBUM:          return ML_ALBUM;
-    case COLUMN_TRACK_NUMBER:   return ML_TRACK_NUMBER;
-    case COLUMN_DESCRIPTION:    return ML_EXTRA;
-    case COLUMN_URI:            return ML_URI;
-    case COLUMN_RATING:         return ML_VOTE;
-    case COLUMN_COVER:          return ML_COVER;
-    case COLUMN_DISC_NUMBER:    return ML_DISC_NUMBER;
-    case COLUMN_DATE:           return ML_YEAR;
     default: abort();
     }
 }

@@ -180,8 +180,8 @@ static int DemuxControl(demux_t *demux, int query, va_list args)
             *va_arg(args, bool*) = true;
             break;
         case DEMUX_GET_PTS_DELAY:
-            *va_arg(args, int64_t *) =
-                INT64_C(1000) * var_InheritInteger(demux, "disc-caching");
+            *va_arg(args, vlc_tick_t *) =
+                VLC_TICK_FROM_MS( var_InheritInteger(demux, "disc-caching") );
             break;
 
         case DEMUX_SET_PAUSE_STATE:
@@ -254,7 +254,7 @@ static int DemuxOpen(vlc_object_t *obj, vcddev_t *dev, unsigned track)
     sys->es = es_out_Add(demux->out, &fmt);
 
     date_Init(&sys->pts, 44100, 1);
-    date_Set(&sys->pts, VLC_TS_0);
+    date_Set(&sys->pts, VLC_TICK_0);
 
     sys->position = 0;
     demux->pf_demux = Demux;

@@ -225,7 +225,7 @@ vlc_module_begin ()
                  TTL_LONGTEXT, true )
     add_bool( SOUT_CFG_PREFIX "rtcp-mux", false,
               RTCP_MUX_TEXT, RTCP_MUX_LONGTEXT, false )
-    add_integer( SOUT_CFG_PREFIX "caching", DEFAULT_PTS_DELAY / 1000,
+    add_integer( SOUT_CFG_PREFIX "caching", MS_FROM_VLC_TICK(DEFAULT_PTS_DELAY),
                  CACHING_TEXT, CACHING_LONGTEXT, true )
 
 #ifdef HAVE_SRTP
@@ -522,7 +522,7 @@ static int Open( vlc_object_t *p_this )
      * without waiting (and already did in the VoD case). So until then,
      * we use an arbitrary reference PTS for timestamp computations, and
      * then actual PTS will catch up using offsets. */
-    p_sys->i_npt_zero = VLC_TS_INVALID;
+    p_sys->i_npt_zero = VLC_TICK_INVALID;
     p_sys->i_pts_zero = rtp_init_ts(p_sys->p_vod_media,
                                     p_sys->psz_vod_session);
     p_sys->i_es = 0;
@@ -978,7 +978,7 @@ static void *Add( sout_stream_t *p_stream, const es_format_t *p_fmt )
 
     id->b_first_packet = true;
     id->i_caching =
-        (int64_t)1000 * var_GetInteger( p_stream, SOUT_CFG_PREFIX "caching");
+        VLC_TICK_FROM_MS(var_GetInteger( p_stream, SOUT_CFG_PREFIX "caching"));
 
     vlc_rand_bytes (&id->i_sequence, sizeof (id->i_sequence));
     vlc_rand_bytes (id->ssrc, sizeof (id->ssrc));
@@ -1169,7 +1169,7 @@ static void *Add( sout_stream_t *p_stream, const es_format_t *p_fmt )
 #endif
 
     vlc_mutex_lock( &p_sys->lock_ts );
-    id->b_ts_init = ( p_sys->i_npt_zero != VLC_TS_INVALID );
+    id->b_ts_init = ( p_sys->i_npt_zero != VLC_TICK_INVALID );
     vlc_mutex_unlock( &p_sys->lock_ts );
     if( id->b_ts_init )
         id->i_ts_offset = rtp_compute_ts( id->rtp_fmt.clock_rate,
@@ -1577,7 +1577,7 @@ static vlc_tick_t rtp_init_ts( const vod_media_t *p_media,
  * the first packets for NPT=0 is returned instead. */
 vlc_tick_t rtp_get_ts( const sout_stream_t *p_stream, const sout_stream_id_sys_t *id,
                     const vod_media_t *p_media, const char *psz_vod_session,
-                    int64_t *p_npt )
+                    vlc_tick_t *p_npt )
 {
     if (p_npt != NULL)
         *p_npt = 0;
@@ -1594,14 +1594,14 @@ vlc_tick_t rtp_get_ts( const sout_stream_t *p_stream, const sout_stream_id_sys_t
     i_npt_zero = p_sys->i_npt_zero;
     vlc_mutex_unlock( &p_sys->lock_ts );
 
-    if( i_npt_zero == VLC_TS_INVALID )
+    if( i_npt_zero == VLC_TICK_INVALID )
         return p_sys->i_pts_zero;
 
     vlc_tick_t now = vlc_tick_now();
     if( now < i_npt_zero )
         return p_sys->i_pts_zero;
 
-    int64_t npt = now - i_npt_zero;
+    vlc_tick_t npt = now - i_npt_zero;
     if (p_npt != NULL)
         *p_npt = npt;
 
@@ -1615,7 +1615,7 @@ void rtp_packetize_common( sout_stream_id_sys_t *id, block_t *out,
     {
         sout_stream_sys_t *p_sys = id->p_stream->p_sys;
         vlc_mutex_lock( &p_sys->lock_ts );
-        if( p_sys->i_npt_zero == VLC_TS_INVALID )
+        if( p_sys->i_npt_zero == VLC_TICK_INVALID )
         {
             /* This is the first packet of any ES. We initialize the
              * NPT=0 time reference, and the offset to match the

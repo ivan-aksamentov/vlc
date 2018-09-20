@@ -215,6 +215,32 @@ bool sout_InputIsEmpty( sout_packetizer_input_t *p_input )
     return b;
 }
 
+static int sout_InputControlVa( sout_packetizer_input_t *p_input, int i_query, va_list args )
+{
+    sout_instance_t *p_sout = p_input->p_sout;
+    if( i_query == SOUT_INPUT_SET_SPU_HIGHLIGHT )
+    {
+        vlc_mutex_lock( &p_sout->lock );
+        int i_ret = sout_StreamControl( p_sout->p_stream,
+                                        SOUT_STREAM_ID_SPU_HIGHLIGHT,
+                                        p_input->id, va_arg(args, void *) );
+        vlc_mutex_unlock( &p_sout->lock );
+        return i_ret;
+    }
+    return VLC_EGENERIC;
+}
+
+int sout_InputControl( sout_packetizer_input_t *p_input, int i_query, ... )
+{
+    va_list args;
+    int     i_result;
+
+    va_start( args, i_query );
+    i_result = sout_InputControlVa( p_input, i_query, args );
+    va_end( args );
+    return i_result;
+}
+
 void sout_InputFlush( sout_packetizer_input_t *p_input )
 {
     sout_instance_t     *p_sout = p_input->p_sout;
@@ -379,7 +405,7 @@ sout_mux_t * sout_MuxNew( sout_instance_t *p_sout, const char *psz_mux,
 
     p_mux->b_add_stream_any_time = false;
     p_mux->b_waiting_stream = true;
-    p_mux->i_add_stream_start = VLC_TS_INVALID;
+    p_mux->i_add_stream_start = VLC_TICK_INVALID;
 
     p_mux->p_module =
         module_need( p_mux, "sout mux", p_mux->psz_mux, true );
@@ -543,16 +569,18 @@ int sout_MuxSendBuffer( sout_mux_t *p_mux, sout_input_t *p_input,
                       current_date - i_dts );
     }
 
-    if( p_mux->b_waiting_stream )
-    {
-        const int64_t i_caching = var_GetInteger( p_mux->p_sout, "sout-mux-caching" ) * INT64_C(1000);
+    if( i_dts == VLC_TICK_INVALID )
+        i_dts = p_buffer->i_pts;
 
-        if( p_mux->i_add_stream_start == VLC_TS_INVALID )
+    if( p_mux->b_waiting_stream && i_dts != VLC_TICK_INVALID )
+    {
+        const vlc_tick_t i_caching = VLC_TICK_FROM_MS(var_GetInteger( p_mux->p_sout, "sout-mux-caching" ));
+
+        if( p_mux->i_add_stream_start == VLC_TICK_INVALID )
             p_mux->i_add_stream_start = i_dts;
 
         /* Wait until we have enough data before muxing */
-        if( p_mux->i_add_stream_start == VLC_TS_INVALID ||
-            i_dts < p_mux->i_add_stream_start + i_caching )
+        if( llabs( i_dts - p_mux->i_add_stream_start ) < i_caching )
             return VLC_SUCCESS;
         p_mux->b_waiting_stream = false;
     }

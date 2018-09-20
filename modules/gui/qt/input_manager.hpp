@@ -57,8 +57,7 @@ public:
         ItemTeletextChanged,
         InterfaceVoutUpdate,
         StatisticsUpdate,
-        InterfaceAoutUpdate, /* 10 */
-        MetaChanged,
+        MetaChanged, /* 10 */
         InfoChanged,
         SynchroChanged,
         CachingEvent,
@@ -66,8 +65,9 @@ public:
         RecordingEvent,
         ProgramChanged,
         RandomChanged,
-        LoopOrRepeatChanged, /* 20 */
+        LoopOrRepeatChanged,
         EPGEvent,
+        CapabilitiesChanged, /* 20 */
     /*    SignalChanged, */
 
         FullscreenControlToggle = QEvent::User + IMEventTypeOffset + 50,
@@ -167,6 +167,7 @@ private:
     void UpdateName();
     void UpdateStatus();
     void UpdateNavigation();
+    void UpdateCapabilities();
     void UpdatePosition();
     void UpdateTeletext();
     void UpdateArt();
@@ -174,7 +175,6 @@ private:
     void UpdateMeta();
     void UpdateMeta(input_item_t *);
     void UpdateVout();
-    void UpdateAout();
     void UpdateStats();
     void UpdateCaching();
     void UpdateRecord();
@@ -211,11 +211,11 @@ public slots:
     void setAtoB();
 
 private slots:
-    void AtoBLoop( float, int64_t, int );
+    void AtoBLoop( float, vlc_tick_t, int );
 
 signals:
     /// Send new position, new time and new length
-    void positionUpdated( float , int64_t, int );
+    void positionUpdated( float , vlc_tick_t, int );
     void remainingTimeChanged( bool );
     void seekRequested( float pos );
     void rateChanged( float );
@@ -225,7 +225,7 @@ signals:
     void chapterChanged( bool );
     void inputCanSeek( bool );
     /// You can resume playback
-    void resumePlayback( int64_t );
+    void resumePlayback( vlc_tick_t );
     /// Statistics are updated
     void statisticsUpdated( input_item_t* );
     void infoChanged( input_item_t* );

@@ -47,7 +47,7 @@ typedef struct libvlc_renderer_item_t libvlc_renderer_item_t;
 enum libvlc_event_e {
     /* Append new event types at the end of a category.
      * Do not remove, insert or re-order any entry.
-     * Keep this in sync with lib/event.c:libvlc_event_type_name(). */
+     */
 
     /**
      * Metadata of a \link #libvlc_media_t media item\endlink changed
@@ -197,18 +197,6 @@ enum libvlc_event_e {
      * The renderer item is no longer valid.
      */
     libvlc_RendererDiscovererItemDeleted,
-
-    libvlc_VlmMediaAdded=0x600,
-    libvlc_VlmMediaRemoved,
-    libvlc_VlmMediaChanged,
-    libvlc_VlmMediaInstanceStarted,
-    libvlc_VlmMediaInstanceStopped,
-    libvlc_VlmMediaInstanceStatusInit,
-    libvlc_VlmMediaInstanceStatusOpening,
-    libvlc_VlmMediaInstanceStatusPlaying,
-    libvlc_VlmMediaInstanceStatusPause,
-    libvlc_VlmMediaInstanceStatusEnd,
-    libvlc_VlmMediaInstanceStatusError
 };
 
 /**
@@ -327,13 +315,6 @@ typedef struct libvlc_event_t
         {
             libvlc_time_t   new_length;
         } media_player_length_changed;
-
-        /* VLM media */
-        struct
-        {
-            const char * psz_media_name;
-            const char * psz_instance_name;
-        } vlm_media_event;
 
         /* Extra MediaPlayer */
         struct

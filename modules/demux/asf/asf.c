@@ -186,7 +186,7 @@ static int Open( vlc_object_t * p_this )
 /*****************************************************************************
  * Demux: read packet and send them to decoders
  *****************************************************************************/
-#define CHUNK (CLOCK_FREQ / 10)
+#define CHUNK VLC_TICK_FROM_MS(100)
 static int Demux( demux_t *p_demux )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
@@ -213,8 +213,8 @@ static int Demux( demux_t *p_demux )
     }
 
     while( !p_sys->b_eos && ( p_sys->i_sendtime - p_sys->i_time - CHUNK < 0 ||
-                            ( p_sys->i_sendtime - p_sys->i_time - CHUNK ) /
-                              UINT64_C( 1000 ) < p_sys->p_fp->i_preroll ) )
+                            ( p_sys->i_sendtime - p_sys->i_time - CHUNK ) <
+                                                     p_sys->p_fp->i_preroll ) )
     {
         /* Read and demux a packet */
         if( DemuxASFPacket( &p_sys->packet_sys,
@@ -237,20 +237,20 @@ static int Demux( demux_t *p_demux )
                 p_sys->b_eof = true;
         }
 
-        if ( p_sys->i_time == VLC_TS_INVALID )
+        if ( p_sys->i_time == VLC_TICK_INVALID )
             p_sys->i_time = p_sys->i_sendtime;
     }
 
     if( p_sys->b_eos || ( p_sys->i_sendtime - p_sys->i_time - CHUNK >= 0 &&
-                        ( p_sys->i_sendtime - p_sys->i_time - CHUNK ) /
-                          UINT64_C( 1000 ) >= p_sys->p_fp->i_preroll ) )
+                        ( p_sys->i_sendtime - p_sys->i_time - CHUNK ) >=
+                                                     p_sys->p_fp->i_preroll ) )
     {
         bool b_data = Block_Dequeue( p_demux, p_sys->i_time + CHUNK );
 
         p_sys->i_time += CHUNK;
-        es_out_SetPCR( p_demux->out, VLC_TS_0 + p_sys->i_time );
+        es_out_SetPCR( p_demux->out, VLC_TICK_0 + p_sys->i_time );
 #ifdef ASF_DEBUG
-        msg_Dbg( p_demux, "Demux Loop Setting PCR to %"PRId64, VLC_TS_0 + p_sys->i_time );
+        msg_Dbg( p_demux, "Demux Loop Setting PCR to %"PRId64, VLC_TICK_0 + p_sys->i_time );
 #endif
         if ( !b_data && p_sys->b_eos )
         {
@@ -263,9 +263,6 @@ static int Demux( demux_t *p_demux )
                 if( DemuxInit( p_demux ) )
                 {
                     msg_Err( p_demux, "failed to load the new header" );
-                    vlc_dialog_display_error( p_demux,
-                        _("Could not demux ASF stream"), "%s",
-                        _("VLC failed to load the ASF header.") );
                     return VLC_DEMUXER_EOF;
                 }
                 es_out_Control( p_demux->out, ES_OUT_RESET_PCR );
@@ -317,9 +314,9 @@ static void WaitKeyframe( demux_t *p_demux )
         {
             /* 1 min if fastseek, otherwise 5 sec */
             /* That's a guess for bandwidth */
-            uint64_t i_maxwaittime = ( p_sys->b_canfastseek ) ? 600000000 : 50000000;
-            i_maxwaittime /= tk->info.p_esp->i_average_time_per_frame;
-            p_sys->i_wait_keyframe = __MIN( i_maxwaittime, UINT_MAX );
+            msftime_t i_maxwaittime = MSFTIME_FROM_SEC( p_sys->b_canfastseek ? 60 : 5);
+            uint64_t frames = i_maxwaittime / tk->info.p_esp->i_average_time_per_frame;
+            p_sys->i_wait_keyframe = __MIN( frames, UINT_MAX );
         }
         else
         {
@@ -356,17 +353,17 @@ static int SeekIndex( demux_t *p_demux, vlc_tick_t i_date, float f_pos )
     asf_object_index_t *p_index;
 
     msg_Dbg( p_demux, "seek with index: %i seconds, position %f",
-             i_date >= 0 ? (int)(i_date/CLOCK_FREQ) : -1, f_pos );
+             i_date >= 0 ? (int)SEC_FROM_VLC_TICK(i_date) : -1, f_pos );
 
     if( i_date < 0 )
         i_date = p_sys->i_length * f_pos;
 
-    p_sys->i_preroll_start = i_date - (int64_t) p_sys->p_fp->i_preroll;
+    p_sys->i_preroll_start = i_date - p_sys->p_fp->i_preroll;
     if ( p_sys->i_preroll_start < 0 ) p_sys->i_preroll_start = 0;
 
     p_index = ASF_FindObject( p_sys->p_root, &asf_object_simple_index_guid, 0 );
 
-    uint64_t i_entry = p_sys->i_preroll_start * 10 / p_index->i_index_entry_time_interval;
+    uint64_t i_entry = MSFTIME_FROM_VLC_TICK(p_sys->i_preroll_start) / p_index->i_index_entry_time_interval;
     if( i_entry >= p_index->i_index_entry_count )
     {
         msg_Warn( p_demux, "Incomplete index" );
@@ -380,7 +377,7 @@ static int SeekIndex( demux_t *p_demux, vlc_tick_t i_date, float f_pos )
 
     if ( vlc_stream_Seek( p_demux->s, i_offset + p_sys->i_data_begin ) == VLC_SUCCESS )
     {
-        es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, VLC_TS_0 + i_date );
+        es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, VLC_TICK_0 + i_date );
         return VLC_SUCCESS;
     }
     else return VLC_EGENERIC;
@@ -392,7 +389,7 @@ static void SeekPrepare( demux_t *p_demux )
 
     p_sys->b_eof = false;
     p_sys->b_eos = false;
-    p_sys->i_time = VLC_TS_INVALID;
+    p_sys->i_time = VLC_TICK_INVALID;
     p_sys->i_sendtime = -1;
     p_sys->i_preroll_start = ASFPACKET_PREROLL_FROM_CURRENT;
 
@@ -402,7 +399,7 @@ static void SeekPrepare( demux_t *p_demux )
         if( tk )
         {
             FlushQueue( tk );
-            tk->i_time = VLC_TS_INVALID;
+            tk->i_time = VLC_TICK_INVALID;
         }
     }
 
@@ -416,21 +413,19 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
     vlc_meta_t  *p_meta;
-    int64_t     i64, *pi64;
+    vlc_tick_t  i64;
     int         i;
     double      f, *pf;
 
     switch( i_query )
     {
     case DEMUX_GET_LENGTH:
-        pi64 = va_arg( args, int64_t * );
-        *pi64 = p_sys->i_length;
+        *va_arg( args, vlc_tick_t * ) = p_sys->i_length;
         return VLC_SUCCESS;
 
     case DEMUX_GET_TIME:
-        pi64 = va_arg( args, int64_t * );
-        if( p_sys->i_time == VLC_TS_INVALID ) return VLC_EGENERIC;
-        *pi64 = p_sys->i_time;
+        if( p_sys->i_time == VLC_TICK_INVALID ) return VLC_EGENERIC;
+        *va_arg( args, vlc_tick_t * ) = p_sys->i_time;
         return VLC_SUCCESS;
 
     case DEMUX_SET_TIME:
@@ -440,11 +435,11 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         SeekPrepare( p_demux );
 
-        if( p_sys->b_index && p_sys->i_length > 0 )
+        if( p_sys->b_index && p_sys->i_length != 0 )
         {
             va_list acpy;
             va_copy( acpy, args );
-            i64 = va_arg( acpy, int64_t );
+            i64 = va_arg( acpy, vlc_tick_t );
             va_end( acpy );
 
             if( !SeekIndex( p_demux, i64, -1 ) )
@@ -485,7 +480,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                     if( !tk || !tk->p_fmt || tk->i_cat != -1 * i )
                         continue;
                     FlushQueue( tk );
-                    tk->i_time = VLC_TS_INVALID;
+                    tk->i_time = VLC_TICK_INVALID;
                 }
             }
 
@@ -497,8 +492,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
     }
 
     case DEMUX_GET_POSITION:
-        if( p_sys->i_time == VLC_TS_INVALID ) return VLC_EGENERIC;
-        if( p_sys->i_length > 0 )
+        if( p_sys->i_time == VLC_TICK_INVALID ) return VLC_EGENERIC;
+        if( p_sys->i_length != 0 )
         {
             pf = va_arg( args, double * );
             *pf = p_sys->i_time / (double)p_sys->i_length;
@@ -518,7 +513,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         SeekPrepare( p_demux );
 
-        if( p_sys->b_index && p_sys->i_length > 0 )
+        if( p_sys->b_index && p_sys->i_length != 0 )
         {
             va_list acpy;
             va_copy( acpy, args );
@@ -567,19 +562,10 @@ static void Packet_SetAR( asf_packet_sys_t *p_packetsys, uint8_t i_stream_number
     if ( !tk->p_fmt || (tk->p_fmt->video.i_sar_num == i_ratio_x && tk->p_fmt->video.i_sar_den == i_ratio_y ) )
         return;
 
-    /* Only apply if origin pixel size >= 1x1, due to broken yacast */
-    if ( tk->p_fmt->video.i_height * i_ratio_x > tk->p_fmt->video.i_width * i_ratio_y )
-    {
-        vout_thread_t *p_vout = input_GetVout( p_demux->p_input );
-        if ( p_vout )
-        {
-            msg_Info( p_demux, "Changing aspect ratio to %i/%i", i_ratio_x, i_ratio_y );
-            vout_ChangeAspectRatio( p_vout, i_ratio_x, i_ratio_y );
-            vlc_object_release( p_vout );
-        }
-    }
     tk->p_fmt->video.i_sar_num = i_ratio_x;
     tk->p_fmt->video.i_sar_den = i_ratio_y;
+    if( tk->p_es )
+        es_out_Control( p_demux->out, ES_OUT_SET_ES_FMT, tk->p_es, tk->p_fmt );
 }
 
 static void Packet_SetSendTime( asf_packet_sys_t *p_packetsys, vlc_tick_t i_time )
@@ -687,11 +673,11 @@ static bool Block_Dequeue( demux_t *p_demux, vlc_tick_t i_nexttime )
             else
                 p_block->p_next = NULL;
 
-            if( p_sys->i_time == VLC_TS_INVALID )
+            if( p_sys->i_time == VLC_TICK_INVALID )
             {
-                es_out_SetPCR( p_demux->out, VLC_TS_0 + p_sys->i_time );
+                es_out_SetPCR( p_demux->out, VLC_TICK_0 + p_sys->i_time );
 #ifdef ASF_DEBUG
-                msg_Dbg( p_demux, "    dequeue setting PCR to %"PRId64, VLC_TS_0 + p_sys->i_time );
+                msg_Dbg( p_demux, "    dequeue setting PCR to %"PRId64, VLC_TICK_0 + p_sys->i_time );
 #endif
             }
 
@@ -785,7 +771,7 @@ static int DemuxInit( demux_t *p_demux )
     demux_sys_t *p_sys = p_demux->p_sys;
 
     /* init context */
-    p_sys->i_time   = VLC_TS_INVALID;
+    p_sys->i_time   = VLC_TICK_INVALID;
     p_sys->i_sendtime    = -1;
     p_sys->i_length = 0;
     p_sys->b_eos = false;
@@ -890,7 +876,7 @@ static int DemuxInit( demux_t *p_demux )
             goto error;
         memset( tk, 0, sizeof( asf_track_t ) );
 
-        tk->i_time = VLC_TS_INVALID;
+        tk->i_time = VLC_TICK_INVALID;
         tk->info.p_sp = p_sp;
         tk->p_es = NULL;
         tk->info.p_esp = NULL;
@@ -1247,14 +1233,14 @@ static int DemuxInit( demux_t *p_demux )
                   p_sys->p_fp->i_min_data_packet_size;
 
         /* calculate the time duration in micro-s */
-        p_sys->i_length = (vlc_tick_t)p_sys->p_fp->i_play_duration / 10 *
+        p_sys->i_length = VLC_TICK_FROM_MSFTIME(p_sys->p_fp->i_play_duration) *
                    (vlc_tick_t)i_count /
-                   (vlc_tick_t)p_sys->p_fp->i_data_packets_count - p_sys->p_fp->i_preroll * 1000;
-        if( p_sys->i_length < 0 )
+                   (vlc_tick_t)p_sys->p_fp->i_data_packets_count;
+        if( p_sys->i_length <= p_sys->p_fp->i_preroll )
             p_sys->i_length = 0;
-
-        if( p_sys->i_length > 0 )
+        else
         {
+            p_sys->i_length  -= p_sys->p_fp->i_preroll;
             p_sys->i_bitrate = 8 * i_size * CLOCK_FREQ / p_sys->i_length;
         }
     }

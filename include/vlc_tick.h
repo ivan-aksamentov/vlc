@@ -90,6 +90,11 @@ static inline double secf_from_vlc_tick(vlc_tick_t vtk)
     return (double)vtk / (double)CLOCK_FREQ;
 }
 
+static inline vlc_tick_t vlc_tick_rate_duration(float frame_rate)
+{
+    return CLOCK_FREQ / frame_rate;
+}
+
 
 /*
  * vlc_tick_t <> milliseconds (ms) conversions
@@ -142,6 +147,7 @@ static inline double secf_from_vlc_tick(vlc_tick_t vtk)
 typedef int64_t msftime_t;
 
 #define MSFTIME_FROM_SEC(sec)       (INT64_C(10000000) * (sec))  /* seconds in msftime_t */
+#define MSFTIME_FROM_MS(sec)        (INT64_C(10000) * (sec))     /* milliseconds in msftime_t */
 
 #if (CLOCK_FREQ % 10000000) == 0
 #define VLC_TICK_FROM_MSFTIME(msft) ((msft) * (CLOCK_FREQ / INT64_C(10000000))
@@ -153,6 +159,14 @@ typedef int64_t msftime_t;
 #define VLC_TICK_FROM_MSFTIME(msft) (CLOCK_FREQ * (msft) / INT64_C(10000000))
 #define MSFTIME_FROM_VLC_TICK(vtk)  ((vtk)  * INT64_C(10000000) / CLOCK_FREQ)
 #endif /* CLOCK_FREQ / 10000000 */
+
+#define vlc_tick_from_timeval(tv) \
+    (vlc_tick_from_sec( (tv)->tv_sec ) + VLC_TICK_FROM_US( (tv)->tv_usec ))
+
+#define vlc_tick_from_timespec(tv) \
+    (vlc_tick_from_sec( (tv)->tv_sec ) + VLC_TICK_FROM_NS( (tv)->tv_nsec ))
+
+struct timespec timespec_from_vlc_tick(vlc_tick_t date);
 
 
 /*****************************************************************************

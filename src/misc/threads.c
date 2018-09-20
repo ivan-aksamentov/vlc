@@ -36,7 +36,6 @@ void vlc_global_mutex (unsigned n, bool acquire)
         VLC_STATIC_MUTEX,
         VLC_STATIC_MUTEX,
         VLC_STATIC_MUTEX,
-        VLC_STATIC_MUTEX,
 #ifdef _WIN32
         VLC_STATIC_MUTEX, // For MTA holder
 #endif
@@ -213,13 +212,13 @@ int vlc_cond_timedwait(vlc_cond_t *cond, vlc_mutex_t *mutex, vlc_tick_t deadline
 }
 
 int vlc_cond_timedwait_daytime(vlc_cond_t *cond, vlc_mutex_t *mutex,
-                               time_t deadline)
+                               time_t deadline_daytime)
 {
     struct timespec ts;
+    vlc_tick_t deadline = vlc_tick_from_sec( deadline_daytime );
 
     timespec_get(&ts, TIME_UTC);
-    deadline -= ts.tv_sec * CLOCK_FREQ;
-    deadline -= ts.tv_nsec / (1000000000 / CLOCK_FREQ);
+    deadline -= vlc_tick_from_timespec( &ts );
 
     return vlc_cond_wait_delay(cond, mutex, deadline);
 }

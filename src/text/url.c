@@ -76,13 +76,17 @@ char *vlc_uri_decode (char *str)
     return str;
 }
 
-static bool isurisafe (int c)
+static bool isurialnum(int c)
 {
-    /* These are the _unreserved_ URI characters (RFC3986 §2.3) */
     return ((unsigned char)(c - 'a') < 26)
         || ((unsigned char)(c - 'A') < 26)
-        || ((unsigned char)(c - '0') < 10)
-        || (strchr ("-._~", c) != NULL);
+        || ((unsigned char)(c - '0') < 10);
+}
+
+static bool isurisafe(int c)
+{
+    /* These are the _unreserved_ URI characters (RFC3986 §2.3) */
+    return isurialnum(c) || (strchr ("-._~", c) != NULL);
 }
 
 static bool isurisubdelim(int c)
@@ -429,8 +433,7 @@ static int vlc_UrlParseInner(vlc_url_t *restrict url, const char *str)
 
     /* URI scheme */
     next = buf;
-    while ((*next >= 'A' && *next <= 'Z') || (*next >= 'a' && *next <= 'z')
-        || (*next >= '0' && *next <= '9') || memchr ("+-.", *next, 3) != NULL)
+    while (isurialnum(*next) || memchr ("+-.", *next, 3) != NULL)
         next++;
 
     if (*next == ':')
@@ -860,15 +863,67 @@ static char *vlc_uri_fixup_inner(const char *str, const char *extras)
     return stream.ptr;
 }
 
+static void vlc_uri_putc(struct vlc_memstream *s, int c, const char *extras)
+{
+    if (isurisafe(c) || isurisubdelim(c) || (strchr(extras, c) != NULL))
+        vlc_memstream_putc(s, c);
+    else
+        vlc_memstream_printf(s, "%%%02hhX", c);
+}
+
 char *vlc_uri_fixup(const char *str)
 {
-    static const char extras[] = ":/?#[]@";
+    assert(str != NULL);
 
-    /* Rule number one is do not change a (potentially) valid URI */
-    if (vlc_uri_component_validate(str, extras))
-        return strdup(str);
+    /* If percent sign is consistently followed by two hexadecimal digits,
+     * then URL encoding must be assumed.
+     * Otherwise, the percent sign itself must be URL-encoded.
+     */
+    bool encode_percent = false;
 
-    return vlc_uri_fixup_inner(str, extras);
+    for (const char *p = str; *p != '\0'; p++)
+        if (p[0] == '%' && !(isurihex(p[1]) && isurihex(p[2])))
+        {
+            encode_percent = true;
+            break;
+        }
+
+    struct vlc_memstream stream;
+    vlc_memstream_open(&stream);
+
+    /* Handle URI scheme */
+    const char *p = str;
+    bool absolute = false;
+    bool encode_brackets = true;
+
+    while (isurialnum(*p) || memchr("+-.", *p, 3) != NULL)
+        vlc_memstream_putc(&stream, *(p++));
+
+    if (p > str && *p == ':')
+    {   /* There is an URI scheme, assume an absolute URI. */
+        vlc_memstream_putc(&stream, *(p++));
+        absolute = true;
+        encode_brackets = false;
+    }
+
+    /* Handle URI authority */
+    if ((absolute || p == str) && strncmp(p, "//", 2) == 0)
+    {
+        vlc_memstream_write(&stream, p, 2);
+        p += 2;
+        encode_brackets = true;
+
+        while (memchr("/?#", *p, 4) == NULL)
+            vlc_uri_putc(&stream, *(p++), "%:[]@" + encode_percent);
+    }
+
+    /* Handle URI path and what follows */
+    const char *extras = encode_brackets ? "%/?#@" : "%:/?#[]@";
+
+    while (*p != '\0')
+        vlc_uri_putc(&stream, *(p++), extras + encode_percent);
+
+    return vlc_memstream_close(&stream) ? NULL : stream.ptr;
 }
 
 #if defined (HAVE_IDN)

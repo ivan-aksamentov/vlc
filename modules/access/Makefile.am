@@ -5,9 +5,6 @@ AM_CPPFLAGS += -I$(srcdir)/access
 
 ### Files ###
 
-libattachment_plugin_la_SOURCES = access/attachment.c
-access_LTLIBRARIES += libattachment_plugin.la
-
 libdcp_plugin_la_SOURCES = access/dcp/dcpparser.h access/dcp/dcp.cpp access/dcp/dcpparser.cpp access/dcp/dcpdecrypt.cpp
 if HAVE_ASDCP
 libdcp_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) $(ASDCP_CFLAGS)
@@ -75,7 +72,7 @@ access_LTLIBRARIES += libpulsesrc_plugin.la
 endif
 
 libaccess_qtsound_plugin_la_SOURCES = access/qtsound.m
-libaccess_qtsound_plugin_la_LDFLAGS = -Wl,-framework,QTKit -Wl,-framework,CoreAudio
+libaccess_qtsound_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)' -Wl,-framework,Foundation -Wl,-framework,QTKit -Wl,-framework,CoreAudio
 access_LTLIBRARIES += $(LTLIBaccess_qtsound)
 EXTRA_LTLIBRARIES += libaccess_qtsound_plugin.la
 
@@ -257,7 +254,7 @@ endif
 access_LTLIBRARIES += $(LTLIBdvdread)
 EXTRA_LTLIBRARIES += libdvdread_plugin.la
 
-liblibbluray_plugin_la_SOURCES = access/bluray.c
+liblibbluray_plugin_la_SOURCES = access/bluray.c demux/mpeg/timestamps.h
 liblibbluray_plugin_la_CFLAGS = $(AM_CFLAGS) $(BLURAY_CFLAGS)
 liblibbluray_plugin_la_LIBADD = $(BLURAY_LIBS)
 liblibbluray_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
@@ -320,7 +317,8 @@ libhttp_plugin_la_SOURCES = access/http.c
 libhttp_plugin_la_LIBADD = $(SOCKET_LIBS)
 access_LTLIBRARIES += libhttp_plugin.la
 
-liblive555_plugin_la_SOURCES = access/live555.cpp access/mms/asf.c access/mms/buffer.c
+liblive555_plugin_la_SOURCES = access/live555.cpp access/mms/asf.c access/mms/buffer.c \
+                               access/live555_dtsgen.h
 liblive555_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(CXXFLAGS_live555)
 liblive555_plugin_la_LIBADD = $(LIBS_live555) $(SOCKET_LIBS)
 liblive555_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)' \
@@ -353,6 +351,17 @@ libdsm_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
 access_LTLIBRARIES += $(LTLIBdsm)
 EXTRA_LTLIBRARIES += libdsm_plugin.la
 
+libsmb2_plugin_la_SOURCES = access/smb2.c
+libsmb2_plugin_la_CFLAGS = $(AM_CFLAGS) $(SMB2_CFLAGS)
+libsmb2_plugin_la_LIBADD = $(SMB2_LIBS) $(SOCKET_LIBS)
+libsmb2_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
+if HAVE_DSM
+libsmb2_plugin_la_CFLAGS += $(DSM_CFLAGS) -DHAVE_DSM
+libsmb2_plugin_la_LIBADD += $(DSM_LIBS)
+endif
+access_LTLIBRARIES += $(LTLIBsmb2)
+EXTRA_LTLIBRARIES += libsmb2_plugin.la
+
 libtcp_plugin_la_SOURCES = access/tcp.c
 libtcp_plugin_la_LIBADD = $(SOCKET_LIBS)
 access_LTLIBRARIES += libtcp_plugin.la
@@ -383,19 +392,6 @@ libnfs_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
 access_LTLIBRARIES += $(LTLIBnfs)
 EXTRA_LTLIBRARIES += libnfs_plugin.la
 
-libaccess_realrtsp_plugin_la_SOURCES = \
-	access/rtsp/access.c \
-	access/rtsp/rtsp.c access/rtsp/rtsp.h \
-	access/rtsp/real.c access/rtsp/real.h \
-	access/rtsp/real_rmff.c access/rtsp/real_rmff.h \
-	access/rtsp/real_sdpplin.c access/rtsp/real_sdpplin.h \
-	access/rtsp/real_asmrp.c
-libaccess_realrtsp_plugin_la_CPPFLAGS = $(AM_CPPFLAGS)
-libaccess_realrtsp_plugin_la_LIBADD = $(SOCKET_LIBS)
-libaccess_realrtsp_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
-access_LTLIBRARIES += $(LTLIBaccess_realrtsp)
-EXTRA_LTLIBRARIES += libaccess_realrtsp_plugin.la
-
 libavio_plugin_la_SOURCES = access/avio.c access/avio.h
 libavio_plugin_la_CFLAGS = $(AM_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS)
 libavio_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(SYMBOLIC_LDFLAGS)
@@ -424,7 +420,7 @@ EXTRA_LTLIBRARIES += libaccess_mtp_plugin.la
 
 ### SRT ###
 
-libaccess_srt_plugin_la_SOURCES = access/srt.c
+libaccess_srt_plugin_la_SOURCES = access/srt.c dummy.cpp
 libaccess_srt_plugin_la_CFLAGS = $(AM_CFLAGS) $(SRT_CFLAGS)
 libaccess_srt_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) $(SRT_CPPFLAGS)
 libaccess_srt_plugin_la_LIBADD = $(SRT_LIBS)

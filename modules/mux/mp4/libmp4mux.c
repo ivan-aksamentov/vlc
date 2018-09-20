@@ -192,7 +192,7 @@ static bo_t *GetEDTS( mp4mux_trackinfo_t *p_track, uint32_t i_movietimescale, bo
     for(unsigned i=0; i<p_track->i_edits_count; i++)
     {
         /* !WARN! media time must start sample time 0, we need a -1 edit for start offsets */
-        if(p_track->p_edits[i].i_start_offset)
+        if(p_track->p_edits[i].i_start_offset != 0)
             i_total_edits++;
     }
 
@@ -200,7 +200,7 @@ static bo_t *GetEDTS( mp4mux_trackinfo_t *p_track, uint32_t i_movietimescale, bo
 
     for(unsigned i=0; i<p_track->i_edits_count; i++)
     {
-        if(p_track->p_edits[i].i_start_offset)
+        if(p_track->p_edits[i].i_start_offset != 0)
         {
             AddEdit(elst,
                     p_track->p_edits[i].i_start_offset * i_movietimescale / CLOCK_FREQ,
@@ -237,7 +237,7 @@ static bo_t *GetESDS(mp4mux_trackinfo_t *p_track)
     for (unsigned i = 0; i < p_track->i_entry_count; i++) {
         i_bitrate_avg += p_track->entry[i].i_size;
         if (p_track->entry[i].i_length > 0) {
-            int64_t i_bitrate = INT64_C(8000000) * p_track->entry[i].i_size / p_track->entry[i].i_length;
+            int64_t i_bitrate = CLOCK_FREQ * 8 * p_track->entry[i].i_size / p_track->entry[i].i_length;
             if (i_bitrate > i_bitrate_max)
                 i_bitrate_max = i_bitrate;
         }
@@ -1350,7 +1350,7 @@ static bo_t *GetStblBox(vlc_object_t *p_obj, mp4mux_trackinfo_t *p_track, bool b
             if ( i_interval != -1 )
             {
                 i_interval += p_track->entry[i].i_length + p_track->entry[i].i_pts_dts;
-                if ( i_interval < CLOCK_FREQ * 2 )
+                if ( i_interval < VLC_TICK_FROM_SEC(2) )
                     continue;
             }
 
@@ -1471,7 +1471,7 @@ bo_t * mp4mux_GetMoovBox(vlc_object_t *p_obj, mp4mux_trackinfo_t **pp_tracks, un
     for (unsigned int i_trak = 0; i_trak < i_tracks; i_trak++) {
         mp4mux_trackinfo_t *p_stream = pp_tracks[i_trak];
 
-        vlc_tick_t i_stream_duration;
+        int64_t i_stream_duration;
         if ( !b_fragmented )
             i_stream_duration = p_stream->i_read_duration * i_movie_timescale / CLOCK_FREQ;
         else

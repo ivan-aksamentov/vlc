@@ -391,13 +391,13 @@ void MainInterface::createResumePanel( QWidget *w )
 
     CONNECT( resumeTimer, timeout(), this, hideResumePanel() );
     CONNECT( cancel, clicked(), this, hideResumePanel() );
-    CONNECT( THEMIM->getIM(), resumePlayback(int64_t), this, showResumePanel(int64_t) );
+    CONNECT( THEMIM->getIM(), resumePlayback(vlc_tick_t), this, showResumePanel(vlc_tick_t) );
     BUTTONACT( ok, resumePlayback() );
 
     w->layout()->addWidget( resumePanel );
 }
 
-void MainInterface::showResumePanel( int64_t _time ) {
+void MainInterface::showResumePanel( vlc_tick_t _time ) {
     int setting = var_InheritInteger( p_intf, "qt-continue" );
 
     if( setting == 0 )
@@ -1530,10 +1530,9 @@ void MainInterface::dropEvent(QDropEvent *event)
  * Event called if something is dropped onto a VLC window
  * \param event the event in question
  * \param b_play whether to play the file immediately
- * \param b_playlist true to add to playlist, false to add to media library
  * \return nothing
  */
-void MainInterface::dropEventPlay( QDropEvent *event, bool b_play, bool b_playlist )
+void MainInterface::dropEventPlay( QDropEvent *event, bool b_play )
 {
     if( event->possibleActions() & ( Qt::CopyAction | Qt::MoveAction | Qt::LinkAction ) )
        event->setDropAction( Qt::CopyAction );
@@ -1578,7 +1577,7 @@ void MainInterface::dropEventPlay( QDropEvent *event, bool b_play, bool b_playli
 #endif
             if( mrl.length() > 0 )
             {
-                Open::openMRL( p_intf, mrl, first, b_playlist );
+                Open::openMRL( p_intf, mrl, first );
                 first = false;
             }
         }
@@ -1591,7 +1590,7 @@ void MainInterface::dropEventPlay( QDropEvent *event, bool b_play, bool b_playli
         QUrl(mimeData->text()).isValid() )
     {
         QString mrl = toURI( mimeData->text() );
-        Open::openMRL( p_intf, mrl, first, b_playlist );
+        Open::openMRL( p_intf, mrl, first );
     }
     event->accept();
 }

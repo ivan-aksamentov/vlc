@@ -165,7 +165,7 @@ std::size_t SegmentInformation::getAllSegments(std::vector<ISegment *> &retSegme
 uint64_t SegmentInformation::getLiveStartSegmentNumber(uint64_t def) const
 {
     const vlc_tick_t i_max_buffering = getPlaylist()->getMaxBuffering() +
-                                    /* FIXME: add dynamic pts-delay */ CLOCK_FREQ;
+                                    /* FIXME: add dynamic pts-delay */ VLC_TICK_FROM_SEC(1);
 
     /* Try to never buffer up to really end */
     const uint64_t OFFSET_FROM_END = 3;
@@ -215,8 +215,11 @@ uint64_t SegmentInformation::getLiveStartSegmentNumber(uint64_t def) const
             else
                 start = end - count;
 
-            const uint64_t bufcount = ( OFFSET_FROM_END + timescale.ToScaled(i_max_buffering) /
-                                        mediaSegmentTemplate->duration.Get() );
+            uint64_t bufcount = ( OFFSET_FROM_END + timescale.ToScaled(i_max_buffering) /
+                                  mediaSegmentTemplate->duration.Get() );
+            /* Ensure we always pick > start # of availability window as this segment might no longer be avail */
+            if( end - start <= bufcount )
+                bufcount = end - start - 1;
 
             return ( end - start > bufcount ) ? end - bufcount : start;
         }
@@ -349,8 +352,8 @@ bool SegmentInformation::getSegmentNumberByTime(vlc_tick_t time, uint64_t *ret) 
         SegmentTimeline *timeline = mediaSegmentTemplate->segmentTimeline.Get();
         if(timeline)
         {
-            time = timescale.ToScaled(time);
-            *ret = timeline->getElementNumberByScaledPlaybackTime(time);
+            stime_t st = timescale.ToScaled(time);
+            *ret = timeline->getElementNumberByScaledPlaybackTime(st);
             return true;
         }
 
@@ -372,16 +375,16 @@ bool SegmentInformation::getSegmentNumberByTime(vlc_tick_t time, uint64_t *ret) 
     else if ( segmentList && !segmentList->getSegments().empty() )
     {
         const Timescale timescale = segmentList->inheritTimescale();
-        time = timescale.ToScaled(time);
-        return segmentList->getSegmentNumberByScaledTime(time, ret);
+        stime_t st = timescale.ToScaled(time);
+        return segmentList->getSegmentNumberByScaledTime(st, ret);
     }
     else if( segmentBase )
     {
         const Timescale timescale = inheritTimescale();
-        time = timescale.ToScaled(time);
+        stime_t st = timescale.ToScaled(time);
         *ret = 0;
         const std::vector<ISegment *> list = segmentBase->subSegments();
-        return SegmentInfoCommon::getSegmentNumberByScaledTime(list, time, ret);
+        return SegmentInfoCommon::getSegmentNumberByScaledTime(list, st, ret);
     }
 
     if(parent)

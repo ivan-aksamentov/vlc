@@ -290,7 +290,7 @@
         input_item_AddOption(p_input, [[NSString stringWithFormat:@"ttl=%@", [_streamTTLField stringValue]] UTF8String], VLC_INPUT_OPTION_TRUSTED);
 
     int returnValue;
-    returnValue = playlist_AddInput(p_playlist, p_input, false, true );
+    returnValue = playlist_AddInput(p_playlist, p_input, false );
 
     if (returnValue == VLC_SUCCESS) {
         /* let's "play" */
@@ -395,6 +395,21 @@
     [_okButton setTitle:_NS("Stream")];
 }
 
+- (void)resetDestination
+{
+    [self setOutputDestination:@""];
+
+    // File panel
+    [[_fileDestinationFileName animator] setHidden: YES];
+    [[_fileDestinationFileNameStub animator] setHidden: NO];
+
+    // Stream panel
+    [_streamDestinationURLLabel setStringValue:_NS("Select Streaming Method")];
+    b_streaming = NO;
+
+    [self updateOKButton];
+}
+
 - (IBAction)cancelDestination:(id)sender
 {
     if ([_streamDestinationView superview] != nil)
@@ -405,7 +420,8 @@
     [_destinationCancelBtn setHidden:YES];
     [[_destinationFileButton animator] setHidden: NO];
     [[_destinationStreamButton animator] setHidden: NO];
-    b_streaming = NO;
+
+    [self resetDestination];
 }
 
 - (IBAction)browseFileDestination:(id)sender
@@ -418,14 +434,11 @@
     [saveFilePanel beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode) {
         if (returnCode == NSModalResponseOK) {
             [self setOutputDestination:[[saveFilePanel URL] path]];
-            [_fileDestinationFileName setStringValue: [[NSFileManager defaultManager] displayNameAtPath:_outputDestination]];
-            [[_fileDestinationFileNameStub animator] setHidden: YES];
-            [[_fileDestinationFileName animator] setHidden: NO];
-        } else {
-            [self setOutputDestination:@""];
-            [[_fileDestinationFileName animator] setHidden: YES];
-            [[_fileDestinationFileNameStub animator] setHidden: NO];
+            [self->_fileDestinationFileName setStringValue: [[NSFileManager defaultManager] displayNameAtPath:self->_outputDestination]];
+            [[self->_fileDestinationFileNameStub animator] setHidden: YES];
+            [[self->_fileDestinationFileName animator] setHidden: NO];
         }
+
         [self updateOKButton];
     }];
 }
@@ -495,7 +508,7 @@
 
         /* update UI */
         [_self recreateProfilePopup];
-        [_profilePopup selectItemWithTitle:resultingText];
+        [self->_profilePopup selectItemWithTitle:resultingText];
 
         /* update internals */
         [_self switchProfile:self];
@@ -604,7 +617,7 @@
     [saveFilePanel setAllowedFileTypes:[NSArray arrayWithObject:@"sdp"]];
     [saveFilePanel beginSheetModalForWindow:_streamPanel completionHandler:^(NSInteger returnCode) {
         if (returnCode == NSModalResponseOK)
-            [_streamSDPField setStringValue:[[saveFilePanel URL] path]];
+            [self->_streamSDPField setStringValue:[[saveFilePanel URL] path]];
     }];
 }
 
@@ -941,10 +954,13 @@
             [composedOptions appendFormat:@",soverlay"];
     }
 
+    // Close transcode
+    [composedOptions appendString:@"}"];
+
     if (!b_streaming) {
         /* file transcoding */
         // add muxer
-        [composedOptions appendFormat:@"}:standard{mux=%@", [self.currentProfile firstObject]];
+        [composedOptions appendFormat:@":standard{mux=%@", [self.currentProfile firstObject]];
 
 
         // add output destination
@@ -952,15 +968,17 @@
                                                                            withString:@"\\\""];
         [composedOptions appendFormat:@",access=file{no-overwrite},dst=\"%@\"}", _outputDestination];
     } else {
+        NSString *destination = [NSString stringWithFormat:@"\"%@:%@\"", _outputDestination, [_streamPortField stringValue]];
+
         /* streaming */
         if ([[[_streamTypePopup selectedItem] title] isEqualToString:@"RTP"])
             [composedOptions appendFormat:@":rtp{mux=ts,dst=%@,port=%@", _outputDestination, [_streamPortField stringValue]];
         else if ([[[_streamTypePopup selectedItem] title] isEqualToString:@"UDP"])
-            [composedOptions appendFormat:@":standard{mux=ts,dst=%@,port=%@,access=udp", _outputDestination, [_streamPortField stringValue]];
+            [composedOptions appendFormat:@":standard{mux=ts,dst=%@,access=udp", destination];
         else if ([[[_streamTypePopup selectedItem] title] isEqualToString:@"MMSH"])
-            [composedOptions appendFormat:@":standard{mux=asfh,dst=%@,port=%@,access=mmsh", _outputDestination, [_streamPortField stringValue]];
+            [composedOptions appendFormat:@":standard{mux=asfh,dst=%@,access=mmsh", destination];
         else
-            [composedOptions appendFormat:@":standard{mux=%@,dst=%@,port=%@,access=http", [self.currentProfile firstObject], [_streamPortField stringValue], _outputDestination];
+            [composedOptions appendFormat:@":standard{mux=%@,dst=%@,access=http", [self.currentProfile firstObject], destination];
 
         if ([_streamSAPCheckbox state])
             [composedOptions appendFormat:@",sap,name=\"%@\"", [_streamChannelField stringValue]];
@@ -980,7 +998,7 @@
             }
         }
 
-        [composedOptions appendString:@"} :sout-keep"];
+        [composedOptions appendString:@"}"];
     }
 
     return [NSString stringWithString:composedOptions];

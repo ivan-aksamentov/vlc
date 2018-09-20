@@ -97,7 +97,7 @@ vlc_module_end ()
         p_qtsound = p_demux;
         currentAudioBuffer = nil;
         date_Init(&date, 44100, 1);
-        date_Set(&date, VLC_TS_0);
+        date_Set(&date, VLC_TICK_0);
         currentPts = 0;
         previousPts = 0;
     }
@@ -534,7 +534,6 @@ static int Demux(demux_t *p_demux)
 static int Control(demux_t *p_demux, int i_query, va_list args)
 {
     bool *pb;
-    int64_t *pi64;
 
     switch(i_query) {
             /* Special for access_demux */
@@ -547,8 +546,8 @@ static int Control(demux_t *p_demux, int i_query, va_list args)
             return VLC_SUCCESS;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = (int64_t*)va_arg(args, int64_t *);
-            *pi64 = INT64_C(1000) * var_InheritInteger(p_demux, "live-caching");
+            *va_arg(args, vlc_tick_t *) =
+                VLC_TICK_FROM_MS(var_InheritInteger(p_demux, "live-caching"));
             return VLC_SUCCESS;
 
         default:

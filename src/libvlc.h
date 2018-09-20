@@ -25,6 +25,8 @@
 #ifndef LIBVLC_LIBVLC_H
 # define LIBVLC_LIBVLC_H 1
 
+#include <vlc_input_item.h>
+
 extern const char psz_vlc_changeset[];
 
 typedef struct variable_t variable_t;
@@ -37,7 +39,7 @@ void system_Configure ( libvlc_int_t *, int, const char *const [] );
 #if defined(_WIN32) || defined(__OS2__)
 void system_End(void);
 #ifndef __OS2__
-size_t EnumClockSource( const char *, char ***, char *** );
+int EnumClockSource( const char *, char ***, char *** );
 #endif
 #endif
 void vlc_CPU_dump(vlc_object_t *);
@@ -183,8 +185,9 @@ typedef struct libvlc_priv_t
     vlc_dialog_provider *p_dialog_provider; ///< dialog provider
     vlc_keystore      *p_memory_keystore; ///< memory keystore
     struct playlist_t *playlist; ///< Playlist for interfaces
-    struct playlist_preparser_t *parser; ///< Input item meta data handler
+    struct input_preparser_t *parser; ///< Input item meta data handler
     vlc_actions_t *actions; ///< Hotkeys handler
+    struct vlc_medialibrary_t *p_media_library; ///< Media library instance
 
     /* Exit callback */
     vlc_exit_t       exit;
@@ -198,6 +201,12 @@ static inline libvlc_priv_t *libvlc_priv (libvlc_int_t *libvlc)
 int intf_InsertItem(libvlc_int_t *, const char *mrl, unsigned optc,
                     const char * const *optv, unsigned flags);
 void intf_DestroyAll( libvlc_int_t * );
+
+int vlc_MetadataRequest(libvlc_int_t *libvlc, input_item_t *item,
+                        input_item_meta_request_option_t i_options,
+                        const input_preparser_callbacks_t *cbs,
+                        void *cbs_userdata,
+                        int timeout, void *id);
 
 /*
  * Variables stuff

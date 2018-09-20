@@ -82,7 +82,7 @@ typedef struct
 {
     ASF_OBJECT_COMMON
     guid_t      i_file_id;
-    uint64_t    i_index_entry_time_interval;
+    msftime_t   i_index_entry_time_interval;
     uint32_t    i_max_packet_count;
     uint32_t    i_index_entry_count;
 
@@ -104,9 +104,9 @@ typedef struct
     uint64_t     i_file_size;
     uint64_t     i_creation_date;
     uint64_t     i_data_packets_count;
-    uint64_t     i_play_duration;
-    uint64_t     i_send_duration;
-    uint64_t     i_preroll;
+    msftime_t    i_play_duration;
+    msftime_t    i_send_duration;
+    vlc_tick_t   i_preroll;
     uint32_t     i_flags;
     uint32_t     i_min_data_packet_size;
     uint32_t     i_max_data_packet_size;
@@ -121,7 +121,7 @@ typedef struct
 
     guid_t  i_stream_type;
     guid_t  i_error_correction_type;
-    uint64_t     i_time_offset;
+    msftime_t    i_time_offset;
     uint32_t     i_type_specific_data_length;
     uint32_t     i_error_correction_data_length;
     uint16_t     i_flags;
@@ -281,7 +281,7 @@ typedef struct
     uint32_t i_flags;
     uint16_t i_stream_number;
     uint16_t i_language_index;
-    uint64_t i_average_time_per_frame;
+    msftime_t i_average_time_per_frame;
 
     uint16_t i_stream_name_count;
 

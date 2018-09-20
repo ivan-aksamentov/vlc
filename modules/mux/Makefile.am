@@ -3,7 +3,7 @@ muxdir = $(pluginsdir)/mux
 libmux_dummy_plugin_la_SOURCES = mux/dummy.c
 
 libmux_asf_plugin_la_SOURCES = mux/asf.c demux/asf/libasf_guid.h
-libmux_avi_plugin_la_SOURCES = mux/avi.c
+libmux_avi_plugin_la_SOURCES = mux/avi.c demux/avi/bitmapinfoheader.h
 libmux_mp4_plugin_la_SOURCES = mux/mp4/mp4.c \
 	mux/mp4/libmp4mux.c mux/mp4/libmp4mux.h \
        demux/mp4/libmp4.h \
@@ -13,7 +13,8 @@ libmux_mp4_plugin_la_SOURCES = mux/mp4/mp4.c \
 libmux_mpjpeg_plugin_la_SOURCES = mux/mpjpeg.c
 libmux_ps_plugin_la_SOURCES = \
 	mux/mpeg/pes.c mux/mpeg/pes.h \
-	mux/mpeg/ps.c mux/mpeg/bits.h
+	mux/mpeg/ps.c mux/mpeg/bits.h \
+	demux/mpeg/timestamps.h
 libmux_wav_plugin_la_SOURCES = mux/wav.c
 
 mux_LTLIBRARIES = \
@@ -39,7 +40,8 @@ libmux_ts_plugin_la_SOURCES = \
 	mux/mpeg/tables.c mux/mpeg/tables.h \
 	mux/mpeg/tsutil.c mux/mpeg/tsutil.h \
 	codec/jpeg2000.h \
-	mux/mpeg/ts.c mux/mpeg/bits.h mux/mpeg/dvbpsi_compat.h
+	mux/mpeg/ts.c mux/mpeg/bits.h mux/mpeg/dvbpsi_compat.h \
+	demux/mpeg/timestamps.h
 libmux_ts_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) $(DVBPSI_CFLAGS)
 libmux_ts_plugin_la_LIBADD = $(DVBPSI_LIBS)
 if HAVE_DVBPSI

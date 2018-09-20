@@ -130,7 +130,7 @@ static int Open (vlc_object_t *obj)
 
     sys->es = es_out_Add (demux->out, &fmt);
     date_Init (&sys->pts, RATE, 1);
-    date_Set(&sys->pts, VLC_TS_0);
+    date_Set(&sys->pts, VLC_TICK_0);
 
     /* Titles */
     unsigned n = gme_track_count (sys->emu);
@@ -150,7 +150,7 @@ static int Open (vlc_object_t *obj)
              continue;
          msg_Dbg (obj, "track %u: %s %d ms", i, infos->song, infos->length);
          if (infos->length != -1)
-             title->i_length = infos->length * INT64_C(1000);
+             title->i_length = VLC_TICK_FROM_MS(infos->length);
          if (infos->song[0])
              title->psz_name = strdup (infos->song);
          gme_free_info (infos);
@@ -272,7 +272,7 @@ static int Control (demux_t *demux, int query, va_list args)
              || (sys->titlev[sys->track_id]->i_length == 0))
                 break;
 
-            int seek = (sys->titlev[sys->track_id]->i_length / 1000) * pos;
+            int seek = MS_FROM_VLC_TICK(sys->titlev[sys->track_id]->i_length) * pos;
             if (gme_seek (sys->emu, seek))
                 break;
             return VLC_SUCCESS;
@@ -280,25 +280,22 @@ static int Control (demux_t *demux, int query, va_list args)
 
         case DEMUX_GET_LENGTH:
         {
-            int64_t *v = va_arg (args, int64_t *);
-
             if (unlikely(sys->track_id >= sys->titlec)
              || (sys->titlev[sys->track_id]->i_length == 0))
                 break;
-            *v = sys->titlev[sys->track_id]->i_length;
+            *va_arg (args, vlc_tick_t *) = sys->titlev[sys->track_id]->i_length;
             return VLC_SUCCESS;
         }
 
         case DEMUX_GET_TIME:
         {
-            int64_t *v = va_arg (args, int64_t *);
-            *v = gme_tell (sys->emu) * INT64_C(1000);
+            *va_arg (args, vlc_tick_t *) = VLC_TICK_FROM_MS(gme_tell (sys->emu));
             return VLC_SUCCESS;
         }
 
         case DEMUX_SET_TIME:
         {
-            int64_t v = va_arg (args, int64_t) / 1000;
+            int64_t v = MS_FROM_VLC_TICK( va_arg (args, vlc_tick_t) );
             if (v > INT_MAX || gme_seek (sys->emu, v))
                 break;
             return VLC_SUCCESS;

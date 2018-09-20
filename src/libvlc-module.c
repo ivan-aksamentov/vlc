@@ -577,6 +577,11 @@ static const char *const ppsz_clock_descriptions[] =
     "(like DVB streams for example)." )
 
 /// \todo Document how to find it
+#define INPUT_VIDEOTRACK_TEXT N_("Video track")
+#define INPUT_VIDEOTRACK_LONGTEXT N_( \
+    "Stream number of the video track to use " \
+    "(from 0 to n).")
+
 #define INPUT_AUDIOTRACK_TEXT N_("Audio track")
 #define INPUT_AUDIOTRACK_LONGTEXT N_( \
     "Stream number of the audio track to use " \
@@ -603,6 +608,10 @@ static const char *const ppsz_clock_descriptions[] =
     "(comma separated, two or three letters country code, you may use 'any' as a fallback).")
 
 /// \todo Document how to find it
+#define INPUT_VIDEOTRACK_ID_TEXT N_("Video track ID")
+#define INPUT_VIDEOTRACK_ID_LONGTEXT N_( \
+    "Stream ID of the video track to use.")
+
 #define INPUT_AUDIOTRACK_ID_TEXT N_("Audio track ID")
 #define INPUT_AUDIOTRACK_ID_LONGTEXT N_( \
     "Stream ID of the audio track to use.")
@@ -1124,6 +1133,14 @@ static const char *const ppsz_prefres[] = {
 #define PREPARSE_TIMEOUT_TEXT N_( "Preparsing timeout" )
 #define PREPARSE_TIMEOUT_LONGTEXT N_( \
     "Maximum time allowed to preparse an item, in milliseconds" )
+
+#define PREPARSE_THREADS_TEXT N_( "Preparsing threads" )
+#define PREPARSE_THREADS_LONGTEXT N_( \
+    "Maximum number of threads used to preparse items" )
+
+#define FETCH_ART_THREADS_TEXT N_( "Fetch-art threads" )
+#define FETCH_ART_THREADS_LONGTEXT N_( \
+    "Maximum number of threads used to fetch art" )
 
 #define METADATA_NETWORK_TEXT N_( "Allow metadata network access" )
 
@@ -1720,6 +1737,9 @@ vlc_module_begin ()
     add_string( "programs", "",
                 INPUT_PROGRAMS_TEXT, INPUT_PROGRAMS_LONGTEXT, true )
         change_safe ()
+    add_integer( "video-track", -1,
+                 INPUT_VIDEOTRACK_TEXT, INPUT_VIDEOTRACK_LONGTEXT, true )
+        change_safe ()
     add_integer( "audio-track", -1,
                  INPUT_AUDIOTRACK_TEXT, INPUT_AUDIOTRACK_LONGTEXT, true )
         change_safe ()
@@ -1737,6 +1757,9 @@ vlc_module_begin ()
     add_string( "menu-language", "",
                  INPUT_MENUTRACK_LANG_TEXT, INPUT_MENUTRACK_LANG_LONGTEXT,
                   false )
+        change_safe ()
+    add_integer( "video-track-id", -1, INPUT_VIDEOTRACK_ID_TEXT,
+                 INPUT_VIDEOTRACK_ID_LONGTEXT, true )
         change_safe ()
     add_integer( "audio-track-id", -1, INPUT_AUDIOTRACK_ID_TEXT,
                  INPUT_AUDIOTRACK_ID_LONGTEXT, true )
@@ -1861,12 +1884,12 @@ vlc_module_begin ()
 
     set_section( N_( "Advanced" ), NULL )
 
-    add_integer( "file-caching", DEFAULT_PTS_DELAY / 1000,
+    add_integer( "file-caching", MS_FROM_VLC_TICK(DEFAULT_PTS_DELAY),
                  CACHING_TEXT, CACHING_LONGTEXT, true )
         change_integer_range( 0, 60000 )
         change_safe()
     add_obsolete_integer( "vdr-caching" ) /* 2.0.0 */
-    add_integer( "live-caching", DEFAULT_PTS_DELAY / 1000,
+    add_integer( "live-caching", MS_FROM_VLC_TICK(DEFAULT_PTS_DELAY),
                  CAPTURE_CACHING_TEXT, CAPTURE_CACHING_LONGTEXT, true )
         change_integer_range( 0, 60000 )
         change_safe()
@@ -1881,7 +1904,7 @@ vlc_module_begin ()
     add_obsolete_integer( "oss-caching" ) /* 2.0.0 */
     add_obsolete_integer( "screen-caching" ) /* 2.0.0 */
     add_obsolete_integer( "v4l2-caching" ) /* 2.0.0 */
-    add_integer( "disc-caching", DEFAULT_PTS_DELAY / 1000,
+    add_integer( "disc-caching", MS_FROM_VLC_TICK(DEFAULT_PTS_DELAY),
                  DISC_CACHING_TEXT, DISC_CACHING_LONGTEXT, true )
         change_integer_range( 0, 60000 )
         change_safe()
@@ -1891,7 +1914,7 @@ vlc_module_begin ()
     add_obsolete_integer( "dvdnav-caching" ) /* 2.0.0 */
     add_obsolete_integer( "dvdread-caching" ) /* 2.0.0 */
     add_obsolete_integer( "vcd-caching" ) /* 2.0.0 */
-    add_integer( "network-caching", CLOCK_FREQ / 1000,
+    add_integer( "network-caching", 1000,
                  NETWORK_CACHING_TEXT, NETWORK_CACHING_LONGTEXT, true )
         change_integer_range( 0, 60000 )
         change_safe()
@@ -1911,7 +1934,7 @@ vlc_module_begin ()
     add_integer( "clock-synchro", -1, CLOCK_SYNCHRO_TEXT,
                  CLOCK_SYNCHRO_LONGTEXT, true )
         change_integer_list( pi_clock_values, ppsz_clock_descriptions )
-    add_integer( "clock-jitter", 5 * CLOCK_FREQ/1000, CLOCK_JITTER_TEXT,
+    add_integer( "clock-jitter", 5000, CLOCK_JITTER_TEXT,
               CLOCK_JITTER_LONGTEXT, true )
         change_safe()
 
@@ -2109,6 +2132,12 @@ vlc_module_begin ()
 
     add_integer( "preparse-timeout", 5000, PREPARSE_TIMEOUT_TEXT,
                  PREPARSE_TIMEOUT_LONGTEXT, false )
+
+    add_integer( "preparse-threads", 1, PREPARSE_THREADS_TEXT,
+                 PREPARSE_THREADS_LONGTEXT, false )
+
+    add_integer( "fetch-art-threads", 1, FETCH_ART_THREADS_TEXT,
+                 FETCH_ART_THREADS_LONGTEXT, false )
 
     add_obsolete_integer( "album-art" )
     add_bool( "metadata-network-access", false, METADATA_NETWORK_TEXT,

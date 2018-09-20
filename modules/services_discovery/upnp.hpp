@@ -35,6 +35,8 @@
 #include "upnp-wrapper.hpp"
 
 #include <vlc_url.h>
+#include <vlc_interrupt.h>
+#include <vlc_threads.h>
 
 namespace SD
 {
@@ -70,6 +72,7 @@ public:
 
 private:
     void parseNewServer( IXML_Document* doc, const std::string& location );
+    void parseSatipServer( IXML_Element* p_device_elem, const char *psz_base_url, const char *psz_udn, const char *psz_friendly_name, std::string iconUrl );
     std::string getIconURL( IXML_Element* p_device_elem , const char* psz_base_url );
 
 private:
@@ -86,13 +89,13 @@ class Upnp_i11e_cb
 {
 public:
     Upnp_i11e_cb( Upnp_FunPtr callback, void *cookie );
-    ~Upnp_i11e_cb();
+    ~Upnp_i11e_cb() = default;
     void waitAndRelease( void );
     static int run( Upnp_EventType, UpnpEventPtr, void *);
 
 private:
-    vlc_sem_t       m_sem;
-    vlc_mutex_t     m_lock;
+    vlc::threads::semaphore m_sem;
+    vlc::threads::mutex m_lock;
     int             m_refCount;
     Upnp_FunPtr     m_callback;
     void*           m_cookie;

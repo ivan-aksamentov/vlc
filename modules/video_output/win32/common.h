@@ -80,6 +80,8 @@ typedef struct vout_display_sys_win32_t
     int  i_align_dest_size;
 
     bool (*pf_GetRect)(const struct vout_display_sys_win32_t *p_sys, RECT *out);
+    unsigned int (*pf_GetPictureWidth) (const vout_display_t *);
+    unsigned int (*pf_GetPictureHeight)(const vout_display_t *);
 } vout_display_sys_win32_t;
 
 
@@ -97,8 +99,6 @@ void UpdateRects (vout_display_t *,
                   const vout_display_cfg_t *,
                   bool is_forced);
 void AlignRect(RECT *, int align_boundary, int align_size);
-
-picture_pool_t *CommonPool(vout_display_t *, unsigned);
 
 /*****************************************************************************
  * Constants

@@ -177,10 +177,12 @@ static const char * const rgsz_ar_text[] = {
 };
 static_assert(ARRAY_SIZE(rgi_ar_values) == ARRAY_SIZE(rgsz_ar_text), "afd arrays messed up");
 
+namespace {
+
 /* Only one audio output module and one video output module
  * can be used per process.
  * We use a static mutex in audio/video submodules entry points.  */
-typedef struct decklink_sys_t
+struct decklink_sys_t
 {
     /* With LOCK */
     IDeckLinkOutput *p_output;
@@ -217,7 +219,9 @@ typedef struct decklink_sys_t
         int nosignal_delay;
         picture_t *pic_nosignal;
     } video;
-} decklink_sys_t;
+};
+
+} // namespace
 
 /*****************************************************************************
  * Local prototypes.
@@ -302,7 +306,7 @@ static decklink_sys_t *HoldDLSys(vlc_object_t *obj, int i_cat)
             {
                 vlc_mutex_unlock(&sys_lock);
                 msg_Info(obj, "Waiting for previous vout module to exit");
-                vlc_tick_sleep(CLOCK_FREQ / 10);
+                vlc_tick_sleep(VLC_TICK_FROM_MS(100));
                 vlc_mutex_lock(&sys_lock);
             }
         }
@@ -723,7 +727,7 @@ static int OpenDecklink(vout_display_t *vd, decklink_sys_t *sys)
 
     /* start */
     result = sys->p_output->StartScheduledPlayback(
-        (vlc_tick_now() * sys->timescale) / CLOCK_FREQ, sys->timescale, 1.0);
+        SEC_FROM_VLC_TICK(vlc_tick_now() * sys->timescale), sys->timescale, 1.0);
     CHECK("Could not start playback");
 
     p_config->Release();
@@ -898,7 +902,7 @@ static void PrepareVideo(vout_display_t *vd, picture_t *picture, subpicture_t *,
     if (!picture)
         return;
 
-    if (now - date > sys->video.nosignal_delay * CLOCK_FREQ) {
+    if (now - date > vlc_tick_from_sec( sys->video.nosignal_delay )) {
         msg_Dbg(vd, "no signal");
         if (sys->video.pic_nosignal) {
             picture = sys->video.pic_nosignal;
@@ -1043,7 +1047,6 @@ static int OpenVideo(vlc_object_t *p_this)
         sys->video.ar = var_InheritInteger(p_this, VIDEO_CFG_PREFIX "ar");
         sys->video.pic_nosignal = NULL;
         sys->video.pool = NULL;
-        video_format_Init( &sys->video.currentfmt, 0 );
 
         if (OpenDecklink(vd, sys) != VLC_SUCCESS)
         {

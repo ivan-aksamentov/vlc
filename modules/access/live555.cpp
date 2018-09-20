@@ -43,6 +43,8 @@
 #include <vlc_strings.h>
 #include <vlc_interrupt.h>
 #include <vlc_keystore.h>
+#include <vlc_threads.h>
+#include <vlc_cxx_helpers.hpp>
 
 #include <limits.h>
 #include <assert.h>
@@ -62,6 +64,7 @@
 
 extern "C" {
 #include "../access/mms/asf.h"  /* Who said ugly ? */
+#include "live555_dtsgen.h"
 }
 
 /*****************************************************************************
@@ -145,6 +148,8 @@ vlc_module_end ()
  * Local prototypes
  *****************************************************************************/
 
+namespace {
+
 typedef struct
 {
     demux_t         *p_demux;
@@ -172,9 +177,11 @@ typedef struct
     bool            b_flushing_discontinuity;
     int             i_next_block_flags;
     char            waiting;
-    int64_t         i_lastpts;
-    int64_t         i_pcr;
+    vlc_tick_t      i_prevpts;
+    vlc_tick_t      i_pcr;
     double          f_npt;
+
+    struct dtsgen_t dtsgen;
 
     enum
     {
@@ -223,7 +230,7 @@ struct demux_sys_t
 
     /* timeout thread information */
     vlc_timer_t      timer;
-    vlc_mutex_t      timeout_mutex; /* Serialise calls to live555 in timeout thread w.r.t. Demux()/Control() */
+    vlc::threads::mutex timeout_mutex; /* Serialise calls to live555 in timeout thread w.r.t. Demux()/Control() */
 
     /* */
     bool             b_force_mcast;
@@ -261,6 +268,8 @@ public:
     demux_sys_t *p_sys;
 };
 
+} // namespace
+
 static int Demux  ( demux_t * );
 static int Control( demux_t *, int, va_list );
 
@@ -285,7 +294,7 @@ static unsigned char* parseVorbisConfigStr( char const* configStr,
 
 static char *passwordLessURL( vlc_url_t *url );
 
-#define PCR_OBS (CLOCK_FREQ / 4)
+#define PCR_OBS VLC_TICK_FROM_MS(250)
 #define PCR_OFF PCR_OBS
 
 /*****************************************************************************
@@ -335,12 +344,12 @@ static int  Open ( vlc_object_t *p_this )
 
     p_demux->pf_demux  = Demux;
     p_demux->pf_control= Control;
-    p_demux->p_sys     = p_sys = (demux_sys_t*)calloc( 1, sizeof( demux_sys_t ) );
+    p_demux->p_sys     = p_sys = new (std::nothrow)demux_sys_t();
     if( !p_sys ) return VLC_ENOMEM;
 
     if( vlc_timer_create(&p_sys->timer, TimeoutPrevention, p_demux) )
     {
-        free( p_sys );
+        delete p_sys;
         return VLC_ENOMEM;
     }
 
@@ -357,7 +366,6 @@ static int  Open ( vlc_object_t *p_this )
     p_sys->b_no_data = true;
     p_sys->b_force_mcast = var_InheritBool( p_demux, "rtsp-mcast" );
     p_sys->f_seek_request = -1;
-    vlc_mutex_init(&p_sys->timeout_mutex);
 
     /* parse URL for rtsp://[user:[passwd]@]serverip:port/options */
     vlc_UrlParse( &p_sys->url, p_demux->psz_url );
@@ -485,6 +493,7 @@ static void Close( vlc_object_t *p_this )
         if( tk->p_out_muxed )
             vlc_demux_chained_Delete( tk->p_out_muxed );
         es_format_Clean( &tk->fmt );
+        dtsgen_Clean( &tk->dtsgen );
         free( tk->p_buffer );
         free( tk );
     }
@@ -496,9 +505,8 @@ static void Close( vlc_object_t *p_this )
     free( p_sys->psz_pl_url );
 
     vlc_UrlClean( &p_sys->url );
-    vlc_mutex_destroy(&p_sys->timeout_mutex);
 
-    free( p_sys );
+    delete p_sys;
 }
 
 static inline Boolean toBool( bool b ) { return b?True:False; } // silly, no?
@@ -863,9 +871,10 @@ static int SessionsSetup( demux_t *p_demux )
             tk->b_rtcp_sync = false;
             tk->b_flushing_discontinuity = false;
             tk->i_next_block_flags = 0;
-            tk->i_lastpts   = VLC_TS_INVALID;
-            tk->i_pcr       = VLC_TS_INVALID;
+            tk->i_prevpts   = VLC_TICK_INVALID;
+            tk->i_pcr       = VLC_TICK_INVALID;
             tk->f_npt       = 0.;
+            dtsgen_Init( &tk->dtsgen );
             tk->state       = live_track_t::STATE_SELECTED;
             tk->i_buffer    = i_frame_buffer;
             tk->p_buffer    = (uint8_t *)malloc( i_frame_buffer );
@@ -1238,7 +1247,7 @@ static int SessionsSetup( demux_t *p_demux )
     p_sys->b_no_data = true;
     p_sys->i_no_data_ti = 0;
     p_sys->b_rtcp_sync = false;
-    p_sys->i_pcr = VLC_TS_INVALID;
+    p_sys->i_pcr = VLC_TICK_INVALID;
 
     return i_return;
 }
@@ -1267,10 +1276,10 @@ static int Play( demux_t *p_demux )
             timeout = 60; /* default value from RFC2326 */
         msg_Dbg( p_demux, "We have a timeout of %d seconds", timeout );
 
-        vlc_tick_t interval = (timeout - 2) * CLOCK_FREQ;
+        vlc_tick_t interval = vlc_tick_from_sec(timeout - 2);
         vlc_timer_schedule( p_sys->timer, false, interval, interval);
     }
-    p_sys->i_pcr = VLC_TS_INVALID;
+    p_sys->i_pcr = VLC_TICK_INVALID;
 
     /* Retrieve the starttime if possible */
     p_sys->f_npt_start = p_sys->ms->playStartTime();
@@ -1356,7 +1365,7 @@ static int Demux( demux_t *p_demux )
 
     /* Protect Live555 from simultaneous calls in TimeoutPrevention()
        during pause */
-    vlc_mutex_locker locker(&p_sys->timeout_mutex);
+    vlc::threads::mutex_locker locker( p_sys->timeout_mutex );
 
     for( i = 0; i < p_sys->i_track; i++ )
     {
@@ -1419,7 +1428,7 @@ static int Demux( demux_t *p_demux )
 
     if( b_send_pcr )
     {
-        vlc_tick_t i_minpcr = VLC_TS_INVALID;
+        vlc_tick_t i_minpcr = VLC_TICK_INVALID;
         bool b_need_flush = false;
 
         /* Check for gap in pts value */
@@ -1434,11 +1443,11 @@ static int Demux( demux_t *p_demux )
             /* Check for gap in pts value */
             b_need_flush |= (tk->b_flushing_discontinuity);
 
-            if( i_minpcr == VLC_TS_INVALID || ( tk->i_pcr != VLC_TS_INVALID && i_minpcr > tk->i_pcr ) )
+            if( i_minpcr == VLC_TICK_INVALID || ( tk->i_pcr != VLC_TICK_INVALID && i_minpcr > tk->i_pcr ) )
                 i_minpcr = tk->i_pcr;
         }
 
-        if( p_sys->i_pcr != VLC_TS_INVALID && b_need_flush )
+        if( p_sys->i_pcr != VLC_TICK_INVALID && b_need_flush )
         {
             es_out_Control( p_demux->out, ES_OUT_RESET_PCR );
             p_sys->i_pcr = i_minpcr;
@@ -1447,22 +1456,22 @@ static int Demux( demux_t *p_demux )
             for( i = 0; i < p_sys->i_track; i++ )
             {
                 live_track_t *tk = p_sys->track[i];
-                tk->i_lastpts = VLC_TS_INVALID;
-                tk->i_pcr = VLC_TS_INVALID;
+                tk->i_prevpts = VLC_TICK_INVALID;
+                tk->i_pcr = VLC_TICK_INVALID;
                 tk->f_npt = 0.;
                 tk->b_flushing_discontinuity = false;
                 tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
             }
-            if( p_sys->i_pcr != VLC_TS_INVALID )
-                es_out_SetPCR( p_demux->out, VLC_TS_0 +
+            if( p_sys->i_pcr != VLC_TICK_INVALID )
+                es_out_SetPCR( p_demux->out, VLC_TICK_0 +
                                __MAX(0, p_sys->i_pcr - PCR_OFF) );
         }
-        else if( p_sys->i_pcr == VLC_TS_INVALID ||
+        else if( p_sys->i_pcr == VLC_TICK_INVALID ||
                  i_minpcr > p_sys->i_pcr + PCR_OBS )
         {
             p_sys->i_pcr = __MAX(0, i_minpcr - PCR_OFF);
-            if( p_sys->i_pcr != VLC_TS_INVALID )
-                es_out_SetPCR( p_demux->out, VLC_TS_0 + p_sys->i_pcr );
+            if( p_sys->i_pcr != VLC_TICK_INVALID )
+                es_out_SetPCR( p_demux->out, VLC_TICK_0 + p_sys->i_pcr );
         }
     }
 
@@ -1509,32 +1518,28 @@ static int Demux( demux_t *p_demux )
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys = (demux_sys_t *)p_demux->p_sys;
-    int64_t *pi64, i64;
     double  *pf, f;
     bool *pb;
 
-    vlc_mutex_locker locker(&p_sys->timeout_mutex); /* (see same in Demux) */
+    vlc::threads::mutex_locker locker( p_sys->timeout_mutex ); /* (see same in Demux) */
 
     switch( i_query )
     {
         case DEMUX_GET_TIME:
-            pi64 = va_arg( args, int64_t * );
             if( p_sys->f_npt > 0 )
             {
-                *pi64 = (int64_t)(p_sys->f_npt * (double)CLOCK_FREQ);
+                *va_arg( args, vlc_tick_t * ) = vlc_tick_from_sec(p_sys->f_npt);
                 return VLC_SUCCESS;
             }
             return VLC_EGENERIC;
 
         case DEMUX_GET_LENGTH:
-            pi64 = va_arg( args, int64_t * );
             if( p_sys->f_npt_length > 0 )
             {
-                double d_length = p_sys->f_npt_length * (double)CLOCK_FREQ;
-                if( d_length >= INT64_MAX )
-                    *pi64 = INT64_MAX;
+                if( unlikely(p_sys->f_npt_length >= (double)(INT64_MAX / CLOCK_FREQ)) )
+                    *va_arg( args, vlc_tick_t * ) = INT64_MAX;
                 else
-                    *pi64 = (int64_t)d_length;
+                    *va_arg( args, vlc_tick_t * ) = vlc_tick_from_sec(p_sys->f_npt_length);
                 return VLC_SUCCESS;
             }
             return VLC_EGENERIC;
@@ -1556,8 +1561,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
                 if( (i_query == DEMUX_SET_TIME) && (p_sys->f_npt > 0) )
                 {
-                    i64 = va_arg( args, int64_t );
-                    time = (float)(i64 / 1000000.0); /* in second */
+                    time = secf_from_vlc_tick(va_arg( args, vlc_tick_t )); /* in second */
                 }
                 else if( i_query == DEMUX_SET_TIME )
                     return VLC_EGENERIC;
@@ -1590,13 +1594,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                         p_sys->env->getResultMsg() );
                     return VLC_EGENERIC;
                 }
-                p_sys->i_pcr = VLC_TS_INVALID;
+                p_sys->i_pcr = VLC_TICK_INVALID;
 
                 for( int i = 0; i < p_sys->i_track; i++ )
                 {
                     p_sys->track[i]->b_rtcp_sync = false;
-                    p_sys->track[i]->i_lastpts = VLC_TS_INVALID;
-                    p_sys->track[i]->i_pcr = VLC_TS_INVALID;
+                    p_sys->track[i]->i_prevpts = VLC_TICK_INVALID;
+                    p_sys->track[i]->i_pcr = VLC_TICK_INVALID;
+                    dtsgen_Resync( &p_sys->track[i]->dtsgen );
                 }
 
                 /* Retrieve the starttime if possible */
@@ -1689,7 +1694,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
             /* ReSync the stream */
             p_sys->f_npt_start = 0;
-            p_sys->i_pcr = VLC_TS_INVALID;
+            p_sys->i_pcr = VLC_TICK_INVALID;
             p_sys->f_npt = 0.0;
 
             *pi_int = (int)( INPUT_RATE_DEFAULT / p_sys->ms->scale() );
@@ -1727,10 +1732,10 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                     tk->b_rtcp_sync = false;
                     tk->b_flushing_discontinuity = false;
                     tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
-                    tk->i_lastpts = VLC_TS_INVALID;
-                    tk->i_pcr = VLC_TS_INVALID;
+                    tk->i_prevpts = VLC_TICK_INVALID;
+                    tk->i_pcr = VLC_TICK_INVALID;
                 }
-                p_sys->i_pcr = VLC_TS_INVALID;
+                p_sys->i_pcr = VLC_TICK_INVALID;
                 es_out_Control( p_demux->out, ES_OUT_RESET_PCR );
             }
 
@@ -1754,9 +1759,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = INT64_C(1000)
-                  * var_InheritInteger( p_demux, "network-caching" );
+            *va_arg( args, vlc_tick_t * ) =
+                VLC_TICK_FROM_MS(var_InheritInteger( p_demux, "network-caching" ));
             return VLC_SUCCESS;
 
         default:
@@ -1777,7 +1781,7 @@ static int RollOverTcp( demux_t *p_demux )
     var_SetBool( p_demux, "rtsp-tcp", true );
 
     /* We close the old RTSP session */
-    vlc_timer_schedule(p_sys->timer, false, 0, 0);
+    vlc_timer_disarm(p_sys->timer);
     p_sys->rtsp->sendTeardownCommand( *p_sys->ms, NULL );
     Medium::close( p_sys->ms );
     RTSPClient::close( p_sys->rtsp );
@@ -1932,8 +1936,7 @@ static void StreamRead( void *p_private, unsigned int i_size,
 
     //msg_Dbg( p_demux, "pts: %d", pts.tv_sec );
 
-    int64_t i_pts = (int64_t)pts.tv_sec * CLOCK_FREQ +
-        (int64_t)pts.tv_usec;
+    vlc_tick_t i_pts = vlc_tick_from_timeval( &pts );
 
     /* XXX Beurk beurk beurk Avoid having negative value XXX */
     i_pts &= INT64_C(0x00ffffffffffffff);
@@ -2005,8 +2008,7 @@ static void StreamRead( void *p_private, unsigned int i_size,
 
 #if 0
     fprintf( stderr, "StreamRead size=%d pts=%lld\n",
-             i_size,
-             pts.tv_sec * 1000000LL + pts.tv_usec );
+             i_size, vlc_tick_from_timeval( &pts) );
 #endif
 
     /* grow buffer if it looks like buffer is too small, but don't eat
@@ -2096,12 +2098,13 @@ static void StreamRead( void *p_private, unsigned int i_size,
     {
         msg_Dbg( p_demux, "tk->rtpSource->hasBeenSynchronizedUsingRTCP()" );
         p_sys->b_rtcp_sync = tk->b_rtcp_sync = true;
-        if( tk->i_pcr != VLC_TS_INVALID )
+        if( tk->i_pcr != VLC_TICK_INVALID )
         {
             tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
-            const int64_t i_max_diff = CLOCK_FREQ * (( tk->fmt.i_cat == SPU_ES ) ? 60 : 1);
+            const vlc_tick_t i_max_diff = vlc_tick_from_sec(( tk->fmt.i_cat == SPU_ES ) ? 60 : 1);
             tk->b_flushing_discontinuity = (llabs(i_pts - tk->i_pcr) > i_max_diff);
             tk->i_pcr = i_pts;
+            tk->dtsgen.count = 0;
         }
     }
 
@@ -2121,19 +2124,26 @@ static void StreamRead( void *p_private, unsigned int i_size,
                 vlc_demux_chained_Send( tk->p_out_muxed, p_block );
                 break;
             default:
-                if( i_pts != tk->i_lastpts )
-                    p_block->i_pts = VLC_TS_0 + i_pts;
+                if( i_pts != tk->i_prevpts )
+                {
+                    p_block->i_pts = VLC_TICK_0 + i_pts;
+                    tk->i_prevpts = i_pts;
+
+                    dtsgen_AddNextPTS( &tk->dtsgen, i_pts );
+                }
+
                 /*FIXME: for h264 you should check that packetization-mode=1 in sdp-file */
                 switch( tk->fmt.i_codec )
                 {
                     case VLC_CODEC_MPGV:
                     case VLC_CODEC_H264:
                     case VLC_CODEC_HEVC:
-                    case VLC_CODEC_VP8:
-                        p_block->i_dts = VLC_TS_INVALID;
+                        p_block->i_dts = dtsgen_GetDTS( &tk->dtsgen );
+                        dtsgen_Debug( VLC_OBJECT(p_demux), &tk->dtsgen, p_block->i_dts, p_block->i_pts );
                         break;
+                    case VLC_CODEC_VP8:
                     default:
-                        p_block->i_dts = VLC_TS_0 + i_pts;
+                        p_block->i_dts = VLC_TICK_0 + i_pts;
                         break;
                 }
 
@@ -2145,12 +2155,13 @@ static void StreamRead( void *p_private, unsigned int i_size,
                     p_block->i_flags |= tk->i_next_block_flags;
                     tk->i_next_block_flags = 0;
                 }
+
+                vlc_tick_t i_pcr = p_block->i_dts > VLC_TICK_INVALID ? p_block->i_dts : p_block->i_pts;
                 es_out_Send( p_demux->out, tk->p_es, p_block );
-                if( i_pts > 0 )
+                if( i_pcr > VLC_TICK_INVALID )
                 {
-                    if( tk->i_pcr < i_pts )
-                        tk->i_pcr = i_pts;
-                    tk->i_lastpts = i_pts;
+                    if( tk->i_pcr < i_pcr )
+                        tk->i_pcr = i_pcr;
                 }
                 break;
         }
@@ -2224,9 +2235,12 @@ static void TimeoutPrevention( void *p_data )
     demux_sys_t *p_sys = (demux_sys_t *)p_demux->p_sys;
     char *bye = NULL;
 
+    if( var_GetBool( p_demux, "rtsp-tcp" ) )
+        return;
+
     /* Protect Live555 from us calling their functions simultaneously
         with Demux() or Control() */
-    vlc_mutex_locker locker(&p_sys->timeout_mutex);
+    vlc::threads::mutex_locker locker( p_sys->timeout_mutex );
 
     /* If the timer fires while the demuxer owns the lock, and the demuxer
      * then torns the session down, the pointers will become NULL. By the time

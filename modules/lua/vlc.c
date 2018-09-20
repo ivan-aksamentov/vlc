@@ -232,6 +232,8 @@ int vlclua_dir_list(const char *luadirname, char ***restrict listp)
     /* Source Lua Scripts in architecture-independent data directory */
     if (both || libdir == NULL)
         list = vlclua_dir_list_append(list, datadir, luadirname);
+    else
+        free(datadir);
 
     *list = NULL;
     return VLC_SUCCESS;
@@ -484,11 +486,11 @@ input_item_t *vlclua_read_input_item(vlc_object_t *obj, lua_State *L)
         msg_Warn(obj, "Playlist item name should be a string" );
 
     /* Read duration */
-    vlc_tick_t duration = -1;
+    vlc_tick_t duration = INPUT_DURATION_INDEFINITE;
 
     lua_getfield( L, -3, "duration" );
     if (lua_isnumber(L, -1))
-        duration = (vlc_tick_t)(lua_tonumber(L, -1) * (CLOCK_FREQ * 1.));
+        duration = vlc_tick_from_sec( lua_tonumber(L, -1) );
     else if (!lua_isnil(L, -1))
         msg_Warn(obj, "Playlist item duration should be a number (seconds)");
     lua_pop( L, 1 ); /* pop "duration" */

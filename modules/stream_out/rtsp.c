@@ -69,7 +69,7 @@ struct rtsp_stream_t
     int             sessionc;
     rtsp_session_t **sessionv;
 
-    unsigned        timeout;
+    vlc_tick_t      timeout;
     vlc_timer_t     timer;
 };
 
@@ -96,8 +96,8 @@ rtsp_stream_t *RtspSetup( vlc_object_t *owner, vod_media_t *media,
     rtsp->vod_media = media;
     vlc_mutex_init( &rtsp->lock );
 
-    rtsp->timeout = var_InheritInteger(owner, "rtsp-timeout");
-    if (rtsp->timeout > 0)
+    rtsp->timeout = vlc_tick_from_sec(__MAX(0,var_InheritInteger(owner, "rtsp-timeout")));
+    if (rtsp->timeout != 0)
     {
         if (vlc_timer_create(&rtsp->timer, RtspTimeOut, rtsp))
             goto error;
@@ -148,7 +148,7 @@ void RtspUnsetup( rtsp_stream_t *rtsp )
     while( rtsp->sessionc > 0 )
         RtspClientDel( rtsp, rtsp->sessionv[0] );
 
-    if (rtsp->timeout > 0)
+    if (rtsp->timeout != 0)
         vlc_timer_destroy(rtsp->timer);
 
     free( rtsp->psz_path );
@@ -300,7 +300,7 @@ void RtspDelId( rtsp_stream_t *rtsp, rtsp_stream_id_t *id )
 /** rtsp must be locked */
 static void RtspUpdateTimer( rtsp_stream_t *rtsp )
 {
-    if (rtsp->timeout <= 0)
+    if (rtsp->timeout == 0)
         return;
 
     vlc_tick_t timeout = 0;
@@ -310,8 +310,14 @@ static void RtspUpdateTimer( rtsp_stream_t *rtsp )
             timeout = rtsp->sessionv[i]->last_seen;
     }
     if (timeout != 0)
-        timeout += rtsp->timeout * CLOCK_FREQ;
-    vlc_timer_schedule(rtsp->timer, true, timeout, 0);
+    {
+        timeout += rtsp->timeout;
+        vlc_timer_schedule(rtsp->timer, true, timeout, VLC_TIMER_FIRE_ONCE);
+    }
+    else
+    {
+        vlc_timer_disarm(rtsp->timer);
+    }
 }
 
 
@@ -323,7 +329,7 @@ static void RtspTimeOut( void *data )
     vlc_tick_t now = vlc_tick_now();
     for (int i = rtsp->sessionc - 1; i >= 0; i--)
     {
-        if (rtsp->sessionv[i]->last_seen + rtsp->timeout * CLOCK_FREQ < now)
+        if (rtsp->sessionv[i]->last_seen + rtsp->timeout < now)
         {
             if (rtsp->vod_media != NULL)
             {
@@ -403,7 +409,7 @@ void RtspClientDel( rtsp_stream_t *rtsp, rtsp_session_t *session )
 /** rtsp must be locked */
 static void RtspClientAlive( rtsp_session_t *session )
 {
-    if (session->stream->timeout <= 0)
+    if (session->stream->timeout == 0)
         return;
 
     session->last_seen = vlc_tick_now();
@@ -570,7 +576,7 @@ static inline const char *parameter_next( const char *str )
 }
 
 
-static int64_t ParseNPT (const char *str)
+static vlc_tick_t ParseNPT (const char *str)
 {
     locale_t loc = newlocale (LC_NUMERIC_MASK, "C", NULL);
     locale_t oldloc = uselocale (loc);
@@ -588,7 +594,7 @@ static int64_t ParseNPT (const char *str)
         uselocale (oldloc);
         freelocale (loc);
     }
-    return sec < 0 ? -1 : sec * CLOCK_FREQ;
+    return sec < 0 ? -1 : vlc_tick_from_sec( sec );
 }
 
 
@@ -946,7 +952,7 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
             answer->i_status = 200;
 
             psz_session = httpd_MsgGet( query, "Session" );
-            int64_t start = -1, end = -1, npt;
+            vlc_tick_t start = -1, end = -1, npt;
             const char *range = httpd_MsgGet (query, "Range");
             if (range != NULL)
             {
@@ -1067,7 +1073,7 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
                     npt = start;
                 }
 
-                double f_npt = (double) npt / CLOCK_FREQ;
+                double f_npt = secf_from_vlc_tick(npt);
                 httpd_MsgAdd( answer, "Range", "npt=%f-", f_npt );
             }
 
@@ -1123,9 +1129,9 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
             if (ses != NULL && id == NULL)
             {
                 assert(vod);
-                int64_t npt = 0;
+                vlc_tick_t npt = 0;
                 vod_pause(rtsp->vod_media, psz_session, &npt);
-                double f_npt = (double) npt / CLOCK_FREQ;
+                double f_npt = secf_from_vlc_tick(npt);
                 httpd_MsgAdd( answer, "Range", "npt=%f-", f_npt );
             }
             break;
@@ -1194,9 +1200,9 @@ static int RtspHandler( rtsp_stream_t *rtsp, rtsp_stream_id_t *id,
 
     if( psz_session )
     {
-        if (rtsp->timeout > 0)
-            httpd_MsgAdd( answer, "Session", "%s;timeout=%u", psz_session,
-                                                              rtsp->timeout );
+        if (rtsp->timeout != 0)
+            httpd_MsgAdd( answer, "Session", "%s;timeout=%" PRIu64, psz_session,
+                                                              SEC_FROM_VLC_TICK(rtsp->timeout) );
         else
             httpd_MsgAdd( answer, "Session", "%s", psz_session );
     }

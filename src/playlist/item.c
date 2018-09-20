@@ -35,6 +35,7 @@
 #include <vlc_playlist.h>
 #include <vlc_rand.h>
 #include "playlist_internal.h"
+#include "libvlc.h"
 
 static void playlist_Preparse( playlist_t *, playlist_item_t * );
 
@@ -50,13 +51,19 @@ static int RecursiveInsertCopy (
  * An input item has gained subitems (Event Callback)
  *****************************************************************************/
 
-static void input_item_add_subitem_tree ( const vlc_event_t * p_event,
-                                          void * user_data )
+static void input_item_subtree_added(input_item_t *p_input,
+                                     input_item_node_t *subtree,
+                                     void *user_data)
 {
-    input_item_t *p_input = p_event->p_obj;
-    playlist_t *p_playlist = user_data;
+    playlist_t *playlist = user_data;
+    playlist_AddSubtree(playlist, p_input, subtree);
+}
+
+void playlist_AddSubtree(playlist_t *p_playlist,
+                         input_item_t *p_input, input_item_node_t *subtree)
+{
     playlist_private_t *p_sys = pl_priv( p_playlist );
-    input_item_node_t *p_new_root = p_event->u.input_item_subitem_tree_added.p_root;
+    input_item_node_t *p_new_root = subtree;
 
     PL_LOCK;
 
@@ -308,8 +315,6 @@ playlist_item_t *playlist_ItemNewFromInput( playlist_t *p_playlist,
 
     vlc_event_manager_t *p_em = &p_item->p_input->event_manager;
 
-    vlc_event_attach( p_em, vlc_InputItemSubItemTreeAdded,
-                      input_item_add_subitem_tree, p_playlist );
     vlc_event_attach( p_em, vlc_InputItemDurationChanged,
                       input_item_changed, p_playlist );
     vlc_event_attach( p_em, vlc_InputItemMetaChanged,
@@ -345,8 +350,6 @@ void playlist_ItemRelease( playlist_t *p_playlist, playlist_item_t *p_item )
 
     vlc_event_manager_t *p_em = &p_item->p_input->event_manager;
 
-    vlc_event_detach( p_em, vlc_InputItemSubItemTreeAdded,
-                      input_item_add_subitem_tree, p_playlist );
     vlc_event_detach( p_em, vlc_InputItemMetaChanged,
                       input_item_changed, p_playlist );
     vlc_event_detach( p_em, vlc_InputItemDurationChanged,
@@ -453,7 +456,7 @@ void playlist_Clear( playlist_t * p_playlist, bool b_locked )
 int playlist_Add( playlist_t *p_playlist, const char *psz_uri, bool play_now )
 {
     return playlist_AddExt( p_playlist, psz_uri, NULL, play_now,
-                            0, NULL, 0, true );
+                            0, NULL, 0 );
 }
 
 /**
@@ -466,20 +469,18 @@ int playlist_Add( playlist_t *p_playlist, const char *psz_uri, bool play_now )
  * \param i_options the number of options
  * \param ppsz_options an array of options
  * \param i_option_flags options flags
- * \param b_playlist TRUE for playlist, FALSE for media library
  * \return VLC_SUCCESS or a VLC error code
 */
 int playlist_AddExt( playlist_t *p_playlist, const char * psz_uri,
                      const char *psz_name, bool play_now,
                      int i_options, const char *const *ppsz_options,
-                     unsigned i_option_flags,
-                     bool b_playlist )
+                     unsigned i_option_flags )
 {
     input_item_t *p_input = input_item_New( psz_uri, psz_name );
     if( !p_input )
         return VLC_ENOMEM;
     input_item_AddOptions( p_input, i_options, ppsz_options, i_option_flags );
-    int i_ret = playlist_AddInput( p_playlist, p_input, play_now, b_playlist );
+    int i_ret = playlist_AddInput( p_playlist, p_input, play_now );
     input_item_Release( p_input );
     return i_ret;
 }
@@ -494,11 +495,10 @@ int playlist_AddExt( playlist_t *p_playlist, const char * psz_uri,
  * \return VLC_SUCCESS or VLC_ENOMEM or VLC_EGENERIC
 */
 int playlist_AddInput( playlist_t* p_playlist, input_item_t *p_input,
-                       bool play_now, bool b_playlist )
+                       bool play_now)
 {
     PL_LOCK;
-    playlist_item_t *item = b_playlist ? p_playlist->p_playing
-                                       : p_playlist->p_media_library;
+    playlist_item_t *item = p_playlist->p_playing;
 
     item = playlist_NodeAddInput( p_playlist, p_input, item, PLAYLIST_END );
 
@@ -717,7 +717,7 @@ void playlist_SendAddNotify( playlist_t *p_playlist, playlist_item_t *item )
 vlc_tick_t playlist_GetNodeDuration( playlist_item_t* node )
 {
     vlc_tick_t duration = input_item_GetDuration( node->p_input );
-    if( duration == VLC_TS_INVALID )
+    if( duration == VLC_TICK_INVALID )
         duration = 0;
 
     for( int i = 0; i < node->i_children; i++ )
@@ -725,6 +725,10 @@ vlc_tick_t playlist_GetNodeDuration( playlist_item_t* node )
 
     return duration;
 }
+
+static const input_preparser_callbacks_t input_preparser_callbacks = {
+    .on_subtree_added = input_item_subtree_added,
+};
 
 /***************************************************************************
  * The following functions are local
@@ -746,7 +750,9 @@ static void playlist_Preparse( playlist_t *p_playlist,
 
     if( sys->b_preparse && !input_item_IsPreparsed( input )
      && (EMPTY_STR(psz_artist) || EMPTY_STR(psz_album)) )
-        libvlc_MetadataRequest( p_playlist->obj.libvlc, input, 0, -1, p_item );
+        vlc_MetadataRequest( p_playlist->obj.libvlc, input, 0,
+                             &input_preparser_callbacks, p_playlist,
+                             -1, p_item );
     free( psz_artist );
     free( psz_album );
 }

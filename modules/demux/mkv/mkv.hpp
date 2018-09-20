@@ -96,6 +96,8 @@
 //# define MKV_DEBUG 0
 #endif
 
+namespace mkv {
+
 #define MATROSKA_COMPRESSION_NONE  -1
 #define MATROSKA_COMPRESSION_ZLIB   0
 #define MATROSKA_COMPRESSION_BLIB   1
@@ -197,7 +199,7 @@ class mkv_track_t
         bool         b_pts_only;
 
         bool         b_no_duration;
-        uint64_t     i_default_duration;
+        vlc_tick_t   i_default_duration;
         float        f_timecodescale;
         vlc_tick_t   i_last_dts;
         uint64_t     i_skip_until_fpos; /*< any block before this fpos should be ignored */
@@ -231,5 +233,6 @@ class mkv_track_t
         vlc_tick_t i_codec_delay;
 };
 
+} // namespace
 
 #endif /* _MKV_HPP_ */

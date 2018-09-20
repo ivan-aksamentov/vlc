@@ -71,7 +71,7 @@ vlc_module_begin ()
 
     add_submodule()
     set_description( N_("MPEG-4 video" ) )
-    set_capability( "demux", 0 )
+    set_capability( "demux", 5 )
     set_callbacks( OpenVideo, Close )
     add_float( "es-fps", 25, FPS_TEXT, FPS_LONGTEXT, false )
 
@@ -289,22 +289,25 @@ static int OpenVideo( vlc_object_t *p_this )
 
     /* Only m4v is supported for the moment */
     bool b_m4v_ext    = demux_IsPathExtension( p_demux, ".m4v" );
+    bool b_re4_ext    = !b_m4v_ext && demux_IsPathExtension( p_demux, ".re4" );
     bool b_m4v_forced = demux_IsForced( p_demux, "m4v" ) ||
                         demux_IsForced( p_demux, "mp4v" );
-    if( !b_m4v_ext && !b_m4v_forced )
+
+    if( !b_m4v_ext && !b_m4v_forced && !b_re4_ext )
         return VLC_EGENERIC;
 
+    ssize_t i_off = b_re4_ext ? 220 : 0;
     const uint8_t *p_peek;
-    if( vlc_stream_Peek( p_demux->s, &p_peek, 4 ) < 4 )
+    if( vlc_stream_Peek( p_demux->s, &p_peek, i_off + 4 ) < i_off + 4 )
         return VLC_EGENERIC;
-    if( p_peek[0] != 0x00 || p_peek[1] != 0x00 || p_peek[2] != 0x01 )
+    if( p_peek[i_off + 0] != 0x00 || p_peek[i_off + 1] != 0x00 || p_peek[i_off + 2] != 0x01 )
     {
         if( !b_m4v_forced)
             return VLC_EGENERIC;
         msg_Warn( p_demux,
                   "this doesn't look like an MPEG ES stream, continuing anyway" );
     }
-    return OpenCommon( p_demux, VIDEO_ES, &codec_m4v, 0 );
+    return OpenCommon( p_demux, VIDEO_ES, &codec_m4v, i_off );
 }
 /*****************************************************************************
  * Demux: reads and demuxes data packets
@@ -329,28 +332,28 @@ static int Demux( demux_t *p_demux )
         /* Correct timestamp */
         if( p_sys->p_packetizer->fmt_out.i_cat == VIDEO_ES )
         {
-            if( p_block_out->i_pts == VLC_TS_INVALID &&
-                p_block_out->i_dts == VLC_TS_INVALID )
-                p_block_out->i_dts = VLC_TS_0 + p_sys->i_pts + CLOCK_FREQ / p_sys->f_fps;
-            if( p_block_out->i_dts != VLC_TS_INVALID )
-                p_sys->i_pts = p_block_out->i_dts - VLC_TS_0;
+            if( p_block_out->i_pts == VLC_TICK_INVALID &&
+                p_block_out->i_dts == VLC_TICK_INVALID )
+                p_block_out->i_dts = VLC_TICK_0 + p_sys->i_pts + VLC_TICK_FROM_SEC(1) / p_sys->f_fps;
+            if( p_block_out->i_dts != VLC_TICK_INVALID )
+                p_sys->i_pts = p_block_out->i_dts - VLC_TICK_0;
         }
         else
         {
-            p_sys->i_pts = p_block_out->i_pts - VLC_TS_0;
+            p_sys->i_pts = p_block_out->i_pts - VLC_TICK_0;
         }
 
-        if( p_block_out->i_pts != VLC_TS_INVALID )
+        if( p_block_out->i_pts != VLC_TICK_INVALID )
         {
             p_block_out->i_pts += p_sys->i_time_offset;
         }
-        if( p_block_out->i_dts != VLC_TS_INVALID )
+        if( p_block_out->i_dts != VLC_TICK_INVALID )
         {
             p_block_out->i_dts += p_sys->i_time_offset;
             es_out_SetPCR( p_demux->out, p_block_out->i_dts );
         }
         /* Re-estimate bitrate */
-        if( p_sys->b_estimate_bitrate && p_sys->i_pts > (CLOCK_FREQ/2) )
+        if( p_sys->b_estimate_bitrate && p_sys->i_pts > VLC_TICK_FROM_MS(500) )
             p_sys->i_bitrate_avg = 8 * CLOCK_FREQ * p_sys->i_bytes
                                    / (p_sys->i_pts - 1);
         p_sys->i_bytes += p_block_out->i_buffer;
@@ -386,7 +389,6 @@ static void Close( vlc_object_t * p_this )
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys  = p_demux->p_sys;
-    int64_t *pi64;
     bool *pb_bool;
 
     switch( i_query )
@@ -397,8 +399,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_GET_TIME:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = p_sys->i_pts + p_sys->i_time_offset;
+            *va_arg( args, vlc_tick_t * ) = p_sys->i_pts + p_sys->i_time_offset;
             return VLC_SUCCESS;
 
         case DEMUX_GET_LENGTH:
@@ -420,13 +421,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                 /* The first few seconds are guaranteed to be very whacky,
                  * don't bother trying ... Too bad */
                 if( f_pos < 0.01f ||
-                    (p_sys->i_pts + p_sys->i_time_offset) < 8000000 )
+                    (p_sys->i_pts + p_sys->i_time_offset) < VLC_TICK_FROM_SEC(8) )
                 {
                     return VLC_EGENERIC;
                 }
 
-                pi64 = va_arg( args, int64_t * );
-                *pi64 = (p_sys->i_pts + p_sys->i_time_offset) / f_pos;
+                *va_arg( args, vlc_tick_t * ) =
+                    (p_sys->i_pts + p_sys->i_time_offset) / f_pos;
                 return VLC_SUCCESS;
             }
             return i_ret;
@@ -435,7 +436,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         case DEMUX_SET_TIME:
             if( p_sys->mllt.p_bits )
             {
-                int64_t i_time = va_arg(args, int64_t);
+                vlc_tick_t i_time = va_arg(args, vlc_tick_t);
                 uint64_t i_pos = SeekByMlltTable( p_demux, &i_time );
                 int i_ret = vlc_stream_Seek( p_demux->s, p_sys->i_stream_offset + i_pos );
                 if( i_ret != VLC_SUCCESS )
@@ -505,7 +506,7 @@ static bool Parse( demux_t *p_demux, block_t **pp_output )
             swab( p_block_in->p_buffer, p_block_in->p_buffer, p_block_in->i_buffer );
         }
 
-        p_block_in->i_pts = p_block_in->i_dts = p_sys->b_start || p_sys->b_initial_sync_failed ? VLC_TS_0 : VLC_TS_INVALID;
+        p_block_in->i_pts = p_block_in->i_dts = p_sys->b_start || p_sys->b_initial_sync_failed ? VLC_TICK_0 : VLC_TICK_INVALID;
     }
     p_sys->b_initial_sync_failed = p_sys->b_start; /* Only try to resync once */
 
@@ -876,7 +877,7 @@ static uint64_t SeekByMlltTable( demux_t *p_demux, vlc_tick_t *pi_time )
     {
         const uint32_t i_bytesdev = bs_read(&p_cur->br, p_sys->mllt.i_bits_per_bytes_dev);
         const uint32_t i_msdev = bs_read(&p_cur->br, p_sys->mllt.i_bits_per_ms_dev);
-        const vlc_tick_t i_deltatime = (p_sys->mllt.i_ms_btw_refs + i_msdev) * INT64_C(1000);
+        const vlc_tick_t i_deltatime = VLC_TICK_FROM_MS(p_sys->mllt.i_ms_btw_refs + i_msdev);
         if( p_cur->i_time + i_deltatime > *pi_time )
             break;
         p_cur->i_time += i_deltatime;

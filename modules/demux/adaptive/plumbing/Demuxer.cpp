@@ -215,7 +215,7 @@ int Demuxer::demux(vlc_tick_t)
 SlaveDemuxer::SlaveDemuxer(demux_t *p_realdemux, const std::string &name, es_out_t *out, AbstractSourceStream *source)
     : Demuxer(p_realdemux, name, out, source)
 {
-    length = VLC_TS_INVALID;
+    length = VLC_TICK_INVALID;
     b_reinitsonseek = false;
     b_startsfromzero = false;
 }
@@ -229,7 +229,7 @@ bool SlaveDemuxer::create()
 {
     if(Demuxer::create())
     {
-        length = VLC_TS_INVALID;
+        length = VLC_TICK_INVALID;
         if(demux_Control(p_demux, DEMUX_GET_LENGTH, &length) != VLC_SUCCESS)
             b_eof = true;
         return true;
@@ -240,7 +240,7 @@ bool SlaveDemuxer::create()
 int SlaveDemuxer::demux(vlc_tick_t nz_deadline)
 {
     /* Always call with increment or buffering will get slow stuck */
-    vlc_tick_t i_next_demux_time = VLC_TS_0 + nz_deadline + CLOCK_FREQ / 4;
+    vlc_tick_t i_next_demux_time = VLC_TICK_0 + nz_deadline + VLC_TICK_FROM_MS(250);
     if( demux_Control(p_demux, DEMUX_SET_NEXT_DEMUX_TIME, i_next_demux_time ) != VLC_SUCCESS )
     {
         b_eof = true;

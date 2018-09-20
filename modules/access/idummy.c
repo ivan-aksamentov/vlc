@@ -106,8 +106,7 @@ static int ControlPause( demux_t *demux, int query, va_list args )
 
         case DEMUX_GET_LENGTH:
         {
-            vlc_tick_t *plen = va_arg( args, vlc_tick_t * );
-            *plen = p_sys->length;
+            *va_arg( args, vlc_tick_t * ) = p_sys->length;
             break;
         }
 
@@ -178,7 +177,7 @@ nop:
     if( !strncasecmp( psz_name, "pause:", 6 ) )
     {
         double f = us_atof( psz_name + 6 );
-        vlc_tick_t length = f * CLOCK_FREQ;
+        vlc_tick_t length = vlc_tick_from_sec( f );
 
         msg_Info( p_demux, "command `pause %f'", f );
         if( length == 0 )
@@ -208,8 +207,7 @@ static int DemuxControl( demux_t *p_demux, int i_query, va_list args )
     {
     case DEMUX_GET_PTS_DELAY:
     {
-        int64_t *pi_pts_delay = va_arg( args, int64_t * );
-        *pi_pts_delay = DEFAULT_PTS_DELAY;
+        *va_arg( args, vlc_tick_t * ) = DEFAULT_PTS_DELAY;
         return VLC_SUCCESS;
     }
     default:

@@ -211,7 +211,7 @@ static int Open( vlc_object_t *p_this )
     p_sys->i_pk_used    = 0;
     p_sys->i_pk_frame   = 0;
     p_sys->i_dts_first  =
-    p_sys->i_dts_last   = VLC_TS_INVALID;
+    p_sys->i_dts_last   = VLC_TICK_INVALID;
     p_sys->i_preroll_time = 2000;
     p_sys->i_bitrate    = 0;
     p_sys->i_bitrate_override = 0;
@@ -561,7 +561,7 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             else
             {
                 tk->psz_name = _("Unknown Video");
-                tk->i_fourcc = p_fmt->i_original_fourcc ?: p_fmt->i_codec;
+                tk->i_fourcc = p_fmt->i_original_fourcc ? p_fmt->i_original_fourcc : p_fmt->i_codec;
             }
             if( !i_codec_extra && p_fmt->i_extra > 0 )
             {
@@ -704,7 +704,7 @@ static int Mux( sout_mux_t *p_mux )
             return VLC_SUCCESS;
         }
 
-        if( p_sys->i_dts_first == VLC_TS_INVALID )
+        if( p_sys->i_dts_first == VLC_TICK_INVALID )
         {
             p_sys->i_dts_first = i_dts;
         }
@@ -854,10 +854,9 @@ static block_t *asf_header_create( sout_mux_t *p_mux, bool b_broadcast )
 
     msg_Dbg( p_mux, "Asf muxer creating header" );
 
-    if( p_sys->i_dts_first != VLC_TS_INVALID )
+    if( p_sys->i_dts_first != VLC_TICK_INVALID && p_sys->i_dts_last > p_sys->i_dts_first )
     {
         i_duration = p_sys->i_dts_last - p_sys->i_dts_first;
-        if( i_duration < 0 ) i_duration = 0;
     }
 
     /* calculate header size */
@@ -940,8 +939,8 @@ static block_t *asf_header_create( sout_mux_t *p_mux, bool b_broadcast )
                                 p_sys->i_packet_size ); /* file size */
     bo_addle_u64( &bo, 0 );                 /* creation date */
     bo_addle_u64( &bo, b_broadcast ? 0xffffffffLL : p_sys->i_packet_count );
-    bo_addle_u64( &bo, i_duration * 10 );   /* play duration (100ns) */
-    bo_addle_u64( &bo, i_duration * 10 );   /* send duration (100ns) */
+    bo_addle_u64( &bo, MSFTIME_FROM_VLC_TICK(i_duration) );   /* play duration (100ns) */
+    bo_addle_u64( &bo, MSFTIME_FROM_VLC_TICK(i_duration) );   /* send duration (100ns) */
     bo_addle_u64( &bo, p_sys->i_preroll_time ); /* preroll duration (ms) */
     bo_addle_u32( &bo, b_broadcast ? 0x01 : 0x02 /* seekable */ ); /* flags */
     bo_addle_u32( &bo, p_sys->i_packet_size );  /* packet size min */
@@ -1156,7 +1155,7 @@ static block_t *asf_packet_flush( sout_mux_t *p_mux )
     bo_add_u8( &bo, 0x11 );
     bo_add_u8( &bo, 0x5d );
     bo_addle_u16( &bo, i_pad );
-    bo_addle_u32( &bo, (p_sys->i_pk_dts - p_sys->i_dts_first) / 1000 +
+    bo_addle_u32( &bo, MS_FROM_VLC_TICK(p_sys->i_pk_dts - p_sys->i_dts_first) +
                   p_sys->i_preroll_time );
     bo_addle_u16( &bo, 0 /* data->i_length */ );
     bo_add_u8( &bo, 0x80 | p_sys->i_pk_frame );
@@ -1216,7 +1215,7 @@ static block_t *asf_packet_create( sout_mux_t *p_mux,
         bo_addle_u32( &bo, i_pos );
         bo_add_u8   ( &bo, 0x08 );  /* flags */
         bo_addle_u32( &bo, i_data );
-        bo_addle_u32( &bo, (data->i_dts - p_sys->i_dts_first) / 1000 +
+        bo_addle_u32( &bo, MS_FROM_VLC_TICK(data->i_dts - p_sys->i_dts_first) +
                       p_sys->i_preroll_time );
         bo_addle_u16( &bo, i_payload );
         bo_add_mem  ( &bo, &p_data[i_pos], i_payload );

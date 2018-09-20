@@ -43,6 +43,11 @@ DEFINE_GUID(_KSDATAFORMAT_SUBTYPE_IEC61937_DOLBY_DIGITAL,
             WAVE_FORMAT_DOLBY_AC3_SPDIF, 0x0000, 0x0010, 0x80, 0x00,
             0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
 
+/* 00000001-0000-0010-8000-00aa00389b71 */
+DEFINE_GUID(_KSDATAFORMAT_SUBTYPE_WAVEFORMATEX,
+            WAVE_FORMAT_PCM, 0x0000, 0x0010, 0x80, 0x00,
+            0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
+
 /* 00000008-0000-0010-8000-00aa00389b71 */
 DEFINE_GUID(_KSDATAFORMAT_SUBTYPE_IEC61937_DTS,
             WAVE_FORMAT_DTS_MS, 0x0000, 0x0010, 0x80, 0x00,
@@ -71,7 +76,7 @@ static BOOL CALLBACK InitFreq(INIT_ONCE *once, void *param, void **context)
 
 static LARGE_INTEGER freq; /* performance counters frequency */
 
-static UINT64 GetQPC(void)
+static msftime_t GetQPC(void)
 {
     LARGE_INTEGER counter;
 
@@ -129,10 +134,10 @@ static HRESULT TimeGet(aout_stream_t *s, vlc_tick_t *restrict delay)
 
     static_assert((10000000 % CLOCK_FREQ) == 0, "Frequency conversion broken");
 
-    *delay = ((w.quot - r.quot) * CLOCK_FREQ)
-           + ((w.rem * CLOCK_FREQ) / sys->rate)
-           - ((r.rem * CLOCK_FREQ) / freq)
-           - ((GetQPC() - qpcpos) / (10000000 / CLOCK_FREQ));
+    *delay = vlc_tick_from_sec(w.quot - r.quot)
+           + (vlc_tick_from_sec(w.rem) / sys->rate)
+           - (vlc_tick_from_sec(r.rem) / freq)
+           - VLC_TICK_FROM_MSFTIME(GetQPC() - qpcpos);
 
     return hr;
 }
@@ -197,7 +202,7 @@ static HRESULT Play(aout_stream_t *s, block_t *block)
             break; /* done */
 
         /* Out of buffer space, sleep */
-        vlc_tick_sleep(sys->frames * (CLOCK_FREQ / 2) / sys->rate);
+        vlc_tick_sleep(sys->frames * VLC_TICK_FROM_MS(500) / sys->rate);
     }
     IAudioRenderClient_Release(render);
 out:
@@ -306,7 +311,13 @@ static void vlc_SpdifToWave(WAVEFORMATEXTENSIBLE *restrict wf,
     switch (audio->i_format)
     {
     case VLC_CODEC_DTS:
-        wf->SubFormat = _KSDATAFORMAT_SUBTYPE_IEC61937_DTS;
+        if (audio->i_rate < 48000)
+        {
+            /* Wasapi doesn't accept DTS @ 44.1kHz but accept IEC 60958 PCM */
+            wf->SubFormat = _KSDATAFORMAT_SUBTYPE_WAVEFORMATEX;
+        }
+        else
+            wf->SubFormat = _KSDATAFORMAT_SUBTYPE_IEC61937_DTS;
         break;
     case VLC_CODEC_SPDIFL:
     case VLC_CODEC_SPDIFB:
@@ -493,14 +504,14 @@ static HRESULT Start(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
         vlc_SpdifToWave(pwfe, &fmt);
         shared_mode = AUDCLNT_SHAREMODE_EXCLUSIVE;
         /* The max buffer duration in exclusive mode is 200ms */
-        buffer_duration = AOUT_MAX_PREPARE_TIME;
+        buffer_duration = MSFTIME_FROM_MS(200);
     }
     else if (b_hdmi)
     {
         vlc_HdmiToWave(&wf_iec61937, &fmt);
         shared_mode = AUDCLNT_SHAREMODE_EXCLUSIVE;
         /* The max buffer duration in exclusive mode is 200ms */
-        buffer_duration = AOUT_MAX_PREPARE_TIME;
+        buffer_duration = MSFTIME_FROM_MS(200);
     }
     else if (AOUT_FMT_LINEAR(&fmt))
     {
@@ -519,12 +530,12 @@ static HRESULT Start(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
 
             /* Setup low latency in order to quickly react to ambisonics filters
              * viewpoint changes. */
-            buffer_duration = AOUT_MIN_PREPARE_TIME;
+            buffer_duration = MSFTIME_FROM_MS(200);
         }
         else
         {
             vlc_ToWave(pwfe, &fmt);
-            buffer_duration = AOUT_MAX_PREPARE_TIME * 10;
+            buffer_duration = MSFTIME_FROM_VLC_TICK(AOUT_MAX_PREPARE_TIME);
         }
     }
     else

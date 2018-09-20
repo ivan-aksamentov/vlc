@@ -84,6 +84,8 @@ vlc_module_begin()
     set_callbacks( Open, Close )
 vlc_module_end()
 
+namespace {
+
 //! Kind of MXF MEDIA TYPE
 typedef enum MxfMedia_t {
     MXF_UNKNOWN = 0,
@@ -214,6 +216,8 @@ class demux_sys_t
         delete p_dcp;
     }
 };
+
+} // namespace
 
 /*TODO: basic correlation between SMPTE S428-3/S429-2
  * Real sound is more complex with case of left/right surround, ...
@@ -773,7 +777,6 @@ static int Control( demux_t *p_demux, int query, va_list args )
 {
     double f,*pf;
     bool *pb;
-    int64_t *pi64, i64;
     demux_sys_t *p_sys = (demux_sys_t *)p_demux->p_sys;
 
     switch ( query )
@@ -811,27 +814,24 @@ static int Control( demux_t *p_demux, int query, va_list args )
             break;
 
         case DEMUX_GET_LENGTH:
-            pi64 = va_arg ( args, int64_t * );
-            *pi64 =  ( p_sys->frames_total * p_sys->frame_rate_denom / p_sys->frame_rate_num ) * CLOCK_FREQ;
+            *va_arg ( args, vlc_tick_t * ) =
+                vlc_tick_from_sec( p_sys->frames_total * p_sys->frame_rate_denom / p_sys->frame_rate_num );
             break;
 
         case DEMUX_GET_TIME:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = p_sys->i_pts >= 0 ? p_sys->i_pts : 0;
+            *va_arg( args, vlc_tick_t * ) = __MAX(p_sys->i_pts, 0);
             break;
 
         case DEMUX_SET_TIME:
-            i64 = va_arg( args, int64_t );
+            p_sys->i_pts = va_arg( args, vlc_tick_t );
             msg_Warn( p_demux, "DEMUX_SET_TIME"  );
-            p_sys->frame_no = i64 * p_sys->frame_rate_num / ( CLOCK_FREQ * p_sys->frame_rate_denom );
-            p_sys->i_pts= i64;
+            p_sys->frame_no = p_sys->i_pts * p_sys->frame_rate_num / ( CLOCK_FREQ * p_sys->frame_rate_denom );
             es_out_SetPCR(p_demux->out, p_sys->i_pts);
-            es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, ( vlc_tick_t ) i64 );
+            es_out_Control( p_demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, p_sys->i_pts );
             break;
         case DEMUX_GET_PTS_DELAY:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 =
-                INT64_C(1000) * var_InheritInteger( p_demux, "file-caching" );
+            *va_arg( args, vlc_tick_t * ) =
+                VLC_TICK_FROM_MS(var_InheritInteger( p_demux, "file-caching" ));
             return VLC_SUCCESS;
 
 

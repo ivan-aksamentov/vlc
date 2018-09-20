@@ -711,6 +711,18 @@ static const struct
         VLC_CODEC_GBR_PLANAR_9B },             PLANAR_16(3, 1, 1, 9) },
     { { VLC_CODEC_GBR_PLANAR_10L,
         VLC_CODEC_GBR_PLANAR_10B },            PLANAR_16(3, 1, 1, 10) },
+    { { VLC_CODEC_GBR_PLANAR_12L,
+        VLC_CODEC_GBR_PLANAR_12B },            PLANAR_16(3, 1, 1, 12) },
+    { { VLC_CODEC_GBR_PLANAR_14L,
+        VLC_CODEC_GBR_PLANAR_14B },            PLANAR_16(3, 1, 1, 14) },
+    { { VLC_CODEC_GBR_PLANAR_16L,
+        VLC_CODEC_GBR_PLANAR_16B },            PLANAR_16(3, 1, 1, 16) },
+    { { VLC_CODEC_GBRA_PLANAR_10L,
+        VLC_CODEC_GBRA_PLANAR_10B },           PLANAR_16(4, 1, 1, 10) },
+    { { VLC_CODEC_GBRA_PLANAR_12L,
+        VLC_CODEC_GBRA_PLANAR_12B },           PLANAR_16(4, 1, 1, 12) },
+    { { VLC_CODEC_GBRA_PLANAR_16L,
+        VLC_CODEC_GBRA_PLANAR_16B },           PLANAR_16(4, 1, 1, 16) },
 
     { { VLC_CODEC_I420_16L,
         VLC_CODEC_I420_16B },                  PLANAR_16(3, 2, 2, 16) },
@@ -743,6 +755,9 @@ static const struct
     { { VLC_CODEC_YUV_PACKED },                PACKED_FMT(2, 16) },
     { { VLC_CODEC_RGB8, VLC_CODEC_GREY,
         VLC_CODEC_YUVP, VLC_CODEC_RGBP },      PACKED_FMT(1, 8) },
+
+    { { VLC_CODEC_GREY_16L,
+        VLC_CODEC_GREY_16B },                  PACKED_FMT(2, 16) },
 
     { { VLC_CODEC_RGB15, 0 },                  PACKED_FMT(2, 15) },
     { { VLC_CODEC_RGB12, 0 },                  PACKED_FMT(2, 12) },

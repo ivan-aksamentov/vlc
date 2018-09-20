@@ -98,8 +98,8 @@ static int Control(stream_t *p_stream, int i_query, va_list args)
             *va_arg( args, bool * ) = false;
             break;
         case STREAM_GET_PTS_DELAY:
-            *va_arg( args, int64_t * ) = INT64_C(1000)
-                   * var_InheritInteger(p_stream, "network-caching");
+            *va_arg( args, vlc_tick_t * ) = VLC_TICK_FROM_MS(
+                   var_InheritInteger(p_stream, "network-caching") );
             break;
         default:
             i_ret = VLC_EGENERIC;
@@ -318,7 +318,7 @@ static int Open(vlc_object_t *p_this)
         goto failed;
     }
 
-    p_sys->psz_host = strdup( parsed_url.psz_host );
+    p_sys->psz_host = vlc_obj_strdup( p_this, parsed_url.psz_host );
     p_sys->i_port = parsed_url.i_port;
 
     vlc_UrlClean( &parsed_url );
@@ -345,16 +345,8 @@ static int Open(vlc_object_t *p_this)
 failed:
     vlc_mutex_destroy( &p_sys->lock );
 
-    if ( p_sys != NULL )
-    {
-        if ( p_sys->sock != -1 ) srt_close( p_sys->sock );
-        if ( p_sys->i_poll_id != -1 ) srt_epoll_release( p_sys->i_poll_id );
-
-        free( p_sys->psz_host );
-
-        vlc_obj_free( p_this, p_sys );
-        p_stream->p_sys = NULL;
-    }
+    if ( p_sys->sock != -1 ) srt_close( p_sys->sock );
+    if ( p_sys->i_poll_id != -1 ) srt_epoll_release( p_sys->i_poll_id );
 
     return VLC_EGENERIC;
 }
@@ -364,19 +356,11 @@ static void Close(vlc_object_t *p_this)
     stream_t     *p_stream = (stream_t*)p_this;
     stream_sys_t *p_sys = p_stream->p_sys;
 
-    if ( p_sys )
-    {
-        vlc_mutex_destroy( &p_sys->lock );
+    vlc_mutex_destroy( &p_sys->lock );
 
-        srt_epoll_remove_usock( p_sys->i_poll_id, p_sys->sock );
-        srt_close( p_sys->sock );
-        srt_epoll_release( p_sys->i_poll_id );
-
-        free( p_sys->psz_host );
-
-        vlc_obj_free( p_this, p_sys );
-        p_stream->p_sys = NULL;
-    }
+    srt_epoll_remove_usock( p_sys->i_poll_id, p_sys->sock );
+    srt_close( p_sys->sock );
+    srt_epoll_release( p_sys->i_poll_id );
 
     srt_cleanup();
 }

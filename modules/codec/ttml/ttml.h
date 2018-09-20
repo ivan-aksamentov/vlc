@@ -35,7 +35,7 @@ enum
 
 typedef struct
 {
-    int64_t base;
+    vlc_tick_t base;
     unsigned frames;
     //unsigned ticks;
 } tt_time_t;
@@ -122,7 +122,7 @@ static inline bool tt_time_Valid( const tt_time_t *t )
 static inline vlc_tick_t tt_time_Convert( const tt_time_t *t )
 {
     if( !tt_time_Valid( t ) )
-        return VLC_TS_INVALID;
+        return VLC_TICK_INVALID;
     else
         return t->base + CLOCK_FREQ * t->frames / TT_FRAME_RATE;
 }
@@ -150,7 +150,7 @@ static inline tt_time_t tt_time_Sub( tt_time_t t1, tt_time_t t2 )
     if( t2.frames > t1.frames )
     {
         unsigned diff = 1 + (t2.frames - t1.frames) / TT_FRAME_RATE;
-        t1.base -= diff * CLOCK_FREQ;
+        t1.base -= vlc_tick_from_sec( diff );
         t1.frames += diff * TT_FRAME_RATE;
     }
     t1.frames -= t2.frames;

@@ -105,7 +105,7 @@ enum demux_query_e
      * Can fail only if synchronous and <b>not</b> an access-demuxer. The
      * underlying input stream then determines the PTS delay.
      *
-     * arg1= int64_t * */
+     * arg1= vlc_tick_t * */
     DEMUX_GET_PTS_DELAY = 0x101,
 
     /** Retrieves stream meta-data.
@@ -176,9 +176,9 @@ enum demux_query_e
     DEMUX_SET_POSITION,         /* arg1= double arg2= bool b_precise    res=can fail    */
 
     /* LENGTH/TIME in microsecond, 0 if unknown */
-    DEMUX_GET_LENGTH,           /* arg1= int64_t *      res=    */
-    DEMUX_GET_TIME,             /* arg1= int64_t *      res=    */
-    DEMUX_SET_TIME,             /* arg1= int64_t arg2= bool b_precise   res=can fail    */
+    DEMUX_GET_LENGTH,           /* arg1= vlc_tick_t *   res=    */
+    DEMUX_GET_TIME,             /* arg1= vlc_tick_t *   res=    */
+    DEMUX_SET_TIME,             /* arg1= vlc_tick_t arg2= bool b_precise   res=can fail    */
 
     /**
      * \todo Document
@@ -365,6 +365,42 @@ static inline bool demux_IsForced( demux_t *p_demux, const char *psz_name )
    if( p_demux->psz_name == NULL || strcmp( p_demux->psz_name, psz_name ) )
         return false;
     return true;
+}
+
+static inline int demux_SetPosition( demux_t *p_demux, double pos, bool precise,
+                                     bool absolute)
+{
+    if( !absolute )
+    {
+        double current_pos;
+        int ret = demux_Control( p_demux, DEMUX_GET_POSITION, &current_pos );
+        if( ret != VLC_SUCCESS )
+            return ret;
+        pos += current_pos;
+    }
+
+    if( pos < 0.f )
+        pos = 0.f;
+    else if( pos > 1.f )
+        pos = 1.f;
+    return demux_Control( p_demux, DEMUX_SET_POSITION, pos, precise );
+}
+
+static inline int demux_SetTime( demux_t *p_demux, vlc_tick_t time, bool precise,
+                                 bool absolute )
+{
+    if( !absolute )
+    {
+        vlc_tick_t current_time;
+        int ret = demux_Control( p_demux, DEMUX_GET_TIME, &current_time );
+        if( ret != VLC_SUCCESS )
+            return ret;
+        time += current_time;
+    }
+
+    if( time < 0 )
+        time = 0;
+    return demux_Control( p_demux, DEMUX_SET_TIME, time, precise );
 }
 
 /**

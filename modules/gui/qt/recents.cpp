@@ -161,38 +161,36 @@ void RecentsMRL::playMRL( const QString &mrl )
     Open::openMRL( p_intf, mrl );
 }
 
-int RecentsMRL::time( const QString &mrl )
+vlc_tick_t RecentsMRL::time( const QString &mrl )
 {
     if( !isActive )
         return -1;
 
     int i_index = recents.indexOf( mrl );
     if( i_index != -1 )
-        return times.value(i_index, "-1").toInt();
+        return VLC_TICK_FROM_MS(times.value(i_index, "-1").toInt());
     else
         return -1;
 }
 
-void RecentsMRL::setTime( const QString &mrl, const int64_t time )
+void RecentsMRL::setTime( const QString &mrl, const vlc_tick_t time )
 {
     int i_index = recents.indexOf( mrl );
     if( i_index != -1 )
-        times[i_index] = QString::number( time / 1000 );
+        times[i_index] = QString::number( MS_FROM_VLC_TICK( time ) );
 }
 
 int Open::openMRL( intf_thread_t *p_intf,
                     const QString &mrl,
-                    bool b_start,
-                    bool b_playlist)
+                    bool b_start )
 {
-    return openMRLwithOptions( p_intf, mrl, NULL, b_start, b_playlist );
+    return openMRLwithOptions( p_intf, mrl, NULL, b_start );
 }
 
 int Open::openMRLwithOptions( intf_thread_t* p_intf,
                      const QString &mrl,
                      QStringList *options,
                      bool b_start,
-                     bool b_playlist,
                      const char *title)
 {
     /* Options */
@@ -213,11 +211,10 @@ int Open::openMRLwithOptions( intf_thread_t* p_intf,
 
     /* Add to playlist */
     int i_ret = playlist_AddExt( THEPL, qtu(mrl), title, b_start,
-                  i_options, ppsz_options, VLC_INPUT_OPTION_TRUSTED,
-                  b_playlist );
+                  i_options, ppsz_options, VLC_INPUT_OPTION_TRUSTED );
 
     /* Add to recent items, only if played */
-    if( i_ret == VLC_SUCCESS && b_start && b_playlist )
+    if( i_ret == VLC_SUCCESS && b_start )
         RecentsMRL::getInstance( p_intf )->addRecent( mrl );
 
     /* Free options */

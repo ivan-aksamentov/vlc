@@ -133,7 +133,7 @@ typedef struct
     /* The AudioUnit we use */
     AudioUnit au_unit;
     bool      b_muted;
-    bool      b_paused;
+    bool      b_stopped;
     bool      b_preferred_channels_set;
     enum au_dev au_dev;
 
@@ -374,7 +374,7 @@ Pause (audio_output_t *p_aout, bool pause, vlc_tick_t date)
      * multi-tasking, the multi-tasking view would still show a playing state
      * despite we are paused, same for lock screen */
 
-    if (pause == p_sys->b_paused)
+    if (pause == p_sys->b_stopped)
         return;
 
     OSStatus err;
@@ -400,8 +400,16 @@ Pause (audio_output_t *p_aout, bool pause, vlc_tick_t date)
             }
         }
     }
-    p_sys->b_paused = pause;
+    p_sys->b_stopped = pause;
     ca_Pause(p_aout, pause, date);
+
+    /* Since we stopped the AudioUnit, we can't really recover the delay from
+     * the last playback. So it's better to flush everything now to avoid
+     * synchronization glitches when resuming from pause. The main drawback is
+     * that we loose 1-2 sec of audio when resuming. The order is important
+     * here, ca_Flush need to be called when paused. */
+    if (pause)
+        ca_Flush(p_aout, false);
 }
 
 static void
@@ -449,7 +457,7 @@ Stop(audio_output_t *p_aout)
 
     [[NSNotificationCenter defaultCenter] removeObserver:p_sys->aoutWrapper];
 
-    if (!p_sys->b_paused)
+    if (!p_sys->b_stopped)
     {
         err = AudioOutputUnitStop(p_sys->au_unit);
         if (err != noErr)
@@ -533,7 +541,7 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
         ca_LogWarn("failed to set IO mode");
 
     ret = au_Initialize(p_aout, p_sys->au_unit, fmt, layout,
-                        [p_sys->avInstance outputLatency] * CLOCK_FREQ, NULL);
+                        vlc_tick_from_sec([p_sys->avInstance outputLatency]), NULL);
     if (ret != VLC_SUCCESS)
         goto error;
 

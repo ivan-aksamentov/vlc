@@ -136,8 +136,7 @@ int net_Connect( vlc_object_t *p_this, const char *psz_host, int i_port,
     }
     free( psz_socks );
 
-    vlc_tick_t timeout = var_InheritInteger(p_this, "ipv4-timeout")
-                      * (CLOCK_FREQ / 1000);
+    vlc_tick_t timeout = VLC_TICK_FROM_MS( var_InheritInteger(p_this, "ipv4-timeout") );
 
     for (struct addrinfo *ptr = res; ptr != NULL; ptr = ptr->ai_next)
     {
@@ -159,7 +158,7 @@ int net_Connect( vlc_object_t *p_this, const char *psz_host, int i_port,
             }
 
             struct pollfd ufd;
-            vlc_tick_t deadline = VLC_TS_INVALID;
+            vlc_tick_t deadline = VLC_TICK_INVALID;
 
             ufd.fd = fd;
             ufd.events = POLLOUT;
@@ -175,7 +174,7 @@ int net_Connect( vlc_object_t *p_this, const char *psz_host, int i_port,
                 if (now > deadline)
                     now = deadline;
 
-                val = vlc_poll_i11e(&ufd, 1, (deadline - now) / 1000);
+                val = vlc_poll_i11e(&ufd, 1, MS_FROM_VLC_TICK(deadline - now));
             }
             while (val == -1 && errno == EINTR);
 

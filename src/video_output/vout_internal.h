@@ -46,10 +46,10 @@
  */
 typedef struct {
     vout_thread_t        *vout;
-    vlc_object_t         *input;
-    bool                 change_fmt;
     const video_format_t *fmt;
     unsigned             dpb_size;
+    vlc_mouse_event      mouse_event;
+    void                 *opaque;
 } vout_configuration_t;
 #include "control.h"
 
@@ -59,8 +59,8 @@ struct vout_thread_sys_t
     /* Splitter module if used */
     char            *splitter_name;
 
-    /* Input thread for dvd menu interactions */
-    vlc_object_t    *input;
+    /* Input thread for spu attachments */
+    input_thread_t    *input;
 
     /* */
     video_format_t  original;   /* Original format ie coming from the decoder */
@@ -80,6 +80,7 @@ struct vout_thread_sys_t
 
     /* Video output window */
     vout_window_t   *window;
+    vlc_mutex_t     window_lock;
 
     /* Thread & synchronization */
     vlc_thread_t    thread;
@@ -114,7 +115,7 @@ struct vout_thread_sys_t
     /* OSD title configuration */
     struct {
         bool        show;
-        vlc_tick_t  timeout;
+        int         timeout;
         int         position;
     } title;
 
@@ -138,6 +139,8 @@ struct vout_thread_sys_t
 
     /* */
     vlc_mouse_t     mouse;
+    vlc_mouse_event mouse_event;
+    void            *opaque;
 
     /* */
     picture_pool_t  *private_pool;
@@ -159,10 +162,12 @@ struct vout_thread_sys_t
  *
  * \param object a vlc object
  * \param cfg the video configuration requested.
+ * \param input used to get attachments for spu filters
  * \return a vout
  */
-vout_thread_t * vout_Request( vlc_object_t *object, const vout_configuration_t *cfg );
-#define vout_Request(a,b) vout_Request(VLC_OBJECT(a),b)
+vout_thread_t * vout_Request( vlc_object_t *object, const vout_configuration_t *cfg,
+                              input_thread_t *input );
+#define vout_Request(a,b,c) vout_Request(VLC_OBJECT(a),b,c)
 
 /**
  * This function will close a vout created by vout_Request.
@@ -217,8 +222,9 @@ void vout_ManageWrapper(vout_thread_t *);
 
 /* */
 int spu_ProcessMouse(spu_t *, const vlc_mouse_t *, const video_format_t *);
-void spu_Attach( spu_t *, vlc_object_t *input, bool );
+void spu_Attach( spu_t *, input_thread_t *input, bool );
 void spu_ChangeMargin(spu_t *, int);
+void spu_SetHighlight(spu_t *, const vlc_spu_highlight_t*);
 
 /**
  * This function will (un)pause the display of pictures.
@@ -248,6 +254,11 @@ void vout_GetResetStatistic( vout_thread_t *p_vout, unsigned *pi_displayed,
  */
 void vout_Flush( vout_thread_t *p_vout, vlc_tick_t i_date );
 
+/**
+ * Empty all the pending pictures in the vout
+ */
+#define vout_FlushAll( vout )  vout_Flush( vout, VLC_TICK_INVALID )
+
 /*
  * Cancel the vout, if cancel is true, it won't return any pictures after this
  * call.
@@ -268,5 +279,7 @@ void vout_DisplayTitle( vout_thread_t *p_vout, const char *psz_title );
  * This function will return true if no more pictures are to be displayed.
  */
 bool vout_IsEmpty( vout_thread_t *p_vout );
+
+void vout_SetSpuHighlight( vout_thread_t *p_vout, const vlc_spu_highlight_t * );
 
 #endif

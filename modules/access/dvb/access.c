@@ -107,7 +107,7 @@ static int Control( stream_t *, int, va_list );
 
 static block_t *BlockScan( stream_t *, bool * );
 
-#define DVB_SCAN_MAX_LOCK_TIME (2*CLOCK_FREQ)
+#define DVB_SCAN_MAX_LOCK_TIME VLC_TICK_FROM_SEC(2)
 
 static void FilterUnset( stream_t *, int i_max );
 static void FilterSet( stream_t *, int i_pid, int i_type );
@@ -152,7 +152,10 @@ static int Open( vlc_object_t *p_this )
         p_access->pf_block = BlockScan;
     }
     else
+    {
+        free( p_sys );
         return VLC_EGENERIC; /* let the DTV plugin do the work */
+    }
 
     /* Getting frontend info */
     if( FrontendOpen( p_this, &p_sys->dvb, p_access->psz_name ) )
@@ -385,7 +388,6 @@ static int Control( stream_t *p_access, int i_query, va_list args )
 {
     access_sys_t *sys = p_access->p_sys;
     bool         *pb_bool;
-    int64_t      *pi_64;
     double       *pf1, *pf2;
     frontend_statistic_t stat;
 
@@ -404,8 +406,7 @@ static int Control( stream_t *p_access, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case STREAM_GET_PTS_DELAY:
-            pi_64 = va_arg( args, int64_t * );
-            *pi_64 = DEFAULT_PTS_DELAY;
+            *va_arg( args, vlc_tick_t * ) = DEFAULT_PTS_DELAY;
             break;
 
         case STREAM_GET_SIGNAL:

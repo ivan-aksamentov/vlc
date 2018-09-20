@@ -1492,13 +1492,13 @@ void SyncControls::update()
 {
     b_userAction = false;
 
-    int64_t i_delay;
+    vlc_tick_t i_delay;
     if( THEMIM->getInput() )
     {
         i_delay = var_GetInteger( THEMIM->getInput(), "audio-delay" );
-        AVSpin->setValue( ( (double)i_delay ) / CLOCK_FREQ );
+        AVSpin->setValue( secf_from_vlc_tick( i_delay ) );
         i_delay = var_GetInteger( THEMIM->getInput(), "spu-delay" );
-        subsSpin->setValue( ( (double)i_delay ) / CLOCK_FREQ );
+        subsSpin->setValue( secf_from_vlc_tick( i_delay ) );
         subSpeedSpin->setValue( var_GetFloat( THEMIM->getInput(), "sub-fps" ) );
         subDurationSpin->setValue( var_InheritFloat( p_intf, SUBSDELAY_CFG_FACTOR ) );
     }
@@ -1509,7 +1509,7 @@ void SyncControls::advanceAudio( double f_advance )
 {
     if( THEMIM->getInput() && b_userAction )
     {
-        int64_t i_delay = f_advance * CLOCK_FREQ;
+        vlc_tick_t i_delay = vlc_tick_from_sec( f_advance );
         var_SetInteger( THEMIM->getInput(), "audio-delay", i_delay );
     }
 }
@@ -1518,7 +1518,7 @@ void SyncControls::advanceSubs( double f_advance )
 {
     if( THEMIM->getInput() && b_userAction )
     {
-        int64_t i_delay = f_advance * CLOCK_FREQ;
+        vlc_tick_t i_delay = vlc_tick_from_sec( f_advance );
         var_SetInteger( THEMIM->getInput(), "spu-delay", i_delay );
     }
 }

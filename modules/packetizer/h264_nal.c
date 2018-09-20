@@ -25,6 +25,8 @@
 
 #include "h264_nal.h"
 #include "hxxx_nal.h"
+#include "hxxx_ep3b.h"
+#include "iso_color_tables.h"
 
 #include <vlc_bits.h>
 #include <vlc_boxes.h>
@@ -460,9 +462,9 @@ static bool h264_parse_sequence_parameter_set_rbsp( bs_t *p_bs,
             }
             else
             {
-                p_sps->vui.colour.i_colour_primaries = HXXX_PRIMARIES_UNSPECIFIED;
-                p_sps->vui.colour.i_transfer_characteristics = HXXX_TRANSFER_UNSPECIFIED;
-                p_sps->vui.colour.i_matrix_coefficients = HXXX_MATRIX_UNSPECIFIED;
+                p_sps->vui.colour.i_colour_primaries = ISO_23001_8_CP_UNSPECIFIED;
+                p_sps->vui.colour.i_transfer_characteristics = ISO_23001_8_TC_UNSPECIFIED;
+                p_sps->vui.colour.i_matrix_coefficients = ISO_23001_8_MC_UNSPECIFIED;
             }
         }
 
@@ -614,14 +616,13 @@ static bool h264_parse_picture_parameter_set_rbsp( bs_t *p_bs,
         if(likely(p_h264type)) \
         { \
             bs_t bs; \
-            bs_init( &bs, p_buf, i_buf ); \
-            unsigned i_bitflow = 0; \
+            struct hxxx_bsfw_ep3b_ctx_s bsctx; \
             if( b_escaped ) \
             { \
-                bs.p_fwpriv = &i_bitflow; \
-                bs.pf_forward = hxxx_bsfw_ep3b_to_rbsp;  /* Does the emulated 3bytes conversion to rbsp */ \
+                hxxx_bsfw_ep3b_ctx_init( &bsctx ); \
+                bs_init_custom( &bs, p_buf, i_buf, &hxxx_bsfw_ep3b_callbacks, &bsctx );\
             } \
-            else (void) i_bitflow;\
+            else bs_init( &bs, p_buf, i_buf ); \
             bs_skip( &bs, 8 ); /* Skip nal_unit_header */ \
             if( !decode( &bs, p_h264type ) ) \
             { \
@@ -806,11 +807,11 @@ bool h264_get_colorimetry( const h264_sequence_parameter_set_t *p_sps,
     if( !p_sps->vui.b_valid )
         return false;
     *p_primaries =
-        hxxx_colour_primaries_to_vlc( p_sps->vui.colour.i_colour_primaries );
+        iso_23001_8_cp_to_vlc_primaries( p_sps->vui.colour.i_colour_primaries );
     *p_transfer =
-        hxxx_transfer_characteristics_to_vlc( p_sps->vui.colour.i_transfer_characteristics );
+        iso_23001_8_tc_to_vlc_xfer( p_sps->vui.colour.i_transfer_characteristics );
     *p_colorspace =
-        hxxx_matrix_coeffs_to_vlc( p_sps->vui.colour.i_matrix_coefficients );
+        iso_23001_8_mc_to_vlc_coeffs( p_sps->vui.colour.i_matrix_coefficients );
     *p_full_range = p_sps->vui.colour.b_full_range;
     return true;
 }

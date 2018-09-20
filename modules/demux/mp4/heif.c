@@ -32,7 +32,7 @@
 
 #include "libmp4.h"
 #include "heif.h"
-#include "color_config.h"
+#include "../../packetizer/iso_color_tables.h"
 
 struct heif_private_t
 {
@@ -177,15 +177,15 @@ static int ControlHEIF( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
         }
         case DEMUX_GET_LENGTH:
-            *(va_arg( args, int64_t * )) = p_sys->p_title->i_seekpoint *
-                                           p_sys->i_image_duration;
+            *(va_arg( args, vlc_tick_t * )) = p_sys->p_title->i_seekpoint *
+                                              p_sys->i_image_duration;
             return VLC_SUCCESS;
         case DEMUX_GET_TIME:
-            *(va_arg(args, int64_t *)) = p_sys->i_pcr;
+            *(va_arg(args, vlc_tick_t *)) = p_sys->i_pcr;
             return VLC_SUCCESS;
         case DEMUX_SET_TIME:
         {
-            SeekToPrevImageEnd( p_sys, va_arg(args, int64_t) /
+            SeekToPrevImageEnd( p_sys, va_arg(args, vlc_tick_t) /
                                 p_sys->i_image_duration );
             return VLC_SUCCESS;
         }
@@ -223,7 +223,7 @@ static int DemuxHEIF( demux_t *p_demux )
         es_out_Control( p_demux->out, ES_OUT_GET_EMPTY, &b_empty );
         if( !b_empty || vlc_tick_now() <= p_sys->i_end_display_time )
         {
-            vlc_tick_sleep( 40 * 1000 );
+            vlc_tick_sleep( VLC_TICK_FROM_MS(40) );
             return VLC_DEMUXER_SUCCESS;
         }
         p_sys->i_end_display_time = 0;
@@ -412,9 +412,9 @@ static int DemuxHEIF( demux_t *p_demux )
     if( !p_block )
         return VLC_DEMUXER_SUCCESS; /* Goto next picture */
 
-    if( p_sys->i_pcr == VLC_TS_INVALID )
+    if( p_sys->i_pcr == VLC_TICK_INVALID )
     {
-        p_sys->i_pcr = VLC_TS_0;
+        p_sys->i_pcr = VLC_TICK_0;
         es_out_SetPCR( p_demux->out, p_sys->i_pcr );
     }
 

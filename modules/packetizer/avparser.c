@@ -179,7 +179,7 @@ static block_t *Packetize ( decoder_t *p_dec, block_t **pp_block )
 
     p_sys->i_offset += av_parser_parse2( p_sys->p_parser_ctx, p_sys->p_codec_ctx,
                                          &p_outdata, &i_outlen, p_indata, i_inlen,
-                                         p_block->i_pts, p_block->i_dts, -1);
+                                         TO_AV_TS(p_block->i_pts), TO_AV_TS(p_block->i_dts), -1);
 
     if( unlikely( i_outlen <= 0 || !p_outdata ) )
         goto out;
@@ -195,7 +195,7 @@ static block_t *Packetize ( decoder_t *p_dec, block_t **pp_block )
     if( p_sys->p_parser_ctx->key_frame == 1 )
         p_ret->i_flags |= BLOCK_FLAG_TYPE_I;
 
-    p_block->i_pts = p_block->i_dts = VLC_TS_INVALID;
+    p_block->i_pts = p_block->i_dts = VLC_TICK_INVALID;
 
     return p_ret;
 

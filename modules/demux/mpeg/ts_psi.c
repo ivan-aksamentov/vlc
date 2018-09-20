@@ -54,6 +54,7 @@
 #include "ts_psip.h"
 #include "ts_si.h"
 #include "ts_metadata.h"
+#include "ts_descriptions.h"
 
 #include "../access/dtv/en50221_capmt.h"
 
@@ -421,10 +422,10 @@ static void SetupAudioExtendedDescriptors( demux_t *p_demux, ts_es_t *p_es,
         if( p_dr && p_dr->i_length > 1 && p_dr->p_data[0] == 0x06 /* Tag extension */ )
         {
             static const char *editorial_classification_coding[] = {
-                N_("Main audio"),
-                N_("Audio description for the visually impaired"),
-                N_("Clean audio for the hearing impaired"),
-                N_("Spoken subtitles for the visually impaired"),
+                DESC_MAIN_AUDIO,
+                DESC_AUDIO_DESC_VISUALLY_IMPAIRED,
+                DESC_CLEAN_AUDIO_HEARING_IMPAIRED,
+                DESC_SPOKEN_SUBTITLES_VISUAL_IMP,
             };
 
             uint8_t i_audio_type = (p_dr->p_data[1] & 0x7F) >> 2;
@@ -460,9 +461,9 @@ static char *GetIso639AudioTypeDesc( uint8_t type )
 {
     static const char *audio_type[] = {
         /* "Main audio", */
-        N_("clean effects"),
-        N_("hearing impaired"),
-        N_("visual impaired commentary"),
+        DESC_CLEAN_EFFECTS,
+        DESC_CLEAN_AUDIO_HEARING_IMPAIRED,
+        DESC_VISUAL_IMPAIRED_COMMENTS,
     };
 
     if ( type == 0 || type >= ARRAY_SIZE(audio_type) )
@@ -685,6 +686,82 @@ static void SetupJ2KDescriptors( demux_t *p_demux, ts_es_t *p_es, const dvbpsi_p
     }
 }
 
+static void SetupTTMLExtendedDescriptor( demux_t *p_demux,
+                                         const dvbpsi_descriptor_t *p_dr, es_format_t *p_fmt )
+{
+    static const struct
+    {
+        uint8_t val;
+        const char * psz;
+    } subtitle_purpose[] = {
+        { 0x00, DESC_SUBS_SAME_LANG },
+        { 0x01, DESC_SUBS_FOREIGN_LANG },
+        { 0x02, DESC_SUBS_ALL_LANG },
+        { 0x10, DESC_SUBS_HEARING_IMPAIRED },
+        { 0x11, DESC_SUBS_HEARING_IMPAIRED },
+        { 0x12, DESC_SUBS_HEARING_IMPAIRED },
+        { 0x30, DESC_SUBS_AUDIO_DESCRIPTION_TRANS },
+        { 0x31, DESC_SUBS_COMMENTARY },
+    };
+
+    if( p_dr->i_length < 9 )
+        return;
+
+    msg_Dbg( p_demux, "     - found TTML_descriptor" );
+    if( !p_fmt->psz_language )
+    {
+        p_fmt->psz_language = strndup( (const char *)&p_dr->p_data[1], 3 );
+        msg_Dbg( p_demux, "       language: %s", p_fmt->psz_language );
+    }
+
+    /* variable members */
+    const uint8_t *p_data = &p_dr->p_data[6];
+    size_t i_data = p_dr->i_length - 6;
+
+    /* profiles */
+    uint8_t i_profiles_count = (p_dr->p_data[5] & 0x0F);
+    if( i_data <= i_profiles_count )
+        goto end;
+    p_data += i_profiles_count;
+    i_data -= i_profiles_count;
+
+    /* qualifier */
+    if( p_dr->p_data[5] & 0x40 )
+    {
+        if( i_data <= 4 )
+            goto end;
+        p_data += 4;
+        i_data -= 4;
+    }
+
+    /* font usage */
+    if( p_dr->p_data[5] & 0x80 )
+    {
+        if( i_data <= 1U || i_data <= 1U + p_data[0] )
+            goto end;
+        p_data += 1 + p_data[0];
+        i_data -= 1 + p_data[0];
+    }
+
+    /* text... finally */
+    if( i_data < 1U || i_data < 1U + p_data[0] )
+        goto end;
+    if( !p_fmt->psz_description )
+        p_fmt->psz_description = strndup( (const char*) &p_data[1], p_data[0] );
+
+end:
+    /* Apply */
+    for( size_t i=0; i<ARRAY_SIZE(subtitle_purpose); i++ )
+    {
+        if( subtitle_purpose[i].val == (p_dr->p_data[4] >> 2) )
+        {
+            if( !p_fmt->psz_description )
+                p_fmt->psz_description = strdup( subtitle_purpose[i].psz );
+            break;
+        }
+    }
+}
+
 typedef struct
 {
     int  i_type;
@@ -695,11 +772,11 @@ typedef struct
 
 static const char *const ppsz_teletext_type[] = {
  "",
- N_("Teletext"),
- N_("Teletext subtitles"),
- N_("Teletext: additional information"),
- N_("Teletext: program schedule"),
- N_("Teletext subtitles: hearing impaired")
+ DESC_TELETEXT,
+ DESC_TELETEXT_SUBTITLES,
+ DESC_TELETEXT_ADDTNL_INFO,
+ DESC_TELETEXT_SCHEDULE,
+ DESC_TELETEXT_SUBS_HEARING_IMPAIRED
 };
 
 static void PMTSetupEsTeletext( demux_t *p_demux, ts_stream_t *p_pes,
@@ -1140,12 +1217,6 @@ static void PMTSetupEs0x06( demux_t *p_demux, ts_stream_t *p_pes,
     {
         es_format_Change( p_fmt, AUDIO_ES, VLC_CODEC_A52 );
     }
-    else if( (desc = PMTEsFindDescriptor( p_dvbpsies, 0x7f ) ) &&
-             desc->i_length >= 2 && desc->p_data[0] == 0x80 &&
-              PMTEsHasRegistration(p_demux, p_dvbpsies, "Opus"))
-    {
-        OpusSetup(p_demux, desc->p_data, desc->i_length, p_fmt);
-    }
     else if( PMTEsHasRegistration( p_demux, p_dvbpsies, "DTS1" ) || /* 512 Bpf */
              PMTEsHasRegistration( p_demux, p_dvbpsies, "DTS2" ) || /* 1024 Bpf */
              PMTEsHasRegistration( p_demux, p_dvbpsies, "DTS3" ) || /* 2048 Bpf */
@@ -1164,6 +1235,34 @@ static void PMTSetupEs0x06( demux_t *p_demux, ts_stream_t *p_pes,
     else if( PMTEsHasRegistration( p_demux, p_dvbpsies, "HEVC" ) )
     {
         es_format_Change( p_fmt, VIDEO_ES, VLC_CODEC_HEVC );
+    }
+    else if( (desc = PMTEsFindDescriptor( p_dvbpsies, 0x7f )) &&
+             desc->i_length >= 2 )
+    {
+        /* extended_descriptor on PMT (DVB Bluebook A038) */
+        switch( desc->p_data[0] )
+        {
+            case 0x80: /* User Defined */
+                 /* non finalized Opus in TS Draft. Can't really tell...
+                  * So ffmpeg produced mixes with System-A reg */
+                if( PMTEsHasRegistration(p_demux, p_dvbpsies, "Opus") )
+                    OpusSetup(p_demux, desc->p_data, desc->i_length, p_fmt);
+                break;
+            case 0x0E: /* DTS HD */
+                es_format_Change( p_fmt, AUDIO_ES, VLC_CODEC_DTS );
+                p_fmt->i_profile = PROFILE_DTS_HD;
+                break;
+            case 0x0F: /* DTS Neural */
+                es_format_Change( p_fmt, AUDIO_ES, VLC_CODEC_DTS );
+                break;
+            case 0x15: /* AC4, unsupported for now */
+                es_format_Change( p_fmt, AUDIO_ES, VLC_FOURCC('A', 'C', '-', '4') );
+                break;
+            case 0x20:
+                es_format_Change( p_fmt, SPU_ES, VLC_CODEC_TTML_TS );
+                SetupTTMLExtendedDescriptor( p_demux, desc, p_fmt );
+                break;
+        }
     }
     else if( p_sys->standard == TS_STANDARD_ARIB )
     {
@@ -2044,7 +2143,7 @@ static void PMTCallBack( void *data, dvbpsi_pmt_t *p_dvbpsipmt )
     UpdatePESFilters( p_demux, p_sys->seltype == PROGRAM_ALL );
 
     /* Probe Boundaries */
-    if( p_sys->b_canfastseek && p_pmt->i_last_dts == -1 )
+    if( p_sys->b_canfastseek && p_pmt->i_last_dts == TS_TICK_UNKNOWN )
     {
         p_pmt->i_last_dts = 0;
         ProbeStart( p_demux, p_pmt->i_number );

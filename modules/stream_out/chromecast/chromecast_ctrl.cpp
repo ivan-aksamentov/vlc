@@ -38,6 +38,7 @@
 #include <iomanip>
 
 #include <vlc_stream.h>
+#include <vlc_rand.h>
 
 #include "../../misc/webservices/json.h"
 
@@ -90,7 +91,6 @@ static const char* StateToStr( States s )
 intf_sys_t::intf_sys_t(vlc_object_t * const p_this, int port, std::string device_addr,
                        int device_port, httpd_host_t *httpd_host)
  : m_module(p_this)
- , m_streaming_port(port)
  , m_device_port(device_port)
  , m_device_addr(device_addr)
  , m_last_request_id( 0 )
@@ -109,25 +109,22 @@ intf_sys_t::intf_sys_t(vlc_object_t * const p_this, int port, std::string device
  , m_cc_eof( false )
  , m_pace( false )
  , m_meta( NULL )
- , m_httpd_host(httpd_host)
+ , m_httpd( httpd_host, port )
  , m_httpd_file(NULL)
  , m_art_url(NULL)
  , m_art_idx(0)
- , m_cc_time_date( VLC_TS_INVALID )
- , m_cc_time( VLC_TS_INVALID )
- , m_pause_delay( VLC_TS_INVALID )
+ , m_cc_time_date( VLC_TICK_INVALID )
+ , m_cc_time( VLC_TICK_INVALID )
+ , m_pause_delay( VLC_TICK_INVALID )
  , m_pingRetriesLeft( PING_WAIT_RETRIES )
 {
-    m_communication = new ChromecastCommunication( p_this, m_device_addr.c_str(),
-                                                   m_device_port );
+    m_communication = new ChromecastCommunication( p_this,
+        getHttpStreamPath(), getHttpStreamPort(),
+        m_device_addr.c_str(), m_device_port );
 
     m_ctl_thread_interrupt = vlc_interrupt_create();
     if( unlikely(m_ctl_thread_interrupt == NULL) )
         throw std::runtime_error( "error creating interrupt context" );
-
-    vlc_mutex_init(&m_lock);
-    vlc_cond_init( &m_stateChangedCond );
-    vlc_cond_init( &m_pace_cond );
 
     std::stringstream ss;
     ss << "http://" << m_communication->getServerIp() << ":" << port;
@@ -150,8 +147,6 @@ intf_sys_t::intf_sys_t(vlc_object_t * const p_this, int port, std::string device
                   VLC_THREAD_PRIORITY_LOW))
     {
         vlc_interrupt_destroy( m_ctl_thread_interrupt );
-        vlc_cond_destroy( &m_stateChangedCond );
-        vlc_cond_destroy( &m_pace_cond );
         var_SetAddress( m_module->obj.parent->obj.parent, CC_SHARED_VAR_NAME, NULL );
         throw std::runtime_error( "error creating cc thread" );
     }
@@ -161,7 +156,7 @@ intf_sys_t::~intf_sys_t()
 {
     var_Destroy( m_module->obj.parent->obj.parent, CC_SHARED_VAR_NAME );
 
-    vlc_mutex_lock(&m_lock);
+    m_lock.lock();
     if( m_communication )
     {
         switch ( m_state )
@@ -185,14 +180,14 @@ intf_sys_t::~intf_sys_t()
             break;
         }
 
-        vlc_mutex_unlock(&m_lock);
+        m_lock.unlock();
         vlc_interrupt_kill( m_ctl_thread_interrupt );
         vlc_join(m_chromecastThread, NULL);
 
         delete m_communication;
     }
     else
-        vlc_mutex_unlock(&m_lock);
+        m_lock.unlock();
 
     vlc_interrupt_destroy( m_ctl_thread_interrupt );
 
@@ -203,10 +198,6 @@ intf_sys_t::~intf_sys_t()
         httpd_FileDelete( m_httpd_file );
 
     free( m_art_url );
-
-    vlc_cond_destroy(&m_stateChangedCond);
-    vlc_cond_destroy(&m_pace_cond);
-    vlc_mutex_destroy(&m_lock);
 }
 
 void intf_sys_t::reinit()
@@ -223,6 +214,8 @@ void intf_sys_t::reinit()
     try
     {
         m_communication = new ChromecastCommunication( m_module,
+                                                       getHttpStreamPath(),
+                                                       getHttpStreamPort(),
                                                        m_device_addr.c_str(),
                                                        m_device_port );
     } catch (const std::runtime_error& err )
@@ -245,14 +238,15 @@ int intf_sys_t::httpd_file_fill( uint8_t *psz_request, uint8_t **pp_data, int *p
 {
     (void) psz_request;
 
-    vlc_mutex_lock( &m_lock );
-    if( !m_art_url )
+    char *psz_art;
     {
-        vlc_mutex_unlock( &m_lock );
-        return VLC_EGENERIC;
+        vlc::threads::mutex_locker lock( m_lock );
+        if( !m_art_url )
+        {
+            return VLC_EGENERIC;
+        }
+        psz_art = strdup( m_art_url );
     }
-    char *psz_art = strdup( m_art_url );
-    vlc_mutex_unlock( &m_lock );
 
     stream_t *s = vlc_stream_NewURL( m_module, psz_art );
     free( psz_art );
@@ -310,25 +304,25 @@ void intf_sys_t::prepareHttpArtwork()
     {
         /* Same art: use the previous cached artwork url */
         assert( m_art_idx != 0 );
-        ss_art_idx << "/art" << (m_art_idx - 1);
+        ss_art_idx << getHttpArtRoot() << "/" << (m_art_idx - 1);
     }
     else
     {
         /* New art: create a new httpd file instance with a new url. The
          * artwork has to be different since the CC will cache the content. */
 
-        ss_art_idx << "/art" << m_art_idx;
+        ss_art_idx << getHttpArtRoot() << "/" << m_art_idx;
         m_art_idx++;
 
-        vlc_mutex_unlock( &m_lock );
+        m_lock.unlock();
 
         if( m_httpd_file )
             httpd_FileDelete( m_httpd_file );
-        m_httpd_file = httpd_FileNew( m_httpd_host, ss_art_idx.str().c_str(),
+        m_httpd_file = httpd_FileNew( m_httpd.m_host, ss_art_idx.str().c_str(),
                                       "application/octet-stream", NULL, NULL,
                                       httpd_file_fill_cb, (httpd_file_sys_t *) this );
 
-        vlc_mutex_lock( &m_lock );
+        m_lock.lock();
         if( !m_httpd_file )
             return;
 
@@ -371,21 +365,20 @@ void intf_sys_t::tryLoad()
     // Reset the mediaSessionID to allow the new session to become the current one.
     // we cannot start a new load when the last one is still processing
     m_last_request_id =
-        m_communication->msgPlayerLoad( m_appTransportId, m_streaming_port,
-                                       m_mime, m_meta );
+        m_communication->msgPlayerLoad( m_appTransportId, m_mime, m_meta );
     if( m_last_request_id != ChromecastCommunication::kInvalidId )
         m_state = Loading;
 }
 
 void intf_sys_t::setRetryOnFail( bool enabled )
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker locker(m_lock);
     m_retry_on_fail = enabled;
 }
 
 void intf_sys_t::setHasInput( const std::string mime_type )
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker locker(m_lock);
     msg_Dbg( m_module, "Loading content" );
 
     if( m_state == Dead )
@@ -404,15 +397,15 @@ void intf_sys_t::setHasInput( const std::string mime_type )
     m_paused = false;
     m_cc_eof = false;
     m_request_load = true;
-    m_cc_time_last_request_date = VLC_TS_INVALID;
-    m_cc_time_date = VLC_TS_INVALID;
-    m_cc_time = VLC_TS_INVALID;
-    m_pause_delay = VLC_TS_INVALID;
+    m_cc_time_last_request_date = VLC_TICK_INVALID;
+    m_cc_time_date = VLC_TICK_INVALID;
+    m_cc_time = VLC_TICK_INVALID;
+    m_pause_delay = VLC_TICK_INVALID;
     m_mediaSessionId = 0;
 
     tryLoad();
 
-    vlc_cond_signal( &m_stateChangedCond );
+    m_stateChangedCond.signal();
 }
 
 bool intf_sys_t::isStateError() const
@@ -461,15 +454,13 @@ bool intf_sys_t::isStateReady() const
 
 void intf_sys_t::setPacing(bool do_pace)
 {
-    vlc_mutex_lock( &m_lock );
-    if( m_pace == do_pace )
     {
-        vlc_mutex_unlock( &m_lock );
-        return;
+        vlc::threads::mutex_locker locker( m_lock );
+        if( m_pace == do_pace )
+            return;
+        m_pace = do_pace;
     }
-    m_pace = do_pace;
-    vlc_mutex_unlock( &m_lock );
-    vlc_cond_signal( &m_pace_cond );
+    m_pace_cond.signal();
 }
 
 static void interrupt_wake_up_cb( void *data )
@@ -480,25 +471,25 @@ static void interrupt_wake_up_cb( void *data )
 
 void intf_sys_t::interrupt_wake_up()
 {
-    vlc_mutex_locker locker( &m_lock );
+    vlc::threads::mutex_locker locker( m_lock );
     m_interrupted = true;
-    vlc_cond_signal( &m_pace_cond );
+    m_pace_cond.signal();
 }
 
 int intf_sys_t::pace()
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker locker( m_lock );
 
     m_interrupted = false;
     vlc_interrupt_register( interrupt_wake_up_cb, this );
     int ret = 0;
-    vlc_tick_t deadline = vlc_tick_now() + CLOCK_FREQ/2;
+    vlc_tick_t deadline = vlc_tick_now() + VLC_TICK_FROM_MS(500);
 
     /* Wait for the sout to send more data via http (m_pace), or wait for the
      * CC to finish. In case the demux filter is EOF, we always wait for
      * 500msec (unless interrupted from the input thread). */
     while( !isFinishedPlaying() && ( m_pace || m_input_eof ) && !m_interrupted && ret == 0 )
-        ret = vlc_cond_timedwait( &m_pace_cond, &m_lock, deadline );
+        ret = m_pace_cond.timedwait( m_lock, deadline );
 
     vlc_interrupt_unregister();
 
@@ -519,26 +510,29 @@ int intf_sys_t::pace()
 
 void intf_sys_t::sendInputEvent(enum cc_input_event event, union cc_input_arg arg)
 {
-    vlc_mutex_lock(&m_lock);
-    on_input_event_itf on_input_event = m_on_input_event;
-    void *data = m_on_input_event_data;
-
-    switch (event)
+    on_input_event_itf on_input_event;
+    void *data;
     {
-        case CC_INPUT_EVENT_EOF:
-            if (m_input_eof != arg.eof)
-                m_input_eof = arg.eof;
-            else
-            {
-                /* Don't send twice the same event */
-                on_input_event = NULL;
-                data = NULL;
-            }
-            break;
-        default:
-            break;
+        vlc::threads::mutex_locker locker( m_lock );
+        on_input_event = m_on_input_event;
+        data = m_on_input_event_data;
+
+        switch (event)
+        {
+            case CC_INPUT_EVENT_EOF:
+                if (m_input_eof != arg.eof)
+                    m_input_eof = arg.eof;
+                else
+                {
+                    /* Don't send twice the same event */
+                    on_input_event = NULL;
+                    data = NULL;
+                }
+                break;
+            default:
+                break;
+        }
     }
-    vlc_mutex_unlock(&m_lock);
 
     if (on_input_event)
         on_input_event(data, event, arg);
@@ -582,6 +576,34 @@ void intf_sys_t::queueMessage( QueueableMessages msg )
     vlc_interrupt_raise( m_ctl_thread_interrupt );
 }
 
+intf_sys_t::httpd_info_t::httpd_info_t( httpd_host_t* host, int port )
+    : m_host( host )
+    , m_port( port )
+{
+    for( int i = 0; i < 3; ++i )
+    {
+        std::ostringstream ss;
+        ss << "/chromecast"
+           << "/" << vlc_tick_now()
+           << "/" << static_cast<uint64_t>( vlc_mrand48() );
+
+        m_root = ss.str();
+        m_url = httpd_UrlNew( m_host, m_root.c_str(), NULL, NULL );
+        if( m_url )
+            break;
+    }
+
+    if( m_url == NULL )
+        throw std::runtime_error( "unable to bind to http path" );
+}
+
+intf_sys_t::httpd_info_t::~httpd_info_t()
+
+{
+    if( m_url )
+        httpd_UrlDelete( m_url );
+}
+
 /*****************************************************************************
  * Chromecast thread
  *****************************************************************************/
@@ -607,7 +629,7 @@ void intf_sys_t::mainLoop()
         // Reset the interrupt state to avoid commands not being sent (since
         // the context is still flagged as interrupted)
         vlc_interrupt_unregister();
-        vlc_mutex_locker lock( &m_lock );
+        vlc::threads::mutex_locker lock( m_lock );
         while ( m_msgQueue.empty() == false )
         {
             QueueableMessages msg = m_msgQueue.front();
@@ -641,7 +663,7 @@ void intf_sys_t::processAuthMessage( const castchannel::CastMessage& msg )
     }
     else
     {
-        vlc_mutex_locker locker(&m_lock);
+        vlc::threads::mutex_locker lock( m_lock );
         setState( Connecting );
         m_communication->msgConnect(DEFAULT_CHOMECAST_RECEIVER);
         m_communication->msgReceiverGetStatus();
@@ -694,7 +716,7 @@ bool intf_sys_t::processReceiverMessage( const castchannel::CastMessage& msg )
             }
         }
 
-        vlc_mutex_locker locker(&m_lock);
+        vlc::threads::mutex_locker lock( m_lock );
 
         switch ( m_state )
         {
@@ -742,6 +764,7 @@ bool intf_sys_t::processReceiverMessage( const castchannel::CastMessage& msg )
             if ( p_app == NULL )
                 break;
             // else: fall through and warn
+            /* fall-through */
         default:
             msg_Warn( m_module, "Unexpected RECEIVER_STATUS with state %s. "
                       "Checking media status",
@@ -758,7 +781,7 @@ bool intf_sys_t::processReceiverMessage( const castchannel::CastMessage& msg )
         json_value reason = (*p_data)["reason"];
         msg_Err( m_module, "Failed to start the MediaPlayer: %s",
                 (const char *)reason);
-        vlc_mutex_locker locker(&m_lock);
+        vlc::threads::mutex_locker lock( m_lock );
         m_appTransportId = "";
         m_mediaSessionId = 0;
         setState( Dead );
@@ -780,7 +803,7 @@ void intf_sys_t::processMediaMessage( const castchannel::CastMessage& msg )
     std::string type((*p_data)["type"]);
     int64_t requestId = (json_int_t) (*p_data)["requestId"];
 
-    vlc_mutex_locker locker( &m_lock );
+    vlc::threads::mutex_locker lock( m_lock );
 
     if ((m_last_request_id != 0 && requestId != m_last_request_id))
     {
@@ -929,7 +952,7 @@ void intf_sys_t::processConnectionMessage( const castchannel::CastMessage& msg )
     {
         // Close message indicates an application is being closed, not the connection.
         // From this point on, we need to relaunch the media receiver app
-        vlc_mutex_locker locker(&m_lock);
+        vlc::threads::mutex_locker lock( m_lock );
         m_appTransportId = "";
         m_mediaSessionId = 0;
         setState( Connected );
@@ -960,7 +983,7 @@ bool intf_sys_t::handleMessages()
         // how many bytes to read
         ssize_t i_ret = m_communication->receive( p_packet + i_received,
                                         i_payloadSize + PACKET_HEADER_LEN - i_received,
-                                        PING_WAIT_TIME - ( vlc_tick_now() - i_begin_time ) / CLOCK_FREQ,
+                                        PING_WAIT_TIME - SEC_FROM_VLC_TICK( vlc_tick_now() - i_begin_time ),
                                         &b_timeout );
         if ( i_ret < 0 )
         {
@@ -968,14 +991,14 @@ bool intf_sys_t::handleMessages()
                 return true;
             // An error occured, we give up
             msg_Err( m_module, "The connection to the Chromecast died (receiving).");
-            vlc_mutex_locker locker(&m_lock);
+            vlc::threads::mutex_locker lock( m_lock );
             setState( Dead );
             return false;
         }
         else if ( b_timeout == true )
         {
             // If no commands were queued to be sent, we timed out. Let's ping the chromecast
-            vlc_mutex_locker locker(&m_lock);
+            vlc::threads::mutex_locker lock( m_lock );
             if ( m_pingRetriesLeft == 0 )
             {
                 m_state = Dead;
@@ -995,7 +1018,7 @@ bool intf_sys_t::handleMessages()
             if ( i_payloadSize > PACKET_MAX_LEN - PACKET_HEADER_LEN )
             {
                 msg_Err( m_module, "Payload size is too long: dropping connection" );
-                vlc_mutex_locker locker(&m_lock);
+                vlc::threads::mutex_locker lock( m_lock );
                 m_state = Dead;
                 return false;
             }
@@ -1027,7 +1050,7 @@ void intf_sys_t::doStop()
 
 void intf_sys_t::requestPlayerStop()
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker lock( m_lock );
 
     std::queue<QueueableMessages> empty;
     std::swap(m_msgQueue, empty);
@@ -1047,7 +1070,7 @@ void intf_sys_t::requestPlayerStop()
 
 States intf_sys_t::state() const
 {
-    vlc_mutex_locker locker( &m_lock );
+    vlc::threads::mutex_locker lock( m_lock );
     return m_state;
 }
 
@@ -1060,14 +1083,14 @@ std::string intf_sys_t::timeVLCToCC(vlc_tick_t time)
 {
     std::stringstream ss;
     ss.setf(std::ios_base::fixed, std::ios_base::floatfield);
-    ss << std::setprecision(6) << (double (time) / (double)CLOCK_FREQ);
+    ss << std::setprecision(6) << secf_from_vlc_tick(time);
     return ss.str();
 }
 
 void intf_sys_t::setOnInputEventCb(on_input_event_itf on_input_event,
                                    void *on_input_event_data)
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker lock( m_lock );
     m_on_input_event = on_input_event;
     m_on_input_event_data = on_input_event_data;
 }
@@ -1076,7 +1099,7 @@ void intf_sys_t::setDemuxEnabled(bool enabled,
                                  on_paused_changed_itf on_paused_changed,
                                  void *on_paused_changed_data)
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker lock( m_lock );
     m_on_paused_changed = on_paused_changed;
     m_on_paused_changed_data = on_paused_changed_data;
 
@@ -1089,7 +1112,7 @@ void intf_sys_t::setDemuxEnabled(bool enabled,
 
 void intf_sys_t::setPauseState(bool paused, vlc_tick_t delay)
 {
-    vlc_mutex_locker locker( &m_lock );
+    vlc::threads::mutex_locker lock( m_lock );
     if ( m_mediaSessionId == 0 || paused == m_paused || !m_communication )
         return;
 
@@ -1108,8 +1131,23 @@ void intf_sys_t::setPauseState(bool paused, vlc_tick_t delay)
 
 vlc_tick_t intf_sys_t::getPauseDelay()
 {
-    vlc_mutex_locker locker( &m_lock );
+    vlc::threads::mutex_locker lock( m_lock );
     return m_pause_delay;
+}
+
+unsigned int intf_sys_t::getHttpStreamPort() const
+{
+    return m_httpd.m_port;
+}
+
+std::string intf_sys_t::getHttpStreamPath() const
+{
+    return m_httpd.m_root + "/stream";
+}
+
+std::string intf_sys_t::getHttpArtRoot() const
+{
+    return m_httpd.m_root + "/art";
 }
 
 bool intf_sys_t::isFinishedPlaying()
@@ -1119,7 +1157,7 @@ bool intf_sys_t::isFinishedPlaying()
 
 void intf_sys_t::setMeta(vlc_meta_t *p_meta)
 {
-    vlc_mutex_locker locker(&m_lock);
+    vlc::threads::mutex_locker lock( m_lock );
     if (m_meta != NULL)
         vlc_meta_Delete(m_meta);
     m_meta = p_meta;
@@ -1127,20 +1165,20 @@ void intf_sys_t::setMeta(vlc_meta_t *p_meta)
 
 vlc_tick_t intf_sys_t::getPlaybackTimestamp()
 {
-    vlc_mutex_locker locker( &m_lock );
+    vlc::threads::mutex_locker lock( m_lock );
     switch( m_state )
     {
         case Buffering:
         case Paused:
             if( !m_played_once )
-                return VLC_TS_INVALID;
+                return VLC_TICK_INVALID;
             /* fallthrough */
         case Playing:
         {
             assert( m_communication );
             vlc_tick_t now = vlc_tick_now();
             if( m_state == Playing && m_last_request_id == 0
-             && now - m_cc_time_last_request_date > INT64_C(4000000) )
+             && now - m_cc_time_last_request_date > VLC_TICK_FROM_SEC(4) )
             {
                 m_cc_time_last_request_date = now;
                 m_last_request_id =
@@ -1149,7 +1187,7 @@ vlc_tick_t intf_sys_t::getPlaybackTimestamp()
             return m_cc_time + now - m_cc_time_date;
         }
         default:
-            return VLC_TS_INVALID;
+            return VLC_TICK_INVALID;
     }
 }
 
@@ -1180,8 +1218,8 @@ void intf_sys_t::setState( States state )
             default:
                 break;
         }
-        vlc_cond_signal( &m_stateChangedCond );
-        vlc_cond_signal( &m_pace_cond );
+        m_stateChangedCond.signal();
+        m_pace_cond.signal();
     }
 }
 

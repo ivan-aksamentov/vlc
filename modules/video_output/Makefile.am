@@ -311,7 +311,7 @@ libdirectdraw_plugin_la_SOURCES = video_output/win32/directdraw.c \
 	video_output/win32/win32touch.c video_output/win32/win32touch.h
 libdirectdraw_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) \
 	-DMODULE_NAME_IS_directdraw
-libdirectdraw_plugin_la_LIBADD = libchroma_copy.la -luser32 -lgdi32 $(LIBCOM) -luuid
+libdirectdraw_plugin_la_LIBADD = libchroma_copy.la -luser32 -ldxguid -lgdi32 $(LIBCOM) -luuid
 libdirectdraw_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)'
 if HAVE_WIN32_DESKTOP
 vout_LTLIBRARIES += $(LTLIBdirectdraw)
@@ -422,6 +422,16 @@ EXTRA_LTLIBRARIES += libfb_plugin.la
 vout_LTLIBRARIES += $(LTLIBfb)
 
 
+### Kernel Mode Setting ###
+
+libkms_plugin_la_SOURCES = video_output/kms.c
+libkms_plugin_la_CFLAGS = $(AM_CFLAGS) $(KMS_CFLAGS)
+libkms_plugin_la_LIBADD = $(KMS_LIBS)
+libkms_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)'
+EXTRA_LTLIBRARIES += libkms_plugin.la
+vout_LTLIBRARIES += $(LTLIBkms)
+
+
 ### Coloured ASCII art ###
 libcaca_plugin_la_SOURCES = video_output/caca.c
 libcaca_plugin_la_CFLAGS = $(AM_CFLAGS) $(CACA_CFLAGS)
@@ -444,10 +454,12 @@ libvdummy_plugin_la_SOURCES = video_output/vdummy.c
 libvmem_plugin_la_SOURCES = video_output/vmem.c
 libwdummy_plugin_la_SOURCES = video_output/wdummy.c
 libyuv_plugin_la_SOURCES = video_output/yuv.c
+libvgl_plugin_la_SOURCES = video_output/vgl.c
 
 vout_LTLIBRARIES += \
 	libflaschen_plugin.la \
 	libvdummy_plugin.la \
 	libvmem_plugin.la \
 	libwdummy_plugin.la \
+	libvgl_plugin.la \
 	libyuv_plugin.la

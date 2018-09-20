@@ -166,11 +166,11 @@ static void *Run( void *data )
         vlc_restorecancel(canc);
         if( i_status == 2 )
         {
-            vlc_tick_sleep( 5*CLOCK_FREQ );
+            vlc_tick_sleep( VLC_TICK_FROM_SEC(5) );
             i_status = 0;
         }
         else
-            vlc_tick_sleep( CLOCK_FREQ/2 );
+            vlc_tick_sleep( VLC_TICK_FROM_MS(500) );
     }
     return NULL;
 }
@@ -270,7 +270,7 @@ static void AddTrack( services_discovery_t *p_sd, LIBMTP_track_t *p_track )
         free( psz_string );
     }
     input_item_SetDate( p_input, p_track->date );
-    p_input->i_duration = p_track->duration * INT64_C(1000);
+    p_input->i_duration = VLC_TICK_FROM_MS(p_track->duration);
     services_discovery_AddItem( p_sd, p_input );
     p_sys->pp_items[p_sys->i_count++] = p_input;
 }

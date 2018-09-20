@@ -28,7 +28,7 @@
 #include "avci.h"
 #include "../xiph.h"
 #include "../../packetizer/dts_header.h"
-#include "color_config.h"
+#include "../../packetizer/iso_color_tables.h"
 
 #include <vlc_demux.h>
 #include <vlc_aout.h>
@@ -601,6 +601,23 @@ int SetupVideoES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample )
             break;
         }
 
+        case ATOM_av01:
+        {
+            static_assert(ATOM_av01 == VLC_CODEC_AV1, "VLC_CODEC_AV1 != ATOM_av01");
+            MP4_Box_t *p_av1C = MP4_BoxGet( p_sample, "av1C" );
+            if( p_av1C && p_av1C->data.p_binary && p_av1C->data.p_binary->i_blob )
+            {
+                p_track->fmt.p_extra = malloc( p_av1C->data.p_binary->i_blob );
+                if( p_track->fmt.p_extra )
+                {
+                    p_track->fmt.i_extra = p_av1C->data.p_binary->i_blob;
+                    memcpy( p_track->fmt.p_extra, p_av1C->data.p_binary->p_blob,
+                            p_av1C->data.p_binary->i_blob );
+                }
+            }
+            break;
+        }
+
         /* avc1: send avcC (h264 without annexe B, ie without start code)*/
         case VLC_FOURCC( 'a', 'v', 'c', '3' ):
         case VLC_FOURCC( 'a', 'v', 'c', '1' ):
@@ -611,6 +628,8 @@ int SetupVideoES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample )
 
             if( p_avcC && BOXDATA(p_avcC) )
             {
+                p_track->fmt.i_profile = BOXDATA(p_avcC)->i_profile;
+                p_track->fmt.i_level = BOXDATA(p_avcC)->i_level;
                 p_track->fmt.i_extra = BOXDATA(p_avcC)->i_avcC;
                 if( p_track->fmt.i_extra > 0 )
                 {
@@ -716,6 +735,8 @@ int SetupVideoES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample )
                 }
 
                 const MP4_Box_t *p_SmDm = MP4_BoxGet( p_sample, "SmDm" );
+                if( !p_SmDm )
+                    p_SmDm = MP4_BoxGet( p_sample, "mdcv" );
                 if( p_SmDm && BOXDATA(p_SmDm) )
                 {
                     memcpy( p_track->fmt.video.mastering.primaries,
@@ -727,6 +748,8 @@ int SetupVideoES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample )
                 }
 
                 const MP4_Box_t *p_CoLL = MP4_BoxGet( p_sample, "CoLL" );
+                if( !p_CoLL )
+                    p_CoLL = MP4_BoxGet( p_sample, "clli" );
                 if( p_CoLL && BOXDATA(p_CoLL) )
                 {
                     p_track->fmt.video.lighting.MaxCLL = BOXDATA(p_CoLL)->i_maxCLL;

@@ -415,19 +415,19 @@ static void satip_teardown(void *data) {
 
             /* Extra sleep for compatibility with some satip servers, that
              * can't handle new sessions right after teardown */
-            vlc_tick_sleep(150000);
+            vlc_tick_sleep(VLC_TICK_FROM_MS(150));
         }
     }
 }
 
-#define RECV_TIMEOUT 2 * 1000 * 1000
+#define RECV_TIMEOUT VLC_TICK_FROM_SEC(2)
 static void *satip_thread(void *data) {
     stream_t *access = data;
     access_sys_t *sys = access->p_sys;
     int sock = sys->udp_sock;
     vlc_tick_t last_recv = vlc_tick_now();
     ssize_t len;
-    vlc_tick_t next_keepalive = vlc_tick_now() + sys->keepalive_interval * 1000 * 1000;
+    vlc_tick_t next_keepalive = vlc_tick_now() + vlc_tick_from_sec(sys->keepalive_interval);
 #ifdef HAVE_RECVMMSG
     struct mmsghdr msgs[VLEN];
     struct iovec iovecs[VLEN];
@@ -519,7 +519,7 @@ static void *satip_thread(void *data) {
             if (rtsp_handle(access, NULL) != RTSP_RESULT_OK)
                 msg_Warn(access, "Failed to keepalive RTSP session");
 
-            next_keepalive = vlc_tick_now() + sys->keepalive_interval * 1000 * 1000;
+            next_keepalive = vlc_tick_now() + vlc_tick_from_sec(sys->keepalive_interval);
         }
     }
 
@@ -557,7 +557,6 @@ static block_t* satip_block(stream_t *access, bool *restrict eof) {
 
 static int satip_control(stream_t *access, int i_query, va_list args) {
     bool *pb_bool;
-    int64_t *pi_64;
 
     switch(i_query)
     {
@@ -569,8 +568,8 @@ static int satip_control(stream_t *access, int i_query, va_list args) {
             break;
 
         case STREAM_GET_PTS_DELAY:
-            pi_64 = va_arg(args, int64_t *);
-            *pi_64 = INT64_C(1000) * var_InheritInteger(access, "live-caching");
+            *va_arg(args, vlc_tick_t *) =
+                VLC_TICK_FROM_MS(var_InheritInteger(access, "live-caching"));
             break;
 
         default:
@@ -741,7 +740,7 @@ static int satip_open(vlc_object_t *obj)
 
     /* Extra sleep for compatibility with some satip servers, that
      * can't handle PLAY right after SETUP */
-    if (vlc_msleep_i11e(50000) < 0)
+    if (vlc_msleep_i11e(VLC_TICK_FROM_MS(50)) < 0)
         goto error;
 
     /* Open UDP socket for reading if not done */

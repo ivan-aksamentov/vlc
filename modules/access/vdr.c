@@ -267,7 +267,6 @@ static int Control( stream_t *p_access, int i_query, va_list args )
     access_sys_t *p_sys = p_access->p_sys;
     input_title_t ***ppp_title;
     int i;
-    int64_t *pi64;
     vlc_meta_t *p_meta;
 
     switch( i_query )
@@ -284,9 +283,8 @@ static int Control( stream_t *p_access, int i_query, va_list args )
             break;
 
         case STREAM_GET_PTS_DELAY:
-            pi64 = va_arg( args, int64_t * );
-            *pi64 = INT64_C(1000)
-                  * var_InheritInteger( p_access, "file-caching" );
+            *va_arg( args, vlc_tick_t * ) =
+                VLC_TICK_FROM_MS(var_InheritInteger( p_access, "file-caching" ));
             break;
 
         case STREAM_SET_PAUSE_STATE:
@@ -864,7 +862,7 @@ static void ImportMarks( stream_t *p_access )
         seekpoint_t *sp = vlc_seekpoint_New();
         if( !sp )
             continue;
-        sp->i_time_offset = i_frame * (int64_t)( CLOCK_FREQ / p_sys->fps );
+        sp->i_time_offset = i_frame * (vlc_tick_t)( CLOCK_FREQ / p_sys->fps );
         sp->psz_name = strdup( line );
 
         TAB_APPEND( p_marks->i_seekpoint, p_marks->seekpoint, sp );

@@ -127,6 +127,8 @@ vlc_module_end ()
 
 static int Control(demux_t *, int, va_list);
 
+namespace {
+
 class DeckLinkCaptureDelegate;
 
 struct demux_sys_t
@@ -148,13 +150,15 @@ struct demux_sys_t
     es_out_id_t *cc_es;
 
     vlc_mutex_t pts_lock;
-    int last_pts;  /* protected by <pts_lock> */
+    vlc_tick_t last_pts;  /* protected by <pts_lock> */
 
     uint32_t dominance_flags;
     int channels;
 
     bool tenbits;
 };
+
+} // namespace
 
 static const char *GetFieldDominance(BMDFieldDominance dom, uint32_t *flags)
 {
@@ -224,6 +228,7 @@ static es_format_t GetModeSettings(demux_t *demux, IDeckLinkDisplayMode *m,
 
     return video_fmt;
 }
+namespace {
 
 class DeckLinkCaptureDelegate : public IDeckLinkInputCallback
 {
@@ -297,6 +302,8 @@ private:
     demux_t *demux_;
 };
 
+} // namespace
+
 HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame* videoFrame, IDeckLinkAudioInputPacket* audioFrame)
 {
     demux_sys_t *sys = static_cast<demux_sys_t *>(demux_->p_sys);
@@ -332,7 +339,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
         BMDTimeValue stream_time, frame_duration;
         videoFrame->GetStreamTime(&stream_time, &frame_duration, CLOCK_FREQ);
         video_frame->i_flags = BLOCK_FLAG_TYPE_I | sys->dominance_flags;
-        video_frame->i_pts = video_frame->i_dts = VLC_TS_0 + stream_time;
+        video_frame->i_pts = video_frame->i_dts = VLC_TICK_0 + stream_time;
 
         if (sys->video_fmt.i_codec == VLC_CODEC_I422_10L) {
             v210_convert((uint16_t*)video_frame->p_buffer, frame_bytes, width, height);
@@ -347,7 +354,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
                     block_t *cc = vanc_to_cc(demux_, dec, width * 2);
                     if (!cc)
                         continue;
-                    cc->i_pts = cc->i_dts = VLC_TS_0 + stream_time;
+                    cc->i_pts = cc->i_dts = VLC_TICK_0 + stream_time;
 
                     if (!sys->cc_es) {
                         es_format_t fmt;
@@ -399,7 +406,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
         BMDTimeValue packet_time;
         audioFrame->GetPacketTime(&packet_time, CLOCK_FREQ);
-        audio_frame->i_pts = audio_frame->i_dts = VLC_TS_0 + packet_time;
+        audio_frame->i_pts = audio_frame->i_dts = VLC_TICK_0 + packet_time;
 
         vlc_mutex_lock(&sys->pts_lock);
         if (audio_frame->i_pts > sys->last_pts)
@@ -728,7 +735,6 @@ static int Control(demux_t *demux, int query, va_list args)
 {
     demux_sys_t *sys = (demux_sys_t *)demux->p_sys;
     bool *pb;
-    int64_t *pi64;
 
     switch(query)
     {
@@ -741,14 +747,13 @@ static int Control(demux_t *demux, int query, va_list args)
             return VLC_SUCCESS;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = va_arg(args, int64_t *);
-            *pi64 = INT64_C(1000) * var_InheritInteger(demux, "live-caching");
+            *va_arg(args, vlc_tick_t *) =
+                VLC_TICK_FROM_MS(var_InheritInteger(demux, "live-caching"));
             return VLC_SUCCESS;
 
         case DEMUX_GET_TIME:
-            pi64 = va_arg(args, int64_t *);
             vlc_mutex_lock(&sys->pts_lock);
-            *pi64 = sys->last_pts;
+            *va_arg(args, vlc_tick_t *) = sys->last_pts;
             vlc_mutex_unlock(&sys->pts_lock);
             return VLC_SUCCESS;
 

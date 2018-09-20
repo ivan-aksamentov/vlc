@@ -57,7 +57,7 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
-static UINT64 GetQPC(void)
+static msftime_t GetQPC(void)
 {
     LARGE_INTEGER counter;
 
@@ -254,7 +254,7 @@ static es_out_id_t *CreateES(demux_t *demux, IAudioClient *client, bool loop,
         flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
 
     /* Request at least thrice the PTS delay */
-    REFERENCE_TIME bufsize = caching * INT64_C(10) * 3;
+    REFERENCE_TIME bufsize = MSFTIME_FROM_VLC_TICK( caching ) * 3;
 
     hr = IAudioClient_Initialize(client, AUDCLNT_SHAREMODE_SHARED, flags,
                                  bufsize, 0, pwf, NULL);
@@ -325,7 +325,7 @@ static unsigned __stdcall Thread(void *data)
         if (hr != S_OK)
             continue;
 
-        pts = vlc_tick_now() - ((GetQPC() - qpc) / 10);
+        pts = vlc_tick_now() - VLC_TICK_FROM_MSFTIME(GetQPC() - qpc);
 
         es_out_SetPCR(demux->out, pts);
 
@@ -356,11 +356,11 @@ static int Control(demux_t *demux, int query, va_list ap)
     switch (query)
     {
         case DEMUX_GET_TIME:
-            *(va_arg(ap, int64_t *)) = vlc_tick_now() - sys->start_time;
+            *(va_arg(ap, vlc_tick_t *)) = vlc_tick_now() - sys->start_time;
             break;
 
         case DEMUX_GET_PTS_DELAY:
-            *(va_arg(ap, int64_t *)) = sys->caching;
+            *(va_arg(ap, vlc_tick_t *)) = sys->caching;
             break;
 
         case DEMUX_HAS_UNSUPPORTED_META:
@@ -396,7 +396,7 @@ static int Open(vlc_object_t *obj)
 
     sys->client = NULL;
     sys->es = NULL;
-    sys->caching = INT64_C(1000) * var_InheritInteger(obj, "live-caching");
+    sys->caching = VLC_TICK_FROM_MS( var_InheritInteger(obj, "live-caching") );
     sys->start_time = vlc_tick_now();
     for (unsigned i = 0; i < 2; i++)
         sys->events[i] = NULL;

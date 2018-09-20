@@ -70,13 +70,17 @@ typedef struct
     unsigned                      slice_index;
     ID3D11VideoProcessorInputView  *processorInput;  /* when used as processor input */
     ID3D11VideoProcessorOutputView *processorOutput; /* when used as processor output */
-    ID3D11ShaderResourceView      *resourceView[D3D11_MAX_SHADER_VIEW];
+    ID3D11ShaderResourceView      *renderSrc[D3D11_MAX_SHADER_VIEW];
     DXGI_FORMAT                   formatTexture;
 } picture_sys_t;
 
 #include "../codec/avcodec/va_surface.h"
 
-picture_sys_t *ActivePictureSys(picture_t *p_pic);
+static inline picture_sys_t *ActivePictureSys(picture_t *p_pic)
+{
+    struct va_pic_context *pic_ctx = (struct va_pic_context*)p_pic->context;
+    return pic_ctx ? &pic_ctx->picsys : p_pic->p_sys;
+}
 
 /* index to use for texture/resource that use a known DXGI format
  * (ie not DXGI_FORMAT_UNKNWON) */
@@ -95,11 +99,11 @@ void AcquirePictureSys(picture_sys_t *p_sys);
 void ReleasePictureSys(picture_sys_t *p_sys);
 
 /* map texture planes to resource views */
-int D3D11_AllocateShaderView(vlc_object_t *obj, ID3D11Device *d3ddevice,
+int D3D11_AllocateResourceView(vlc_object_t *obj, ID3D11Device *d3ddevice,
                              const d3d_format_t *format,
                              ID3D11Texture2D *p_texture[D3D11_MAX_SHADER_VIEW], UINT slice_index,
-                             ID3D11ShaderResourceView *resourceView[D3D11_MAX_SHADER_VIEW]);
-#define D3D11_AllocateShaderView(a,b,c,d,e,f)  D3D11_AllocateShaderView(VLC_OBJECT(a),b,c,d,e,f)
+                             ID3D11ShaderResourceView *output[D3D11_MAX_SHADER_VIEW]);
+#define D3D11_AllocateResourceView(a,b,c,d,e,f)  D3D11_AllocateResourceView(VLC_OBJECT(a),b,c,d,e,f)
 
 HRESULT D3D11_CreateDevice(vlc_object_t *obj, d3d11_handle_t *,
                            bool hw_decoding, d3d11_device_t *out);
@@ -129,12 +133,14 @@ static inline bool DeviceSupportsFormat(ID3D11Device *d3ddevice,
             && ( i_formatSupport & supportFlags ) == supportFlags;
 }
 
-const d3d_format_t *FindD3D11Format(ID3D11Device *d3ddevice,
+const d3d_format_t *FindD3D11Format(vlc_object_t *,
+                                    d3d11_device_t*,
                                     vlc_fourcc_t i_src_chroma,
                                     bool rgb_only,
                                     uint8_t bits_per_channel,
                                     bool allow_opaque,
                                     UINT supportFlags);
+#define FindD3D11Format(a,b,c,d,e,f,g)  FindD3D11Format(VLC_OBJECT(a),b,c,d,e,f,g)
 
 int AllocateTextures(vlc_object_t *, d3d11_device_t *, const d3d_format_t *,
                      const video_format_t *, unsigned pool_size, ID3D11Texture2D *textures[]);

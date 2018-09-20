@@ -191,7 +191,7 @@ static int ParseControlSeq( decoder_t *p_dec, subpicture_t *p_spu,
     spu_data_cmd.pi_alpha[3] = 0x0f;
 
     /* Initialize the structure */
-    p_spu->i_start = p_spu->i_stop = 0;
+    p_spu->i_start = p_spu->i_stop = VLC_TICK_INVALID;
     p_spu->b_ephemer = false;
 
     memset( p_spu_properties, 0, sizeof(*p_spu_properties) );
@@ -215,7 +215,7 @@ static int ParseControlSeq( decoder_t *p_dec, subpicture_t *p_spu,
             b_cmd_offset = false;
             b_cmd_alpha = false;
             /* Get the control sequence date */
-            date = (vlc_tick_t)GetWBE( &p_sys->buffer[i_index] ) * 11000;
+            date = VLC_TICK_FROM_MS(GetWBE( &p_sys->buffer[i_index] ) * 11);
 
             /* Next offset */
             i_cur_seq = i_index;
@@ -416,7 +416,7 @@ static int ParseControlSeq( decoder_t *p_dec, subpicture_t *p_spu,
         return VLC_EGENERIC;
     }
 
-    if( !p_spu->i_start )
+    if( p_spu->i_start == VLC_TICK_INVALID )
     {
         msg_Err( p_dec, "no `start display' command" );
         return VLC_EGENERIC;
@@ -425,7 +425,7 @@ static int ParseControlSeq( decoder_t *p_dec, subpicture_t *p_spu,
     if( p_spu->i_stop <= p_spu->i_start && !p_spu->b_ephemer )
     {
         /* This subtitle will live for 5 seconds or until the next subtitle */
-        p_spu->i_stop = p_spu->i_start + (vlc_tick_t)500 * 11000;
+        p_spu->i_stop = p_spu->i_start + VLC_TICK_FROM_MS(500 * 11);
         p_spu->b_ephemer = true;
     }
 
