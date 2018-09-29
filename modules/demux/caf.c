@@ -335,7 +335,7 @@ static inline vlc_tick_t FrameSpanGetTime( frame_span_t *span, uint32_t i_sample
     if( !i_sample_rate )
         return VLC_TICK_INVALID;
 
-    return ( span->i_samples * CLOCK_FREQ ) / i_sample_rate + VLC_TICK_0;
+    return vlc_tick_from_samples( span->i_samples, i_sample_rate) + VLC_TICK_0;
 }
 
 /* SetSpanWithSample returns the span from the beginning of the file up to and
@@ -1017,12 +1017,12 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_GET_LENGTH:
             *va_arg( args, vlc_tick_t * ) =
-                CLOCK_FREQ * ( i_num_samples / p_sys->fmt.audio.i_rate );
+                vlc_tick_from_samples( i_num_samples, p_sys->fmt.audio.i_rate );
             return VLC_SUCCESS;
 
         case DEMUX_GET_TIME:
             *va_arg( args, vlc_tick_t * ) =
-                CLOCK_FREQ * ( p_sys->position.i_samples / p_sys->fmt.audio.i_rate );
+                vlc_tick_from_samples( p_sys->position.i_samples, p_sys->fmt.audio.i_rate );
             return VLC_SUCCESS;
 
         case DEMUX_GET_POSITION:
@@ -1039,7 +1039,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_SET_TIME:
-            i_sample = va_arg( args, vlc_tick_t ) * p_sys->fmt.audio.i_rate / CLOCK_FREQ;
+            i_sample =
+                samples_from_vlc_tick( va_arg( args, vlc_tick_t ), p_sys->fmt.audio.i_rate );
             if( SetSpanWithSample( p_demux, &position, i_sample ))
                 return VLC_EGENERIC;
             p_sys->position = position;

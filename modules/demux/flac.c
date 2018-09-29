@@ -726,8 +726,8 @@ static int  ParseHeaders( demux_t *p_demux, es_format_t *p_fmt )
             p_fmt->audio.i_channels = p_sys->stream_info.channels;
             p_fmt->audio.i_bitspersample = p_sys->stream_info.bits_per_sample;
             if( p_sys->stream_info.sample_rate > 0 )
-                p_sys->i_length = p_sys->stream_info.total_samples * CLOCK_FREQ
-                                / p_sys->stream_info.sample_rate;
+                p_sys->i_length = vlc_tick_from_samples(p_sys->stream_info.total_samples,
+                                  p_sys->stream_info.sample_rate);
 
             continue;
         }
@@ -784,7 +784,7 @@ static void ParseSeekTable( demux_t *p_demux, const uint8_t *p_data, size_t i_da
             break;
 
         s = xmalloc( sizeof (*s) );
-        s->i_time_offset = i_sample * CLOCK_FREQ / i_sample_rate;
+        s->i_time_offset = vlc_tick_from_samples(i_sample, i_sample_rate);
         s->i_byte_offset = GetQWBE( &p_data[4+18*i+8] );
 
         /* Check for duplicate entry */

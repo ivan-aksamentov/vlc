@@ -77,9 +77,9 @@ size_t AES3AudioBuffer::FramesToBytes(unsigned f) const
     return (size_t) f * sizeof(uint16_t) * buffersubframes;
 }
 
-int64_t AES3AudioBuffer::FramesToDuration(unsigned f) const
+vlc_tick_t AES3AudioBuffer::FramesToDuration(unsigned f) const
 {
-    return CLOCK_FREQ * f / 48000;
+    return vlc_tick_from_samples(f, 48000);
 }
 
 unsigned AES3AudioBuffer::BytesToFrames(size_t s) const
@@ -87,9 +87,9 @@ unsigned AES3AudioBuffer::BytesToFrames(size_t s) const
     return s / (sizeof(uint16_t) * buffersubframes);
 }
 
-unsigned AES3AudioBuffer::TicksDurationToFrames(int64_t t) const
+unsigned AES3AudioBuffer::TicksDurationToFrames(vlc_tick_t t) const
 {
-    return t * 48000 / CLOCK_FREQ;
+    return samples_from_vlc_tick(t, 48000);
 }
 
 void AES3AudioBuffer::flushConsumed()

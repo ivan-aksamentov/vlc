@@ -392,7 +392,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         case DEMUX_GET_LENGTH:
             if( p_sys->i_mux_rate > 0 )
             {
-                *va_arg( args, vlc_tick_t * ) = CLOCK_FREQ * ( stream_Size( p_demux->s ) / 50 ) / p_sys->i_mux_rate;
+                *va_arg( args, vlc_tick_t * ) = vlc_tick_from_samples( stream_Size( p_demux->s ) / 50, p_sys->i_mux_rate);
                 return VLC_SUCCESS;
             }
             *va_arg( args, vlc_tick_t * ) = 0;
@@ -613,7 +613,7 @@ static int ReadNSVs( demux_t *p_demux )
     else if( header[16] != 0 )
     {
         /* Integer frame rate */
-        p_sys->i_pcr_inc = CLOCK_FREQ / header[16];
+        p_sys->i_pcr_inc = vlc_tick_from_samples(1, header[16]);
     }
     else
     {

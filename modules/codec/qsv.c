@@ -303,16 +303,6 @@ typedef struct
 static block_t *Encode(encoder_t *, picture_t *);
 
 
-static inline vlc_tick_t qsv_timestamp_to_mtime(int64_t mfx_ts)
-{
-    return FROM_SCALE_NZ(mfx_ts);
-}
-
-static inline uint64_t qsv_mtime_to_timestamp(vlc_tick_t vlc_ts)
-{
-    return TO_SCALE_NZ(vlc_ts);
-}
-
 static void clear_unused_frames(encoder_sys_t *sys)
 {
     QSVFrame *cur = sys->work_frames;
@@ -686,8 +676,8 @@ static void qsv_set_block_flags(block_t *block, uint16_t frame_type)
  */
 static void qsv_set_block_ts(encoder_t *enc, encoder_sys_t *sys, block_t *block, mfxBitstream *bs)
 {
-    block->i_pts = qsv_timestamp_to_mtime(bs->TimeStamp) + sys->offset_pts;
-    block->i_dts = qsv_timestamp_to_mtime(bs->DecodeTimeStamp) + sys->offset_pts;
+    block->i_pts = FROM_SCALE_NZ(bs->TimeStamp) + sys->offset_pts;
+    block->i_dts = FROM_SCALE_NZ(bs->DecodeTimeStamp) + sys->offset_pts;
 
     /* HW encoder (with old driver versions) and some parameters
        combinations doesn't set the DecodeTimeStamp field so we warn
@@ -730,9 +720,8 @@ static block_t *qsv_synchronize_block(encoder_t *enc, async_task_t *task)
     /*         task->bs.FrameType, task->bs.TimeStamp, block->i_pts, task->bs.DecodeTimeStamp, *task->syncp); */
 
     /* Copied from x264.c: This isn't really valid for streams with B-frames */
-    block->i_length = CLOCK_FREQ *
-        enc->fmt_in.video.i_frame_rate_base /
-        enc->fmt_in.video.i_frame_rate;
+    block->i_length = vlc_tick_from_samples( enc->fmt_in.video.i_frame_rate_base,
+                                             enc->fmt_in.video.i_frame_rate );
 
     // Buggy DTS (value comes from experiments)
     if (task->bs.DecodeTimeStamp < -10000)
@@ -780,7 +769,7 @@ static int submit_frame(encoder_t *enc, picture_t *pic, QSVFrame **new_frame)
     qf->surface.Data.Y         = qf->pic->p[0].p_pixels;
     qf->surface.Data.UV        = qf->pic->p[1].p_pixels;
 
-    qf->surface.Data.TimeStamp = qsv_mtime_to_timestamp(pic->date - sys->offset_pts);
+    qf->surface.Data.TimeStamp = TO_SCALE_NZ(pic->date - sys->offset_pts);
 
     *new_frame = qf;
 

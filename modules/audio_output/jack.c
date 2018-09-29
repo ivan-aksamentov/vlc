@@ -180,8 +180,8 @@ static int Start( audio_output_t *p_aout, audio_sample_format_t *restrict fmt )
         goto error_out;
     }
 
-    const size_t buf_sz = AOUT_MAX_ADVANCE_TIME * fmt->i_rate *
-        fmt->i_bytes_per_frame / CLOCK_FREQ;
+    const size_t buf_sz =
+        samples_from_vlc_tick(AOUT_MAX_ADVANCE_TIME, fmt->i_rate * fmt->i_bytes_per_frame);
     p_sys->p_jack_ringbuffer = jack_ringbuffer_create( buf_sz );
 
     if( p_sys->p_jack_ringbuffer == NULL )
@@ -352,9 +352,9 @@ static int TimeGet(audio_output_t *p_aout, vlc_tick_t *delay)
     jack_ringbuffer_t *rb = p_sys->p_jack_ringbuffer;
     const size_t bytes_per_frame = p_sys->i_channels * sizeof(jack_sample_t);
 
-    *delay = (p_sys->latency +
-            (jack_ringbuffer_read_space(rb) / bytes_per_frame)) *
-        CLOCK_FREQ / p_sys->i_rate;
+    *delay = p_sys->latency +
+            vlc_tick_from_samples(jack_ringbuffer_read_space(rb) / bytes_per_frame,
+                                  p_sys->i_rate);
 
     return 0;
 }

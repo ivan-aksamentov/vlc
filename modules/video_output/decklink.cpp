@@ -727,7 +727,7 @@ static int OpenDecklink(vout_display_t *vd, decklink_sys_t *sys)
 
     /* start */
     result = sys->p_output->StartScheduledPlayback(
-        SEC_FROM_VLC_TICK(vlc_tick_now() * sys->timescale), sys->timescale, 1.0);
+        samples_from_vlc_tick(vlc_tick_now(), sys->timescale), sys->timescale, 1.0);
     CHECK("Could not start playback");
 
     p_config->Release();
@@ -1097,7 +1097,7 @@ static void Flush (audio_output_t *aout, bool drain)
     if (drain) {
         uint32_t samples;
         sys->p_output->GetBufferedAudioSampleFrameCount(&samples);
-        vlc_tick_sleep(CLOCK_FREQ * samples / sys->i_rate);
+        vlc_tick_sleep(vlc_tick_from_samples(samples, sys->i_rate));
     } else if (sys->p_output->FlushBufferedAudioSamples() == E_FAIL)
         msg_Err(aout, "Flush failed");
 }

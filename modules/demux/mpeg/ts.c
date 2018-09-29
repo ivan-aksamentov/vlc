@@ -1310,7 +1310,7 @@ static block_t *J2K_Parse( demux_t *p_demux, block_t *p_block, bool b_interlaced
     uint16_t i_num = GetWBE( &p_buf[10] );
     if( i_den == 0 )
         goto invalid;
-    p_block->i_length = CLOCK_FREQ * i_den / i_num;
+    p_block->i_length = vlc_tick_from_samples( i_den, i_num );
 
     p_block->p_buffer += (b_interlaced) ? 48 : 38;
     p_block->i_buffer -= (b_interlaced) ? 48 : 38;
@@ -1349,7 +1349,7 @@ static block_t * ConvertPESBlock( demux_t *p_demux, ts_es_t *p_es,
              * In this case use the last PCR + 40ms */
             stime_t i_pcr = p_es->p_program->pcr.i_current;
             if( SETANDVALID(i_pcr) )
-                p_block->i_pts = FROM_SCALE(i_pcr) + 40000;
+                p_block->i_pts = FROM_SCALE(i_pcr) + VLC_TICK_FROM_MS(40);
         }
     }
     else if( p_es->fmt.i_codec == VLC_CODEC_ARIB_A ||

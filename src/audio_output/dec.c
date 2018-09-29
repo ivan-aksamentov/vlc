@@ -209,7 +209,7 @@ static void aout_DecSilence (audio_output_t *aout, vlc_tick_t length, vlc_tick_t
 {
     aout_owner_t *owner = aout_owner (aout);
     const audio_sample_format_t *fmt = &owner->mixer_format;
-    size_t frames = (fmt->i_rate * length) / CLOCK_FREQ;
+    size_t frames = samples_from_vlc_tick(length, fmt->i_rate);
 
     block_t *block = block_Alloc (frames * fmt->i_bytes_per_frame
                                   / fmt->i_frame_length);
@@ -352,8 +352,8 @@ int aout_DecPlay(audio_output_t *aout, block_t *block)
 
     assert (block->i_pts != VLC_TICK_INVALID);
 
-    block->i_length = CLOCK_FREQ * block->i_nb_samples
-                                 / owner->input_format.i_rate;
+    block->i_length = vlc_tick_from_samples( block->i_nb_samples,
+                                   owner->input_format.i_rate );
 
     int ret = aout_CheckReady (aout);
     if (unlikely(ret == AOUT_DEC_FAILED))

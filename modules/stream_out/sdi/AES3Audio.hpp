@@ -59,9 +59,9 @@ namespace sdi_sout
 
         private:
             size_t   FramesToBytes(unsigned) const;
-            int64_t  FramesToDuration(unsigned) const;
+            vlc_tick_t FramesToDuration(unsigned) const;
             unsigned BytesToFrames(size_t) const;
-            unsigned TicksDurationToFrames(int64_t) const;
+            unsigned TicksDurationToFrames(vlc_tick_t) const;
             block_bytestream_t bytestream;
             mutable std::mutex bytestream_mutex;
             uint8_t buffersubframes;
