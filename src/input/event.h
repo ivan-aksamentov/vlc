@@ -182,6 +182,14 @@ static inline void input_SendEventMetaEpg(input_thread_t *p_input)
     });
 }
 
+static inline void input_SendEventSubsFPS(input_thread_t *p_input, float fps)
+{
+    input_SendEvent(p_input, &(struct vlc_input_event) {
+        .type = INPUT_EVENT_SUBS_FPS,
+        .subs_fps = fps,
+    });
+}
+
 /*****************************************************************************
  * Event for es_out.c
  *****************************************************************************/
@@ -192,6 +200,18 @@ static inline void input_SendEventProgramAdd(input_thread_t *p_input,
         .type = INPUT_EVENT_PROGRAM,
         .program = {
             .action = VLC_INPUT_PROGRAM_ADDED,
+            .id = i_program,
+            .title = psz_text
+        }
+    });
+}
+static inline void input_SendEventProgramUpdated(input_thread_t *p_input,
+                                int i_program, const char *psz_text)
+{
+    input_SendEvent(p_input, &(struct vlc_input_event) {
+        .type = INPUT_EVENT_PROGRAM,
+        .program = {
+            .action = VLC_INPUT_PROGRAM_UPDATED,
             .id = i_program,
             .title = psz_text
         }
@@ -247,6 +267,23 @@ static inline void input_SendEventParsing(input_thread_t *p_input,
     input_SendEvent(p_input, &(struct vlc_input_event) {
         .type = INPUT_EVENT_SUBITEMS,
         .subitems = p_root,
+    });
+}
+
+static inline void input_SendEventVbiPage(input_thread_t *p_input, unsigned page)
+{
+    input_SendEvent(p_input, &(struct vlc_input_event) {
+        .type = INPUT_EVENT_VBI_PAGE,
+        .vbi_page = page,
+    });
+}
+
+static inline void input_SendEventVbiTransparency(input_thread_t *p_input,
+                                                  bool transparent)
+{
+    input_SendEvent(p_input, &(struct vlc_input_event) {
+        .type = INPUT_EVENT_VBI_TRANSPARENCY,
+        .vbi_transparent = transparent,
     });
 }
 

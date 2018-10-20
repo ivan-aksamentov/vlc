@@ -76,6 +76,9 @@ static int RecordCallback( vlc_object_t *p_this, char const *psz_cmd,
 static int FrameNextCallback( vlc_object_t *p_this, char const *psz_cmd,
                               vlc_value_t oldval, vlc_value_t newval,
                               void *p_data );
+static int SubFpsCallback( vlc_object_t *p_this, char const *psz_cmd,
+                           vlc_value_t oldval, vlc_value_t newval,
+                           void *p_data );
 static void input_LegacyVarTitle( input_thread_t *p_input, int i_title );
 static void input_LegacyVarNavigation( input_thread_t *p_input );
 
@@ -110,6 +113,7 @@ static const vlc_input_callback_t p_input_callbacks[] =
     CALLBACK( "spu-es", EsSpuCallback ),
     CALLBACK( "record", RecordCallback ),
     CALLBACK( "frame-next", FrameNextCallback ),
+    CALLBACK( "sub-fps", SubFpsCallback ),
 
     CALLBACK( NULL, NULL )
 };
@@ -313,6 +317,11 @@ void input_LegacyEvents( input_thread_t *p_input,
                     break;
                 case VLC_INPUT_PROGRAM_DELETED:
                     VarListDel( p_input, "program", event->program.id );
+                    break;
+                case VLC_INPUT_PROGRAM_UPDATED:
+                    VarListDel( p_input, "program", event->program.id );
+                    VarListAdd( p_input, "program", event->program.id,
+                                event->program.title );
                     break;
                 case VLC_INPUT_PROGRAM_SELECTED:
                     VarListSelect( p_input, "program", event->program.id );
@@ -528,6 +537,7 @@ void input_LegacyVarInit ( input_thread_t *p_input )
 
     /* Special "intf-event" variable. */
     var_Create( p_input, "intf-event", VLC_VAR_INTEGER );
+    var_Create( p_input, "sub-fps", VLC_VAR_FLOAT | VLC_VAR_DOINHERIT );
 
     /* Add all callbacks
      * XXX we put callback only in non preparsing mode. We need to create the variable
@@ -790,6 +800,9 @@ void input_ConfigVarInit ( input_thread_t *p_input )
     var_Create( p_input, "meta-description", VLC_VAR_STRING|VLC_VAR_DOINHERIT);
     var_Create( p_input, "meta-date", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
     var_Create( p_input, "meta-url", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
+
+    /* Inherited by demux/subtitle.c */
+    var_Create( p_input, "sub-original-fps", VLC_VAR_FLOAT );
 }
 
 /*****************************************************************************
@@ -1105,3 +1118,15 @@ static int FrameNextCallback( vlc_object_t *p_this, char const *psz_cmd,
     return VLC_SUCCESS;
 }
 
+static int SubFpsCallback( vlc_object_t *p_this, char const *psz_cmd,
+                           vlc_value_t oldval, vlc_value_t newval,
+                           void *p_data )
+{
+    input_thread_t *p_input = (input_thread_t*)p_this;
+    VLC_UNUSED(psz_cmd); VLC_UNUSED(oldval); VLC_UNUSED(p_data);
+    VLC_UNUSED(newval);
+
+    input_ControlPushHelper( p_input, INPUT_CONTROL_SET_SUBS_FPS, &newval );
+
+    return VLC_SUCCESS;
+}

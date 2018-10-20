@@ -48,11 +48,6 @@
 static int  Open ( vlc_object_t *p_this );
 static void Close( vlc_object_t *p_this );
 
-#define SUB_DELAY_LONGTEXT \
-    N_("Apply a delay to all subtitles (in 1/10s, eg 100 means 10s).")
-#define SUB_FPS_LONGTEXT \
-    N_("Override the normal frames per second settings. " \
-    "This will only work with MicroDVD and SubRIP (SRT) subtitles.")
 #define SUB_TYPE_LONGTEXT \
     N_("Force the subtiles format. Selecting \"auto\" means autodetection and should always work.")
 #define SUB_DESCRIPTION_LONGTEXT \
@@ -72,12 +67,6 @@ vlc_module_begin ()
     set_capability( "demux", 0 )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_DEMUX )
-    add_float( "sub-fps", 0.0,
-               N_("Frames per Second"),
-               SUB_FPS_LONGTEXT, true )
-    add_integer( "sub-delay", 0,
-               N_("Subtitle delay"),
-               SUB_DELAY_LONGTEXT, true )
     add_string( "sub-type", "auto", N_("Subtitle format"),
                 SUB_TYPE_LONGTEXT, true )
         change_string_list( ppsz_sub_type, ppsz_sub_type )
@@ -172,6 +161,7 @@ typedef struct
     bool        b_slave;
     bool        b_first_time;
 
+    double      f_rate;
     vlc_tick_t  i_next_demux_date;
 
     struct
@@ -321,6 +311,7 @@ static int Open ( vlc_object_t *p_this )
     p_sys->b_slave = false;
     p_sys->b_first_time = true;
     p_sys->i_next_demux_date = 0;
+    p_sys->f_rate = 1.0;
 
     p_sys->pf_convert = ToTextBlock;
 
@@ -335,7 +326,7 @@ static int Open ( vlc_object_t *p_this )
     p_sys->props.sami.psz_start     = NULL;
 
     /* Get the FPS */
-    f_fps = var_CreateGetFloat( p_demux, "sub-fps" );
+    f_fps = var_CreateGetFloat( p_demux, "sub-original-fps" );
     if( f_fps >= 1.f )
     {
         p_sys->props.i_microsecperframe = llroundf( (float)CLOCK_FREQ / f_fps );
@@ -676,12 +667,6 @@ static int Open ( vlc_object_t *p_this )
 
     msg_Dbg(p_demux, "loaded %zu subtitles", p_sys->subtitles.i_count );
 
-    /* Fix subtitle (order and time) *** */
-    p_sys->subtitles.i_current = 0;
-    p_sys->i_length = 0;
-    if( p_sys->subtitles.i_count > 0 )
-        p_sys->i_length = p_sys->subtitles.p_array[p_sys->subtitles.i_count-1].i_stop;
-
     /* *** add subtitle ES *** */
     if( p_sys->props.i_type == SUB_TYPE_SSA1 ||
              p_sys->props.i_type == SUB_TYPE_SSA2_4 ||
@@ -697,6 +682,11 @@ static int Open ( vlc_object_t *p_this )
     }
     else
         es_format_Init( &fmt, SPU_ES, VLC_CODEC_SUBT );
+
+    p_sys->subtitles.i_current = 0;
+    p_sys->i_length = 0;
+    if( p_sys->subtitles.i_count > 0 )
+        p_sys->i_length = p_sys->subtitles.p_array[p_sys->subtitles.i_count-1].i_stop;
 
     /* Stupid language detection in the filename */
     char * psz_language = get_language_from_filename( p_demux->psz_filepath );
@@ -746,6 +736,19 @@ static void Close( vlc_object_t *p_this )
     free( p_sys );
 }
 
+static void
+ResetCurrentIndex( demux_t *p_demux )
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+    for( size_t i = 0; i < p_sys->subtitles.i_count; i++ )
+    {
+        if( p_sys->subtitles.p_array[i].i_start * p_sys->f_rate >
+            p_sys->i_next_demux_date && i > 0 )
+            break;
+        p_sys->subtitles.i_current = i;
+    }
+}
+
 /*****************************************************************************
  * Control:
  *****************************************************************************/
@@ -765,22 +768,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_GET_TIME:
-            *va_arg( args, vlc_tick_t * ) = p_sys->i_next_demux_date - var_GetInteger( p_demux->obj.parent, "spu-delay" );
-            if( *va_arg( args, vlc_tick_t * ) < 0 )
-               *va_arg( args, vlc_tick_t * ) = p_sys->i_next_demux_date;
+            *va_arg( args, vlc_tick_t * ) = p_sys->i_next_demux_date;
             return VLC_SUCCESS;
 
         case DEMUX_SET_TIME:
         {
             p_sys->b_first_time = true;
             p_sys->i_next_demux_date = va_arg( args, vlc_tick_t );
-            for( size_t i = 0; i < p_sys->subtitles.i_count; i++ )
-            {
-                if( p_sys->subtitles.p_array[i].i_start > p_sys->i_next_demux_date &&
-                    i > 0 )
-                    break;
-                p_sys->subtitles.i_current = i;
-            }
+            ResetCurrentIndex( p_demux );
             return VLC_SUCCESS;
         }
 
@@ -792,9 +787,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             }
             else if( p_sys->subtitles.i_count > 0 && p_sys->i_length )
             {
-                *pf = p_sys->i_next_demux_date - var_GetInteger( p_demux->obj.parent, "spu-delay" );
-                if( *pf < 0 )
-                    *pf = p_sys->i_next_demux_date;
+                *pf = p_sys->i_next_demux_date;
                 *pf /= p_sys->i_length;
             }
             else
@@ -812,6 +805,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             }
             break;
 
+        case DEMUX_CAN_CONTROL_RATE:
+            *va_arg( args, bool * ) = true;
+            return VLC_SUCCESS;
+        case DEMUX_SET_RATE:
+            p_sys->f_rate = (double)INPUT_RATE_DEFAULT / *va_arg( args, int * );
+            ResetCurrentIndex( p_demux );
+            return VLC_SUCCESS;
         case DEMUX_SET_NEXT_DEMUX_TIME:
             p_sys->b_slave = true;
             p_sys->i_next_demux_date = va_arg( args, vlc_tick_t ) - VLC_TICK_0;
@@ -843,12 +843,11 @@ static int Demux( demux_t *p_demux )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
 
-    vlc_tick_t i_barrier = p_sys->i_next_demux_date - var_GetInteger( p_demux->obj.parent, "spu-delay" );
-    if( i_barrier < 0 )
-        i_barrier = p_sys->i_next_demux_date;
+    vlc_tick_t i_barrier = p_sys->i_next_demux_date;
 
     while( p_sys->subtitles.i_current < p_sys->subtitles.i_count &&
-           p_sys->subtitles.p_array[p_sys->subtitles.i_current].i_start <= i_barrier )
+           ( p_sys->subtitles.p_array[p_sys->subtitles.i_current].i_start *
+             p_sys->f_rate ) <= i_barrier )
     {
         const subtitle_t *p_subtitle = &p_sys->subtitles.p_array[p_sys->subtitles.i_current];
 
@@ -864,9 +863,9 @@ static int Demux( demux_t *p_demux )
             if( p_block )
             {
                 p_block->i_dts =
-                p_block->i_pts = VLC_TICK_0 + p_subtitle->i_start;
+                p_block->i_pts = VLC_TICK_0 + p_subtitle->i_start * p_sys->f_rate;
                 if( p_subtitle->i_stop >= 0 && p_subtitle->i_stop >= p_subtitle->i_start )
-                    p_block->i_length = p_subtitle->i_stop - p_subtitle->i_start;
+                    p_block->i_length = (p_subtitle->i_stop - p_subtitle->i_start) * p_sys->f_rate;
 
                 es_out_Send( p_demux->out, p_sys->es, p_block );
             }
@@ -1008,9 +1007,9 @@ static int ParseMicroDvd( vlc_object_t *p_obj, subs_properties_t *p_props,
                 break;
 
             /* We found a possible setting of the framerate "{1}{1}23.976" */
-            /* Check if it's usable, and if the sub-fps is not set */
+            /* Check if it's usable, and if the sub-original-fps is not set */
             float f_fps = us_strtof( psz_text, NULL );
-            if( f_fps > 0.f && var_GetFloat( p_obj, "sub-fps" ) <= 0.f )
+            if( f_fps > 0.f && var_GetFloat( p_obj, "sub-original-fps" ) <= 0.f )
                 p_props->i_microsecperframe = llroundf((float)CLOCK_FREQ / f_fps);
         }
         free( psz_text );
@@ -1727,8 +1726,8 @@ static int ParseMPSub( vlc_object_t *p_obj, subs_properties_t *p_props,
             {
                 float f_fps = us_strtof( psz_temp, NULL );
 
-                if( f_fps > 0.f && var_GetFloat( p_obj, "sub-fps" ) <= 0.f )
-                    var_SetFloat( p_obj, "sub-fps", f_fps );
+                if( f_fps > 0.f && var_GetFloat( p_obj, "sub-original-fps" ) <= 0.f )
+                    var_SetFloat( p_obj, "sub-original-fps", f_fps );
 
                 p_props->mpsub.i_factor = 1;
                 free( psz_temp );
@@ -2358,7 +2357,7 @@ static int ParseSCC( vlc_object_t *p_obj, subs_properties_t *p_props,
         { 6000, { 60, 1 },       false },
     };
     const struct rates *p_rate = &framerates[3];
-    float f_fps = var_GetFloat( p_obj, "sub-fps" );
+    float f_fps = var_GetFloat( p_obj, "sub-original-fps" );
     if( f_fps > 1.0 )
     {
         for( size_t i=0; i<ARRAY_SIZE(framerates); i++ )

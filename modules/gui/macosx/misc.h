@@ -49,24 +49,6 @@
 
 @end
 
-
-/*****************************************************************************
- * VLCMainWindowSplitView interface
- *****************************************************************************/
-@interface VLCMainWindowSplitView : NSSplitView
-
-@end
-
-/*****************************************************************************
- * VLCThreePartImageView interface
- *****************************************************************************/
-@interface VLCThreePartImageView : NSView
-
-- (void)setImagesLeft:(NSImage *)left middle: (NSImage *)middle right:(NSImage *)right;
-
-@end
-
-
 /*****************************************************************************
  * PositionFormatter interface
  *

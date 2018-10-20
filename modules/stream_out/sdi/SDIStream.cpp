@@ -129,7 +129,7 @@ StreamID& StreamID::operator=(const StreamID &other)
     return *this;
 }
 
-bool StreamID::operator==(const StreamID &other)
+bool StreamID::operator==(const StreamID &other) const
 {
     if(stream_id == -1 || other.stream_id == -1)
         return sequence_id == other.sequence_id;
@@ -527,24 +527,20 @@ void AudioDecodedStream::setCallbacks()
     p_decoder->cbs = &dec_cbs;
 }
 
-CaptionsStream::CaptionsStream(vlc_object_t *p_obj, const StreamID &id,
+
+AbstractRawStream::AbstractRawStream(vlc_object_t *p_obj, const StreamID &id,
                                AbstractStreamOutputBuffer *buffer)
     : AbstractStream(p_obj, id, buffer)
 {
 
 }
 
-CaptionsStream::~CaptionsStream()
+AbstractRawStream::~AbstractRawStream()
 {
     FlushQueued();
 }
 
-bool CaptionsStream::init(const es_format_t *fmt)
-{
-    return (fmt->i_codec == VLC_CODEC_CEA608);
-}
-
-int CaptionsStream::Send(block_t *p_block)
+int AbstractRawStream::Send(block_t *p_block)
 {
     if(p_block->i_buffer)
         outputbuffer->Enqueue(p_block);
@@ -553,19 +549,137 @@ int CaptionsStream::Send(block_t *p_block)
     return VLC_SUCCESS;
 }
 
-void CaptionsStream::Flush()
+void AbstractRawStream::Flush()
+{
+    FlushQueued();
+}
+
+void AbstractRawStream::Drain()
 {
 
 }
 
-void CaptionsStream::Drain()
-{
-
-}
-
-void CaptionsStream::FlushQueued()
+void AbstractRawStream::FlushQueued()
 {
     block_t *p;
     while((p = reinterpret_cast<block_t *>(outputbuffer->Dequeue())))
         block_Release(p);
 }
+
+
+AbstractReorderedStream::AbstractReorderedStream(vlc_object_t *p_obj, const StreamID &id,
+                                                 AbstractStreamOutputBuffer *buffer)
+    : AbstractRawStream(p_obj, id, buffer)
+{
+    reorder_depth = 0;
+    do_reorder = false;
+}
+
+AbstractReorderedStream::~AbstractReorderedStream()
+{
+}
+
+int AbstractReorderedStream::Send(block_t *p_block)
+{
+    auto it = reorder.begin();
+    if(do_reorder)
+    {
+        for(; it != reorder.end(); ++it)
+        {
+            if((*it)->i_pts == VLC_TICK_INVALID)
+                continue;
+            if(p_block->i_pts < (*it)->i_pts)
+            {
+                /* found insertion point */
+                if(it == reorder.begin() &&
+                   reorder_depth < 16 && reorder.size() < reorder_depth)
+                      reorder_depth++;
+                break;
+            }
+        }
+
+        reorder.insert(it, p_block);
+
+        if(reorder.size() <= reorder_depth + 1)
+            return VLC_SUCCESS;
+
+        p_block = reorder.front();
+        reorder.pop_front();
+    }
+
+    return AbstractRawStream::Send(p_block);
+}
+
+void AbstractReorderedStream::Flush()
+{
+    Drain();
+    FlushQueued();
+}
+
+void AbstractReorderedStream::Drain()
+{
+    while(!reorder.empty())
+    {
+        AbstractRawStream::Send(reorder.front());
+        reorder.pop_front();
+    }
+}
+
+void AbstractReorderedStream::setReorder(size_t r)
+{
+    reorder_depth = r;
+    do_reorder = true;
+}
+
+AudioCompressedStream::AudioCompressedStream(vlc_object_t *p_obj, const StreamID &id,
+                                             AbstractStreamOutputBuffer *buffer)
+    : AbstractRawStream(p_obj, id, buffer)
+{
+}
+
+AudioCompressedStream::~AudioCompressedStream()
+{
+}
+
+int AudioCompressedStream::Send(block_t *p_block)
+{
+    const size_t i_payload = p_block->i_buffer;
+    const size_t i_pad = (p_block->i_buffer & 1) ? 1 : 0;
+    p_block = block_Realloc(p_block, 12, p_block->i_buffer + i_pad);
+    if(!p_block)
+        return VLC_EGENERIC;
+    /* Convert to AES3 Payload */
+    SetWBE(&p_block->p_buffer[0], 0x0000); /* Extra 0000 */
+    SetWBE(&p_block->p_buffer[2], 0x0000); /* see S337 Annex B */
+    SetWBE(&p_block->p_buffer[4], 0xF872); /* Pa Start code/Preamble */
+    SetWBE(&p_block->p_buffer[6], 0x4E1F); /* Pb Start code/Preamble */
+    SetWBE(&p_block->p_buffer[8], 0x0001); /* A52 Burst code */
+    SetWBE(&p_block->p_buffer[10], i_payload);
+    if(i_pad)
+        p_block->p_buffer[p_block->i_buffer - 1] = 0x00;
+    return AbstractRawStream::Send(p_block);
+}
+
+bool AudioCompressedStream::init(const es_format_t *fmt)
+{
+    return (fmt->i_codec == VLC_CODEC_A52);
+}
+
+CaptionsStream::CaptionsStream(vlc_object_t *p_obj, const StreamID &id,
+                               AbstractStreamOutputBuffer *buffer)
+    : AbstractReorderedStream(p_obj, id, buffer)
+{
+
+}
+
+CaptionsStream::~CaptionsStream()
+{
+}
+
+bool CaptionsStream::init(const es_format_t *fmt)
+{
+    if(fmt->subs.cc.i_reorder_depth >= 0)
+        setReorder(fmt->subs.cc.i_reorder_depth);
+    return (fmt->i_codec == VLC_CODEC_CEA608);
+}
+

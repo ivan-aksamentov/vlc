@@ -65,86 +65,6 @@ NSString *const kVLCMediaUnknown = @"Unknown";
 }
 
 #pragma mark -
-#pragma mark String utility
-
-/* i_width is in pixels */
-- (NSString *)wrapString:(NSString *)o_in_string toWidth:(int)i_width
-{
-    NSMutableString *o_wrapped;
-    NSString *o_out_string;
-    NSRange glyphRange, effectiveRange, charRange;
-    NSUInteger glyphIndex;
-    unsigned breaksInserted = 0;
-
-    NSTextStorage *o_storage = [[NSTextStorage alloc] initWithString: o_in_string
-                                                          attributes: [NSDictionary dictionaryWithObjectsAndKeys:
-                                                                       [NSFont labelFontOfSize: 0.0], NSFontAttributeName, nil]];
-    NSLayoutManager *o_layout_manager = [[NSLayoutManager alloc] init];
-    NSTextContainer *o_container = [[NSTextContainer alloc]
-                                    initWithContainerSize: NSMakeSize(i_width, 2000)];
-
-    [o_layout_manager addTextContainer: o_container];
-    [o_storage addLayoutManager: o_layout_manager];
-
-    o_wrapped = [o_in_string mutableCopy];
-    glyphRange = [o_layout_manager glyphRangeForTextContainer: o_container];
-
-    for (glyphIndex = glyphRange.location ; glyphIndex < NSMaxRange(glyphRange) ;
-        glyphIndex += effectiveRange.length) {
-        [o_layout_manager lineFragmentRectForGlyphAtIndex: glyphIndex
-                                           effectiveRange: &effectiveRange];
-        charRange = [o_layout_manager characterRangeForGlyphRange: effectiveRange
-                                                 actualGlyphRange: &effectiveRange];
-        if ([o_wrapped lineRangeForRange:
-            NSMakeRange(charRange.location + breaksInserted, charRange.length)].length > charRange.length) {
-            [o_wrapped insertString: @"\n" atIndex: NSMaxRange(charRange) + breaksInserted];
-            breaksInserted++;
-        }
-    }
-    o_out_string = [NSString stringWithString: o_wrapped];
-
-    return o_out_string;
-}
-
-- (NSString *)getCurrentTimeAsString:(input_thread_t *)p_input negative:(BOOL)b_negative
-{
-    assert(p_input != nil);
-
-    char psz_time[MSTRTIME_MAX_SIZE];
-    vlc_tick_t t = var_GetInteger(p_input, "time");
-
-    vlc_tick_t dur = input_item_GetDuration(input_GetItem(p_input));
-    if (b_negative && dur > 0) {
-        vlc_tick_t remaining = 0;
-        if (dur > t)
-            remaining = dur - t;
-        return [NSString stringWithFormat: @"-%s", secstotimestr(psz_time, (int)SEC_FROM_VLC_TICK(remaining))];
-    } else
-        return toNSStr(secstotimestr(psz_time, (int)SEC_FROM_VLC_TICK(t)));
-}
-
-- (NSString *)stringForTime:(long long int)time
-{
-    if (time > 0) {
-        long long positiveDuration = llabs(time);
-        if (positiveDuration > 3600)
-            return [NSString stringWithFormat:@"%s%01ld:%02ld:%02ld",
-                    time < 0 ? "-" : "",
-                    (long) (positiveDuration / 3600),
-                    (long)((positiveDuration / 60) % 60),
-                    (long) (positiveDuration % 60)];
-        else
-            return [NSString stringWithFormat:@"%s%02ld:%02ld",
-                    time < 0 ? "-" : "",
-                    (long)((positiveDuration / 60) % 60),
-                    (long) (positiveDuration % 60)];
-    } else {
-        // Return a string that represents an undefined time.
-        return @"--:--";
-    }
-}
-
-#pragma mark -
 #pragma mark Key Shortcuts
 
 static struct
@@ -354,34 +274,6 @@ NSString *toNSStr(const char *str) {
 #endif
 
     return theString;
-}
-
-#pragma mark -
-#pragma mark base64 helpers
-
-- (NSString *)b64Decode:(NSString *)string
-{
-    char *psz_decoded_string = vlc_b64_decode([string UTF8String]);
-    if(!psz_decoded_string)
-        return @"";
-
-    NSString *returnStr = [NSString stringWithFormat:@"%s", psz_decoded_string];
-    free(psz_decoded_string);
-
-    return returnStr;
-}
-
-- (NSString *)b64EncodeAndFree:(char *)psz_string
-{
-    char *psz_encoded_string = vlc_b64_encode(psz_string);
-    free(psz_string);
-    if(!psz_encoded_string)
-        return @"";
-
-    NSString *returnStr = [NSString stringWithFormat:@"%s", psz_encoded_string];
-    free(psz_encoded_string);
-
-    return returnStr;
 }
 
 - (NSString *) getBSDNodeFromMountPath:(NSString *)mountPath

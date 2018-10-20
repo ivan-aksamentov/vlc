@@ -46,8 +46,6 @@ struct input_stats;
 /* input_source_t: gathers all information per input source */
 typedef struct
 {
-    struct vlc_common_members obj;
-
     demux_t  *p_demux; /**< Demux object (most downstream) */
 
     /* Title infos for that input */
@@ -71,6 +69,10 @@ typedef struct
     bool b_rescale_ts;
     double f_fps;
 
+    /* sub-fps handling */
+    bool b_slave_sub;
+    unsigned i_sub_rate;
+
     /* */
     vlc_tick_t i_pts_delay;
 
@@ -82,20 +84,27 @@ typedef union
 {
     vlc_value_t val;
     vlc_viewpoint_t viewpoint;
+    vlc_es_id_t *id;
     struct {
         bool b_fast_seek;
-        bool b_absolute;
         vlc_tick_t i_val;
     } time;
     struct {
         bool b_fast_seek;
-        bool b_absolute;
         float f_val;
     } pos;
     struct {
         bool b_absolute;
         vlc_tick_t i_val;
     } delay;
+    struct {
+        vlc_es_id_t *id;
+        unsigned page;
+    } vbi_page;
+    struct {
+        vlc_es_id_t *id;
+        bool enabled;
+    } vbi_transparency;
 } input_control_param_t;
 
 typedef struct
@@ -170,6 +179,7 @@ typedef struct input_thread_private_t
     /* Slave sources (subs, and others) */
     int            i_slave;
     input_source_t **slave;
+    unsigned i_slave_subs_rate;
 
     /* Last ES added */
     enum es_format_category_e i_last_es_cat;
@@ -207,8 +217,10 @@ enum input_control_e
     INPUT_CONTROL_SET_RATE,
 
     INPUT_CONTROL_SET_POSITION,
+    INPUT_CONTROL_JUMP_POSITION,
 
     INPUT_CONTROL_SET_TIME,
+    INPUT_CONTROL_JUMP_TIME,
 
     INPUT_CONTROL_SET_PROGRAM,
 
@@ -233,6 +245,10 @@ enum input_control_e
     INPUT_CONTROL_SET_ES_BY_ID,
     INPUT_CONTROL_RESTART_ES_BY_ID,
 
+    INPUT_CONTROL_SET_ES,
+    INPUT_CONTROL_UNSET_ES,
+    INPUT_CONTROL_RESTART_ES,
+
     INPUT_CONTROL_SET_VIEWPOINT,    // new absolute viewpoint
     INPUT_CONTROL_SET_INITIAL_VIEWPOINT, // set initial viewpoint (generally from video)
     INPUT_CONTROL_UPDATE_VIEWPOINT, // update viewpoint relative to current
@@ -241,12 +257,16 @@ enum input_control_e
     INPUT_CONTROL_SET_SPU_DELAY,
 
     INPUT_CONTROL_ADD_SLAVE,
+    INPUT_CONTROL_SET_SUBS_FPS,
 
     INPUT_CONTROL_SET_RECORD_STATE,
 
     INPUT_CONTROL_SET_FRAME_NEXT,
 
     INPUT_CONTROL_SET_RENDERER,
+
+    INPUT_CONTROL_SET_VBI_PAGE,
+    INPUT_CONTROL_SET_VBI_TRANSPARENCY,
 };
 
 /* Internal helpers */
@@ -267,6 +287,16 @@ static inline void input_ControlPushHelper( input_thread_t *p_input, int i_type,
     {
         input_ControlPush( p_input, i_type, NULL );
     }
+}
+
+static inline void input_ControlPushEsHelper( input_thread_t *p_input, int i_type,
+                                              vlc_es_id_t *id )
+{
+    assert( i_type == INPUT_CONTROL_SET_ES || i_type == INPUT_CONTROL_UNSET_ES ||
+            i_type == INPUT_CONTROL_RESTART_ES );
+    input_ControlPush( p_input, i_type, &(input_control_param_t) {
+        .id = vlc_es_id_Hold( id ),
+    } );
 }
 
 bool input_Stopped( input_thread_t * );

@@ -39,6 +39,7 @@
 #include <limits.h>
 #include "../codec/cc.h"
 #include "heif.h"
+#include "../av1_unpack.h"
 
 /*****************************************************************************
  * Module descriptor
@@ -645,6 +646,10 @@ static block_t * MP4_Block_Convert( demux_t *p_demux, const mp4_track_t *p_track
             p_block->i_buffer = 0;
             break;
         }
+    }
+    else if( p_track->fmt.i_codec == VLC_CODEC_AV1 )
+    {
+        p_block = AV1_Unpack_Sample( p_block );
     }
     else if( p_track->fmt.i_original_fourcc == ATOM_rrtp )
     {

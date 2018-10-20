@@ -33,6 +33,10 @@
 
 #include <new>
 
+extern "C" {
+    #include "../av1_unpack.h"
+}
+
 #include <vlc_fs.h>
 #include <vlc_url.h>
 
@@ -647,6 +651,12 @@ void BlockDecode( demux_t *p_demux, KaxBlock *block, KaxSimpleBlock *simpleblock
                 p_block->p_buffer[1] = 0x00; // subtitle stream id
                 p_block->p_buffer[ p_block->i_buffer - 1 ] = 0x3f; // end marker
             }
+            break;
+
+          case VLC_CODEC_AV1:
+            p_block = AV1_Unpack_Sample( p_block );
+            if( unlikely( !p_block ) )
+                continue;
             break;
         }
 

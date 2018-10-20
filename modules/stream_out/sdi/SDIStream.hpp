@@ -26,6 +26,8 @@
 #include <vlc_codec.h>
 #include <queue>
 #include <mutex>
+#include <string>
+#include <list>
 
 namespace sdi_sout
 {
@@ -72,7 +74,7 @@ namespace sdi_sout
             StreamID(int);
             StreamID(int, int);
             StreamID& operator=(const StreamID &);
-            bool      operator==(const StreamID &);
+            bool      operator==(const StreamID &) const;
             std::string toString() const;
 
         private:
@@ -157,22 +159,54 @@ namespace sdi_sout
             aout_filters_t *p_filters;
     };
 
-    class CaptionsStream : public AbstractStream
+    class AbstractRawStream : public AbstractStream
+    {
+        public:
+            AbstractRawStream(vlc_object_t *, const StreamID &,
+                              AbstractStreamOutputBuffer *);
+            virtual ~AbstractRawStream();
+            virtual int Send(block_t*); /* impl */
+            virtual void Flush(); /* impl */
+            virtual void Drain(); /* impl */
+
+        protected:
+            void FlushQueued();
+    };
+
+    class AbstractReorderedStream : public AbstractRawStream
+    {
+        public:
+            AbstractReorderedStream(vlc_object_t *, const StreamID &,
+                                    AbstractStreamOutputBuffer *);
+            virtual ~AbstractReorderedStream();
+            virtual int Send(block_t*); /* impl */
+            virtual void Flush(); /* impl */
+            virtual void Drain(); /* impl */
+            void setReorder(size_t);
+
+        protected:
+            std::list<block_t *> reorder;
+            size_t reorder_depth;
+            bool do_reorder;
+    };
+
+    class AudioCompressedStream : public AbstractRawStream
+    {
+        public:
+            AudioCompressedStream(vlc_object_t *, const StreamID &,
+                                  AbstractStreamOutputBuffer *);
+            virtual ~AudioCompressedStream();
+            virtual int Send(block_t*); /* reimpl */
+            virtual bool init(const es_format_t *); /* impl */
+    };
+
+    class CaptionsStream : public AbstractReorderedStream
     {
         public:
             CaptionsStream(vlc_object_t *, const StreamID &,
                            AbstractStreamOutputBuffer *);
             virtual ~CaptionsStream();
             virtual bool init(const es_format_t *); /* impl */
-            virtual int Send(block_t*);
-            virtual void Flush();
-            virtual void Drain();
-
-        protected:
-            void FlushQueued();
-
-        private:
-            void Output(block_t *);
     };
 }
 

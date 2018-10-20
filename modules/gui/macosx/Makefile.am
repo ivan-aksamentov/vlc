@@ -18,7 +18,7 @@ libmacosx_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(guidir)' \
 	-Wl,-framework,AVFoundation -Wl,-framework,CoreMedia -Wl,-framework,IOKit \
 	-Wl,-framework,AddressBook -Wl,-framework,WebKit -Wl,-framework,CoreAudio \
 	-Wl,-framework,SystemConfiguration -Wl,-framework,ScriptingBridge \
-	-Wl,-framework,QuartzCore -Wl,-framework,MediaPlayer
+	-Wl,-framework,QuartzCore -Wl,-weak_framework,MediaPlayer
 
 if HAVE_SPARKLE
 libmacosx_plugin_la_LDFLAGS += -Wl,-framework,Sparkle
@@ -26,6 +26,7 @@ endif
 
 libmacosx_plugin_la_SOURCES = \
 	gui/macosx/helpers.h \
+	gui/macosx/NSString+Helpers.h gui/macosx/NSString+Helpers.m \
 	gui/macosx/VLCAboutWindowController.h gui/macosx/VLCAboutWindowController.m \
 	gui/macosx/VLCAddonListItem.h gui/macosx/VLCAddonListItem.m \
 	gui/macosx/VLCAddonsWindowController.h gui/macosx/VLCAddonsWindowController.m \

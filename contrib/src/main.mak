@@ -136,9 +136,13 @@ endif
 EXTRA_CFLAGS += $(CFLAGS)
 endif
 
+LN_S = ln -s
 ifdef HAVE_WIN32
 ifneq ($(shell $(CC) $(CFLAGS) -E -dM -include _mingw.h - < /dev/null | grep -E __MINGW64_VERSION_MAJOR),)
 HAVE_MINGW_W64 := 1
+endif
+ifndef HAVE_CROSS_COMPILE
+LN_S = cp -R
 endif
 ifneq ($(findstring clang, $(shell $(CC) --version)),)
 HAVE_CLANG := 1
@@ -509,6 +513,7 @@ endif
 ifdef HAVE_CROSS_COMPILE
 	echo "set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)" >> $@
 	echo "set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)" >> $@
+	echo "set(PKG_CONFIG_EXECUTABLE $(PKG_CONFIG))" >> $@
 endif
 
 # Default pattern rules

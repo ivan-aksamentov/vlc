@@ -37,9 +37,6 @@
  * the translated string. the translation should be '1:translatedstring' though */
 #define _ANS(s) [((s) ? toNSStr(vlc_gettext(s)) : @"") substringFromIndex:2]
 
-#define B64DecNSStr(s) [[VLCStringUtility sharedInstance] b64Decode: s]
-#define B64EncAndFree(s) [[VLCStringUtility sharedInstance] b64EncodeAndFree: s]
-
 extern NSString *const kVLCMediaAudioCD;
 extern NSString *const kVLCMediaDVD;
 extern NSString *const kVLCMediaVCD;
@@ -61,16 +58,9 @@ NSImage *imageFromRes(NSString *name);
 
 + (VLCStringUtility *)sharedInstance;
 
-- (NSString *)wrapString: (NSString *)o_in_string toWidth: (int)i_width;
-- (NSString *)getCurrentTimeAsString:(input_thread_t *)p_input negative:(BOOL)b_negative;
-- (NSString *)stringForTime:(long long int)time;
-
 - (NSString *)OSXStringKeyToString:(NSString *)theString;
 - (NSString *)VLCKeyToString:(NSString *)theString;
 - (unsigned int)VLCModifiersToCocoa:(NSString *)theString;
-
-- (NSString *)b64Decode:(NSString *)string;
-- (NSString *)b64EncodeAndFree:(char *)psz_string;
 
 - (NSString *)getVolumeTypeFromMountPath:(NSString *)mountPath;
 - (NSString *)getBSDNodeFromMountPath:(NSString *)mountPath;

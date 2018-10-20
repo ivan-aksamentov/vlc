@@ -61,14 +61,8 @@
 
 #endif
 
-// Define stuff for older SDKs
-#if (TARGET_OS_OSX && MAC_OS_X_VERSION_MAX_ALLOWED < 101100) || \
-    (TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MAX_ALLOWED < 90000) || \
-    (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED < 90000)
-enum { kCMVideoCodecType_HEVC = 'hvc1' };
-#endif
 
-#if (!TARGET_OS_OSX || MAC_OS_X_VERSION_MAX_ALLOWED < 1090)
+#if (!TARGET_OS_OSX)
 const CFStringRef kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder = CFSTR("EnableHardwareAcceleratedVideoDecoder");
 const CFStringRef kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder = CFSTR("RequireHardwareAcceleratedVideoDecoder");
 #endif
@@ -674,6 +668,11 @@ static bool FillReorderInfoHEVC(decoder_t *p_dec, const block_t *p_block,
             }
 
             p_info->b_keyframe = i_nal_type >= HEVC_NAL_BLA_W_LP;
+            enum hevc_slice_type_e slice_type;
+            if(hevc_get_slice_type(p_sli, &slice_type))
+            {
+                p_info->b_keyframe |= (slice_type == HEVC_SLICE_TYPE_I);
+            }
 
             hevc_sequence_parameter_set_t *p_sps;
             hevc_picture_parameter_set_t *p_pps;
@@ -1134,15 +1133,8 @@ static CFMutableDictionaryRef CreateSessionDescriptionFormat(decoder_t *p_dec,
             yuvmatrix = kCVImageBufferYCbCrMatrix_ITU_R_601_4;
             break;
         case COLOR_SPACE_BT2020:
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-            if (&kCVImageBufferColorPrimaries_ITU_R_2020 != nil)
-            {
-                yuvmatrix = kCVImageBufferColorPrimaries_ITU_R_2020;
-                break;
-            }
-#pragma clang diagnostic pop
-            /* fall through */
+            yuvmatrix = kCVImageBufferColorPrimaries_ITU_R_2020;
+            break;
         case COLOR_SPACE_BT709:
         default:
             yuvmatrix = kCVImageBufferColorPrimaries_ITU_R_709_2;
@@ -1150,9 +1142,6 @@ static CFMutableDictionaryRef CreateSessionDescriptionFormat(decoder_t *p_dec,
     }
     CFDictionarySetValue(decoderConfiguration, kCVImageBufferYCbCrMatrixKey,
                          yuvmatrix);
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
 
     /* enable HW accelerated playback, since this is optional on OS X
      * note that the backend may still fallback on software mode if no
@@ -1167,8 +1156,6 @@ static CFMutableDictionaryRef CreateSessionDescriptionFormat(decoder_t *p_dec,
         CFDictionarySetValue(decoderConfiguration,
                              kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder,
                              kCFBooleanTrue);
-
-#pragma clang diagnostic pop
 
     CFDictionarySetValue(decoderConfiguration,
                          kVTDecompressionPropertyKey_FieldMode,
@@ -1501,17 +1488,9 @@ static void CloseDecoder(vlc_object_t *p_this)
 
 static BOOL deviceSupportsHEVC()
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-
-#if (TARGET_OS_OSX && MAC_OS_X_VERSION_MAX_ALLOWED >= 101300) || \
-    (TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MAX_ALLOWED >= 110000) || \
-    (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 110000)
-    if (VTIsHardwareDecodeSupported != nil)
+    if (@available(macOS 10.13, iOS 11.0, tvOS 11.0, *))
         return VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC);
     else
-#endif
-#pragma clang diagnostic pop
         return NO;
 }
 
