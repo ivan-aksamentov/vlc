@@ -2,7 +2,6 @@
  * live555.cpp : LIVE555 Streaming Media support.
  *****************************************************************************
  * Copyright (C) 2003-2007 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Derk-Jan Hartman <hartman at videolan. org>
@@ -1648,8 +1647,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_SET_RATE:
         {
-            int *pi_int;
-            double f_scale, f_old_scale;
+            float *pf_scale, f_scale;
+            double f_old_scale;
 
             if( !p_sys->rtsp || (p_sys->f_npt_length <= 0) ||
                 !(p_sys->capabilities & CAP_RATE_CONTROL) )
@@ -1669,8 +1668,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
              * Scale < 0 value indicates rewind
              */
 
-            pi_int = va_arg( args, int * );
-            f_scale = (double)INPUT_RATE_DEFAULT / (*pi_int);
+            pf_scale = va_arg( args, float * );
+            f_scale = *pf_scale;
             f_old_scale = p_sys->ms->scale();
 
             /* Passing -1 for the start and end time will mean liveMedia won't
@@ -1697,8 +1696,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             p_sys->i_pcr = VLC_TICK_INVALID;
             p_sys->f_npt = 0.0;
 
-            *pi_int = (int)( INPUT_RATE_DEFAULT / p_sys->ms->scale() );
-            msg_Dbg( p_demux, "PLAY with new Scale %0.2f (%d)", p_sys->ms->scale(), (*pi_int) );
+            *pf_scale = p_sys->ms->scale() ;
+            msg_Dbg( p_demux, "PLAY with new Scale %0.2f", p_sys->ms->scale() );
             return VLC_SUCCESS;
         }
 
@@ -2078,6 +2077,8 @@ static void StreamRead( void *p_private, unsigned int i_size,
             p_block->p_buffer[2] = 0x00;
             p_block->p_buffer[3] = 0x01;
             memcpy( &p_block->p_buffer[4], tk->p_buffer, i_size );
+            if( tk->sub->rtpSource()->curPacketMarkerBit() )
+                p_block->i_flags |= BLOCK_FLAG_AU_END;
         }
     }
     else if( tk->format == live_track_t::ASF_STREAM )
@@ -2347,7 +2348,7 @@ static unsigned char* parseH264ConfigStr( char const* configStr,
         }
     }
 
-    size_t configMax = 5*strlen(dup);
+    size_t configMax = 4*i_records+strlen(configStr);
     unsigned char *cfg = new unsigned char[configMax];
     psz = dup;
     for( size_t i = 0; i < i_records; ++i )

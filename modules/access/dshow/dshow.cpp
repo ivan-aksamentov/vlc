@@ -2,7 +2,6 @@
  * dshow.cpp : DirectShow access and access_demux module for vlc
  *****************************************************************************
  * Copyright (C) 2002-2004, 2006, 2008, 2010 the VideoLAN team
- * $Id$
  *
  * Author: Gildas Bazin <gbazin@videolan.org>
  *         Damien Fouilleul <damienf@videolan.org>
@@ -71,7 +70,6 @@ static size_t EnumDeviceCaps( vlc_object_t *, IBaseFilter *,
                               AM_MEDIA_TYPE *mt, size_t, bool );
 static bool ConnectFilters( vlc_object_t *, access_sys_t *,
                             IBaseFilter *, CaptureFilter * );
-static int FindDevices( const char *, char ***, char *** );
 
 static void ShowPropertyPage( IUnknown * );
 static void ShowDeviceProperties( vlc_object_t *, ICaptureGraphBuilder2 *,
@@ -194,10 +192,8 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
     add_string( "dshow-vdev", NULL, VDEV_TEXT, VDEV_LONGTEXT, false)
-        change_string_cb( FindDevices )
 
     add_string( "dshow-adev", NULL, ADEV_TEXT, ADEV_LONGTEXT, false)
-        change_string_cb( FindDevices )
 
     add_string( "dshow-size", NULL, SIZE_TEXT, SIZE_LONGTEXT, false)
         change_safe()
@@ -820,9 +816,6 @@ static void CommonClose( vlc_object_t *p_this, access_sys_t *p_sys )
 
     vlc_delete_all( p_sys->pp_streams );
 
-    vlc_mutex_destroy( &p_sys->lock );
-    vlc_cond_destroy( &p_sys->wait );
-
     vlc_mta_release( p_this );
 
     free( p_sys );
@@ -1229,7 +1222,7 @@ FindCaptureDevice( vlc_object_t *p_this, std::string *p_devicename,
                            IID_ICreateDevEnum, (void**)p_dev_enum.GetAddressOf() );
     if( FAILED(hr) )
     {
-        msg_Err( p_this, "failed to create the device enumerator (0x%lx)", hr);
+        msg_Err( p_this, "failed to create the device enumerator (0x%lX)", hr);
         return p_base_filter;
     }
 
@@ -1243,7 +1236,7 @@ FindCaptureDevice( vlc_object_t *p_this, std::string *p_devicename,
                                                 p_class_enum.GetAddressOf(), 0 );
     if( FAILED(hr) )
     {
-        msg_Err( p_this, "failed to create the class enumerator (0x%lx)", hr );
+        msg_Err( p_this, "failed to create the class enumerator (0x%lX)", hr );
         return p_base_filter;
     }
 
@@ -1307,7 +1300,7 @@ FindCaptureDevice( vlc_object_t *p_this, std::string *p_devicename,
                     if( FAILED(hr) )
                     {
                         msg_Err( p_this, "couldn't bind moniker to filter "
-                                 "object (0x%lx)", hr );
+                                 "object (0x%lX)", hr );
                         return NULL;
                     }
                     return p_base_filter;
@@ -2078,6 +2071,8 @@ static int FindDevices( const char *psz_name, char ***vp, char ***tp )
     return count;
 }
 
+VLC_CONFIG_STRING_ENUM(FindDevices)
+
 /*****************************************************************************
  * Properties
  *****************************************************************************/
@@ -2220,7 +2215,6 @@ static void ConfigTuner( vlc_object_t *p_this, ICaptureGraphBuilder2 *p_graph,
 {
     int i_channel, i_country, i_input, i_amtuner_mode;
     long l_modes = 0;
-    unsigned i_frequency;
     ComPtr<IAMTVTuner> p_TV;
     HRESULT hr;
 

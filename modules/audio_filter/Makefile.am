@@ -33,6 +33,8 @@ libspatializer_plugin_la_SOURCES = \
 	audio_filter/spatializer/revmodel.hpp \
 	audio_filter/spatializer/spatializer.cpp
 libspatializer_plugin_la_LIBADD = $(LIBM)
+libcenter_plugin_la_SOURCES = audio_filter/center.c
+libcenter_plugin_la_LIBADD  = $(LIBM)
 
 audio_filter_LTLIBRARIES = \
 	libaudiobargraph_a_plugin.la \
@@ -46,7 +48,8 @@ audio_filter_LTLIBRARIES = \
 	libscaletempo_plugin.la \
 	libscaletempo_pitch_plugin.la \
 	libspatializer_plugin.la \
-	libstereo_widen_plugin.la
+	libstereo_widen_plugin.la \
+	libcenter_plugin.la
 
 # Channel mixers
 libdolby_surround_decoder_plugin_la_SOURCES = \
@@ -67,6 +70,9 @@ libsimple_channel_mixer_plugin_la_LIBADD =
 if HAVE_NEON
 EXTRA_LTLIBRARIES += libsimple_channel_mixer_plugin_arm_neon.la
 libsimple_channel_mixer_plugin_arm_neon_la_SOURCES = arm_neon/simple_channel_mixer.S
+# Intentionally leaving out AM_LDFLAGS from this one; it's not meant to be
+# built like a plugin.
+libsimple_channel_mixer_plugin_arm_neon_la_LDFLAGS = -static
 
 libsimple_channel_mixer_plugin_la_LIBADD += libsimple_channel_mixer_plugin_arm_neon.la
 libsimple_channel_mixer_plugin_la_CFLAGS += -DCAN_COMPILE_NEON

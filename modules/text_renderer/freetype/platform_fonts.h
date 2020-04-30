@@ -2,7 +2,6 @@
  * freetype.c : Put text on the video, using freetype2
  *****************************************************************************
  * Copyright (C) 2002 - 2015 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Sigmund Augdal Helberg <dnumgis@videolan.org>
  *          Gildas Bazin <gbazin@videolan.org>
@@ -44,6 +43,9 @@
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
+
+/* Debug Stuff */
+//#define DEBUG_PLATFORM_FONTS
 
 #include "freetype.h"
 
@@ -270,11 +272,13 @@ vlc_family_t *InitDefaultList( filter_t *p_filter, const char *const *ppsz_defau
                                int i_size );
 
 /* Debug Helpers */
+#ifdef DEBUG_PLATFORM_FONTS
 void DumpFamily( filter_t *p_filter, const vlc_family_t *p_family,
                  bool b_dump_fonts, int i_max_families );
 
 void DumpDictionary( filter_t *p_filter, const vlc_dictionary_t *p_dict,
                      bool b_dump_fonts, int i_max_families );
+#endif
 
 /* String helpers */
 char* ToLower( const char *psz_src );

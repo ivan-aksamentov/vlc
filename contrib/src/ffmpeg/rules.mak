@@ -5,12 +5,12 @@
 #USE_FFMPEG ?= 1
 
 ifndef USE_LIBAV
-FFMPEG_HASH=d0e740b8fb30f02914594d00eb311a32442a63f8
+FFMPEG_HASH=1e35519fe0b8bbad84641e83d49138152720b544
 FFMPEG_GITURL := http://git.videolan.org/git/ffmpeg.git
 FFMPEG_LAVC_MIN := 57.37.100
 USE_FFMPEG := 1
 else
-FFMPEG_HASH=35ed7f93dbc72d733e454ae464b1324f38af62a0
+FFMPEG_HASH=e5afa1b556542fd7a52a0a9b409c80f2e6e1e9bb
 FFMPEG_GITURL := git://git.libav.org/libav.git
 FFMPEG_LAVC_MIN := 57.16.0
 endif
@@ -33,6 +33,7 @@ FFMPEGCONF = \
 	--disable-protocol=concat \
 	--disable-bsfs \
 	--disable-bzlib \
+	--disable-libvpx \
 	--disable-avresample \
 	--enable-bsf=vp9_superframe
 
@@ -70,11 +71,8 @@ ifndef BUILD_NETWORK
 FFMPEGCONF += --disable-network
 endif
 ifdef BUILD_ENCODERS
-FFMPEGCONF += --enable-libmp3lame --enable-libvpx --disable-decoder=libvpx_vp8 --disable-decoder=libvpx_vp9
-ifndef USE_FFMPEG
-FFMPEGCONF += --disable-decoder=libvpx
-endif
-DEPS_ffmpeg += lame $(DEPS_lame) vpx $(DEPS_vpx)
+FFMPEGCONF += --enable-libmp3lame
+DEPS_ffmpeg += lame $(DEPS_lame)
 else
 FFMPEGCONF += --disable-encoders --disable-muxers
 endif
@@ -143,7 +141,7 @@ endif
 
 # Darwin
 ifdef HAVE_DARWIN_OS
-FFMPEGCONF += --arch=$(ARCH) --target-os=darwin
+FFMPEGCONF += --arch=$(ARCH) --target-os=darwin --extra-cflags="$(CFLAGS)"
 ifdef USE_FFMPEG
 FFMPEGCONF += --disable-lzma
 endif
@@ -151,7 +149,7 @@ ifeq ($(ARCH),x86_64)
 FFMPEGCONF += --cpu=core2
 endif
 ifdef HAVE_IOS
-FFMPEGCONF += --enable-pic --extra-ldflags="$(EXTRA_CFLAGS)"
+FFMPEGCONF += --enable-pic --extra-ldflags="$(EXTRA_CFLAGS) -isysroot $(IOS_SDK)"
 ifdef HAVE_NEON
 FFMPEGCONF += --as="$(AS)"
 endif
@@ -172,17 +170,12 @@ endif
 ifeq ($(ANDROID_ABI), x86_64)
 FFMPEGCONF +=  --disable-mmx --disable-mmxext --disable-inline-asm
 endif
-ifdef HAVE_NEON
-ifeq ($(ANDROID_ABI), armeabi-v7a)
-FFMPEGCONF += --as='gas-preprocessor.pl -as-type clang -arch arm $(CC)'
-endif
-endif
 endif
 
 # Windows
 ifdef HAVE_WIN32
 ifndef HAVE_VISUALSTUDIO
-DEPS_ffmpeg += d3d11
+DEPS_ffmpeg += wine-headers
 ifndef HAVE_MINGW_W64
 DEPS_ffmpeg += directx
 endif
@@ -241,11 +234,14 @@ $(TARBALLS)/ffmpeg-$(FFMPEG_BASENAME).tar.xz:
 ffmpeg: ffmpeg-$(FFMPEG_BASENAME).tar.xz .sum-ffmpeg
 	rm -Rf $@ $@-$(FFMPEG_BASENAME)
 	mkdir -p $@-$(FFMPEG_BASENAME)
-	tar xvJf "$<" --strip-components=1 -C $@-$(FFMPEG_BASENAME)
+	tar xvJfo "$<" --strip-components=1 -C $@-$(FFMPEG_BASENAME)
 ifdef USE_FFMPEG
 	$(APPLY) $(SRC)/ffmpeg/armv7_fixup.patch
 	$(APPLY) $(SRC)/ffmpeg/dxva_vc1_crash.patch
 	$(APPLY) $(SRC)/ffmpeg/h264_early_SAR.patch
+	$(APPLY) $(SRC)/ffmpeg/0001-avcodec-dxva2_hevc-add-support-for-parsing-HEVC-Rang.patch
+	$(APPLY) $(SRC)/ffmpeg/0002-avcodec-hevcdec-allow-HEVC-444-8-10-12-bits-decoding.patch
+	$(APPLY) $(SRC)/ffmpeg/0003-avcodec-hevcdec-allow-HEVC-422-10-12-bits-decoding-w.patch
 endif
 ifdef USE_LIBAV
 	$(APPLY) $(SRC)/ffmpeg/libav_gsm.patch

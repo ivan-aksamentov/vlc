@@ -2,7 +2,6 @@
  * aiff.c: Audio Interchange File Format demuxer
  *****************************************************************************
  * Copyright (C) 2004-2007 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -48,7 +47,7 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_INPUT_DEMUX )
     set_description( N_("AIFF demuxer" ) )
     set_capability( "demux", 10 )
-    set_callbacks( Open, NULL )
+    set_callback( Open )
     add_shortcut( "aiff" )
 vlc_module_end ()
 
@@ -206,6 +205,7 @@ static int Open( vlc_object_t *p_this )
     }
 
     /* */
+    p_sys->fmt.i_id = 0;
     p_sys->es = es_out_Add( p_demux->out, &p_sys->fmt );
     if( unlikely(p_sys->es == NULL) )
         return VLC_ENOMEM;

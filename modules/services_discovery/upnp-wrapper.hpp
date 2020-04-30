@@ -3,7 +3,7 @@
  *****************************************************************************
  * Copyright © 2004-2018 VLC authors and VideoLAN
  *
- * Authors: Rémi Denis-Courmont <rem # videolan.org> (original plugin)
+ * Authors: Rémi Denis-Courmont (original plugin)
  *          Christian Henz <henz # c-lab.de>
  *          Mirsal Ennaime <mirsal dot ennaime at gmail dot com>
  *          Hugo Beauzée-Luyssen <hugo@beauzee.fr>
@@ -24,13 +24,21 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#ifndef UPNP_WRAPPER_H
+#define UPNP_WRAPPER_H
+
+#include <vlc_common.h>
 #include <vlc_charset.h>
+#include <vlc_cxx_helpers.hpp>
 
 #include <memory>
 #include <vector>
 #include <algorithm>
 #include <assert.h>
 
+#ifdef _WIN32
+#include <wincrypt.h>
+#endif
 #include <upnp.h>
 #include <upnptools.h>
 
@@ -62,7 +70,7 @@ public:
 
 private:
     static UpnpInstanceWrapper* s_instance;
-    static vlc_mutex_t s_lock;
+    static vlc::threads::mutex s_lock;
     UpnpClient_Handle m_handle;
     int m_refcount;
     typedef std::shared_ptr<Listener> ListenerPtr;
@@ -327,11 +335,43 @@ done:
 
 #ifdef UPNP_ENABLE_IPV6
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX
+#include <SystemConfiguration/SystemConfiguration.h>
+#include "vlc_charset.h"
+
+inline char *getPreferedAdapter()
+{
+    SCDynamicStoreRef session = SCDynamicStoreCreate(NULL, CFSTR("session"), NULL, NULL);
+    if (session == NULL)
+        return NULL;
+
+    CFDictionaryRef q = (CFDictionaryRef) SCDynamicStoreCopyValue(session, CFSTR("State:/Network/Global/IPv4"));
+    char *returnValue = NULL;
+
+    if (q != NULL) {
+        const void *val;
+        if (CFDictionaryGetValueIfPresent(q, CFSTR("PrimaryInterface"), &val)) {
+            returnValue = FromCFString((CFStringRef)val, kCFStringEncodingUTF8);
+        }
+        CFRelease(q);
+    }
+    CFRelease(session);
+
+    return returnValue;
+}
+
+#else
+
 inline char *getPreferedAdapter()
 {
     return NULL;
 }
 
+#endif
 #else
 
 inline char *getIpv4ForMulticast()
@@ -342,3 +382,4 @@ inline char *getIpv4ForMulticast()
 #endif
 
 #endif /* _WIN32 */
+#endif /* UPNP_WRAPPER_H */

@@ -51,11 +51,11 @@ JNIEnv *android_getEnv(vlc_object_t *p_obj, const char *psz_thread_name);
  * with 255 buffers we can buffer 2.55s of audio.
  */
 
-#define CHECK_OPENSL_ERROR(msg)                \
+#define CHECK_OPENSL_ERROR(msg) \
     if (unlikely(result != SL_RESULT_SUCCESS)) \
-    {                                          \
-        msg_Err(aout, msg" (%lu)", result);    \
-        goto error;                            \
+    { \
+        msg_Err(aout, msg" (%" PRIu32 ")", (uint32_t)result); \
+        goto error; \
     }
 
 typedef SLresult (*slCreateEngine_t)(
@@ -157,7 +157,7 @@ static int TimeGet(audio_output_t* aout, vlc_tick_t* restrict drift)
     SLAndroidSimpleBufferQueueState st;
     SLresult res = GetState(sys->playerBufferQueue, &st);
     if (unlikely(res != SL_RESULT_SUCCESS)) {
-        msg_Err(aout, "Could not query buffer queue state in TimeGet (%lu)", res);
+        msg_Err(aout, "Could not query buffer queue state in TimeGet (%" PRIu32 ")", (uint32_t)res);
         return -1;
     }
 
@@ -177,30 +177,24 @@ static int TimeGet(audio_output_t* aout, vlc_tick_t* restrict drift)
     return 0;
 }
 
-static void Flush(audio_output_t *aout, bool drain)
+static void Flush(audio_output_t *aout)
 {
     aout_sys_t *sys = aout->sys;
 
-    if (drain) {
-        vlc_tick_t delay;
-        if (!TimeGet(aout, &delay))
-            vlc_tick_sleep(delay);
-    } else {
-        vlc_mutex_lock(&sys->lock);
-        SetPlayState(sys->playerPlay, SL_PLAYSTATE_STOPPED);
-        Clear(sys->playerBufferQueue);
-        SetPlayState(sys->playerPlay, SL_PLAYSTATE_PLAYING);
+    vlc_mutex_lock(&sys->lock);
+    SetPlayState(sys->playerPlay, SL_PLAYSTATE_STOPPED);
+    Clear(sys->playerBufferQueue);
+    SetPlayState(sys->playerPlay, SL_PLAYSTATE_PLAYING);
 
-        /* release audio data not yet written to opensles */
-        block_ChainRelease(sys->p_buffer_chain);
-        sys->p_buffer_chain = NULL;
-        sys->pp_buffer_last = &sys->p_buffer_chain;
+    /* release audio data not yet written to opensles */
+    block_ChainRelease(sys->p_buffer_chain);
+    sys->p_buffer_chain = NULL;
+    sys->pp_buffer_last = &sys->p_buffer_chain;
 
-        sys->samples = 0;
-        sys->started = false;
+    sys->samples = 0;
+    sys->started = false;
 
-        vlc_mutex_unlock(&sys->lock);
-    }
+    vlc_mutex_unlock(&sys->lock);
 }
 
 static int VolumeSet(audio_output_t *aout, float vol)
@@ -268,7 +262,8 @@ static int WriteBuffer(audio_output_t *aout)
     SLAndroidSimpleBufferQueueState st;
     SLresult res = GetState(sys->playerBufferQueue, &st);
     if (unlikely(res != SL_RESULT_SUCCESS)) {
-        msg_Err(aout, "Could not query buffer queue state in %s (%lu)", __func__, res);
+        msg_Err(aout, "Could not query buffer queue state in %s (%" PRIu32 ")",
+                __func__, (uint32_t)res);
         return false;
     }
 
@@ -313,8 +308,8 @@ static int WriteBuffer(audio_output_t *aout)
         return true;
     } else {
         /* XXX : if writing fails, we don't retry */
-        msg_Err(aout, "error %lu when writing %d bytes %s",
-                r, b->i_buffer,
+        msg_Err(aout, "error %" PRIu32 " when writing %zu bytes %s",
+                (uint32_t)r, b->i_buffer,
                 (r == SL_RESULT_BUFFER_INSUFFICIENT) ? " (buffer insufficient)" : "");
         return false;
     }
@@ -527,7 +522,6 @@ static void Close(vlc_object_t *obj)
     Destroy(sys->outputMixObject);
     Destroy(sys->engineObject);
     dlclose(sys->p_so_handle);
-    vlc_mutex_destroy(&sys->lock);
     free(sys);
 }
 

@@ -2,7 +2,6 @@
  * freetype.c : Put text on the video, using freetype2
  *****************************************************************************
  * Copyright (C) 2002 - 2015 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Sigmund Augdal Helberg <dnumgis@videolan.org>
  *          Gildas Bazin <gbazin@videolan.org>
@@ -241,9 +240,10 @@ vlc_family_t *NewFamily( filter_t *p_filter, const char *psz_family,
                          const char *psz_key )
 {
     filter_sys_t *p_sys = p_filter->p_sys;
-    vlc_family_t *p_family = NULL;
 
-    p_family = calloc( 1, sizeof( *p_family ) );
+    vlc_family_t *p_family = calloc( 1, sizeof( *p_family ) );
+    if( unlikely(!p_family) )
+        return NULL;
 
     char *psz_name;
     if( psz_family && *psz_family )
@@ -384,6 +384,7 @@ error:
     return NULL;
 }
 
+#ifdef DEBUG_PLATFORM_FONTS
 void DumpFamily( filter_t *p_filter, const vlc_family_t *p_family,
                  bool b_dump_fonts, int i_max_families )
 {
@@ -393,8 +394,7 @@ void DumpFamily( filter_t *p_filter, const vlc_family_t *p_family,
 
     for( int i = 0; p_family && i < i_max_families ; p_family = p_family->p_next, ++i )
     {
-        msg_Dbg( p_filter, "\t[0x%"PRIxPTR"] %s",
-                 ( uintptr_t ) p_family, p_family->psz_name );
+        msg_Dbg( p_filter, "\t[%p] %s", (void *)p_family, p_family->psz_name );
 
         if( b_dump_fonts )
         {
@@ -410,10 +410,8 @@ void DumpFamily( filter_t *p_filter, const vlc_family_t *p_family,
                 else if( p_font->b_bold && p_font->b_italic )
                     psz_style = "Bold Italic";
 
-                msg_Dbg( p_filter, "\t\t[0x%"PRIxPTR"] (%s): %s - %d",
-                         ( uintptr_t ) p_font, psz_style,
-                         p_font->psz_fontfile, p_font->i_index );
-
+                msg_Dbg( p_filter, "\t\t[%p] (%s): %s - %d", (void *)p_font,
+                         psz_style, p_font->psz_fontfile, p_font->i_index );
             }
 
         }
@@ -438,6 +436,7 @@ void DumpDictionary( filter_t *p_filter, const vlc_dictionary_t *p_dict,
     }
     free( ppsz_keys );
 }
+#endif
 
 char* ToLower( const char *psz_src )
 {

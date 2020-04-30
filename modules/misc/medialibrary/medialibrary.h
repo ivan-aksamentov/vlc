@@ -26,6 +26,7 @@
 #include <medialibrary/parser/IItem.h>
 #include <medialibrary/parser/Parser.h>
 #include <medialibrary/IMedia.h>
+#include <medialibrary/IThumbnailer.h>
 
 #include <vlc_common.h>
 #include <vlc_threads.h>
@@ -38,6 +39,8 @@
 
 struct vlc_event_t;
 struct vlc_object_t;
+struct vlc_thumbnailer_t;
+struct vlc_thumbnailer_request_t;
 
 class Logger;
 
@@ -47,23 +50,23 @@ private:
     struct ParseContext
     {
         ParseContext( MetadataExtractor* mde, medialibrary::parser::IItem& item )
-            : inputItem( nullptr, &input_item_Release )
-            , input( nullptr, &input_Close )
-            , needsProbing( false )
-            , state( INIT_S )
+            : needsProbing( false )
+            , success( false )
             , mde( mde )
             , item( item )
+            , inputItem( nullptr, &input_item_Release )
+            , inputParser( nullptr, &input_item_parser_id_Release )
         {
         }
 
-        std::unique_ptr<input_item_t, decltype(&input_item_Release)> inputItem;
-        std::unique_ptr<input_thread_t, decltype(&input_Close)> input;
-        vlc::threads::condition_variable m_cond;
-        vlc::threads::mutex m_mutex;
         bool needsProbing;
-        input_state_e state;
+        bool success;
         MetadataExtractor* mde;
         medialibrary::parser::IItem& item;
+        std::unique_ptr<input_item_t, decltype(&input_item_Release)> inputItem;
+        // Needs to be last to be destroyed first, otherwise a late callback
+        // could use some already destroyed fields
+        std::unique_ptr<input_item_parser_id_t, decltype(&input_item_parser_id_Release)> inputParser;
     };
 
 public:
@@ -75,36 +78,75 @@ public:
 private:
     virtual medialibrary::parser::Status run( medialibrary::parser::IItem& item ) override;
     virtual const char*name() const override;
-    virtual uint8_t nbThreads() const override;
     virtual medialibrary::parser::Step targetedStep() const override;
     virtual bool initialize( medialibrary::IMediaLibrary* ml ) override;
     virtual void onFlushing() override;
     virtual void onRestarted() override;
+    virtual void stop() override;
 
-    void onInputEvent( const vlc_input_event* event, ParseContext& ctx );
+    void onParserEnded( ParseContext& ctx, int status );
     void addSubtree( ParseContext& ctx, input_item_node_t *root );
     void populateItem( medialibrary::parser::IItem& item, input_item_t* inputItem );
 
-    static void onInputEvent( input_thread_t *input,
-                              const struct vlc_input_event *event, void *user_data );
+    static void onParserEnded( input_item_t *, int status, void *user_data );
+    static void onParserSubtreeAdded( input_item_t *, input_item_node_t *subtree,
+                                      void *user_data );
 
 private:
+    vlc::threads::condition_variable m_cond;
+    vlc::threads::mutex m_mutex;
+    ParseContext* m_currentCtx;
     vlc_object_t* m_obj;
+};
+
+class Thumbnailer : public medialibrary::IThumbnailer
+{
+    struct ThumbnailerCtx
+    {
+        ~ThumbnailerCtx()
+        {
+            if ( thumbnail != nullptr )
+                picture_Release( thumbnail );
+        }
+        Thumbnailer* thumbnailer;
+        bool done;
+        picture_t* thumbnail;
+        vlc_thumbnailer_request_t* request;
+    };
+public:
+    Thumbnailer(vlc_medialibrary_module_t* ml);
+    virtual bool generate( const medialibrary::IMedia&, const std::string& mrl,
+                           uint32_t desiredWidth, uint32_t desiredHeight,
+                           float position, const std::string& dest ) override;
+    virtual void stop() override;
+
+private:
+    static void onThumbnailComplete( void* data, picture_t* thumbnail );
+
+private:
+    vlc_medialibrary_module_t* m_ml;
+    vlc::threads::mutex m_mutex;
+    vlc::threads::condition_variable m_cond;
+    ThumbnailerCtx* m_currentContext;
+    std::unique_ptr<vlc_thumbnailer_t, void(*)(vlc_thumbnailer_t*)> m_thumbnailer;
 };
 
 class MediaLibrary : public medialibrary::IMediaLibraryCb
 {
 public:
     MediaLibrary( vlc_medialibrary_module_t* ml );
+    bool Init();
     bool Start();
     int Control( int query, va_list args );
     int List( int query, const vlc_ml_query_params_t* params, va_list args );
-    void* Get( int query, int64_t id );
+    void* Get( int query, va_list args );
 
 private:
     int controlMedia( int query, va_list args );
     int getMeta( const medialibrary::IMedia& media, int meta, char** result );
+    int getMeta( const medialibrary::IMedia& media, vlc_ml_playback_states_all* result );
     int setMeta( medialibrary::IMedia& media, int meta, const char* value );
+    int setMeta( medialibrary::IMedia& media, const vlc_ml_playback_states_all* values );
     int filterListChildrenQuery( int query, int parentType );
     int listAlbums( int listQuery, const medialibrary::QueryParameters* paramsPtr,
                     const char* pattern, uint32_t nbItems, uint32_t offset, va_list args );
@@ -126,31 +168,39 @@ private:
     // IMediaLibraryCb interface
 public:
     virtual void onMediaAdded(std::vector<medialibrary::MediaPtr> media) override;
-    virtual void onMediaModified(std::vector<medialibrary::MediaPtr> media) override;
+    virtual void onMediaModified(std::vector<int64_t> media) override;
     virtual void onMediaDeleted(std::vector<int64_t> mediaIds) override;
     virtual void onArtistsAdded(std::vector<medialibrary::ArtistPtr> artists) override;
-    virtual void onArtistsModified(std::vector<medialibrary::ArtistPtr> artists) override;
+    virtual void onArtistsModified(std::vector<int64_t> artists) override;
     virtual void onArtistsDeleted(std::vector<int64_t> artistsIds) override;
     virtual void onAlbumsAdded(std::vector<medialibrary::AlbumPtr> albums) override;
-    virtual void onAlbumsModified(std::vector<medialibrary::AlbumPtr> albums) override;
+    virtual void onAlbumsModified(std::vector<int64_t> albums) override;
     virtual void onAlbumsDeleted(std::vector<int64_t> albumsIds) override;
     virtual void onPlaylistsAdded(std::vector<medialibrary::PlaylistPtr> playlists) override;
-    virtual void onPlaylistsModified(std::vector<medialibrary::PlaylistPtr> playlists) override;
+    virtual void onPlaylistsModified(std::vector<int64_t> playlists) override;
     virtual void onPlaylistsDeleted(std::vector<int64_t> playlistIds) override;
     virtual void onGenresAdded(std::vector<medialibrary::GenrePtr> genres) override;
-    virtual void onGenresModified(std::vector<medialibrary::GenrePtr> genres) override;
+    virtual void onGenresModified(std::vector<int64_t> genres) override;
     virtual void onGenresDeleted(std::vector<int64_t> genreIds) override;
+    virtual void onMediaGroupAdded( std::vector<medialibrary::MediaGroupPtr> mediaGroups ) override;
+    virtual void onMediaGroupModified( std::vector<int64_t> mediaGroupsIds ) override;
+    virtual void onMediaGroupDeleted( std::vector<int64_t> mediaGroupsIds ) override;
     virtual void onDiscoveryStarted(const std::string& entryPoint) override;
     virtual void onDiscoveryProgress(const std::string& entryPoint) override;
     virtual void onDiscoveryCompleted(const std::string& entryPoint, bool success) override;
     virtual void onReloadStarted(const std::string& entryPoint) override;
     virtual void onReloadCompleted(const std::string& entryPoint, bool success) override;
+    virtual void onEntryPointAdded(const std::string& entryPoint, bool success) override;
     virtual void onEntryPointRemoved(const std::string& entryPoint, bool success) override;
     virtual void onEntryPointBanned(const std::string& entryPoint, bool success) override;
     virtual void onEntryPointUnbanned(const std::string& entryPoint, bool success) override;
     virtual void onParsingStatsUpdated(uint32_t percent) override;
     virtual void onBackgroundTasksIdleChanged(bool isIdle) override;
-    virtual void onMediaThumbnailReady(medialibrary::MediaPtr media, bool success) override;
+    virtual void onMediaThumbnailReady(medialibrary::MediaPtr media,
+                                       medialibrary::ThumbnailSizeType sizeType,
+                                       bool success) override;
+    virtual void onHistoryChanged( medialibrary::HistoryType historyType ) override;
+    virtual void onRescanStarted() override;
 };
 
 bool Convert( const medialibrary::IMedia* input, vlc_ml_media_t& output );
@@ -165,6 +215,7 @@ bool Convert( const medialibrary::IShow* input, vlc_ml_show_t& output );
 bool Convert( const medialibrary::ILabel* input, vlc_ml_label_t& output );
 bool Convert( const medialibrary::IPlaylist* input, vlc_ml_playlist_t& output );
 bool Convert( const medialibrary::IFolder* input, vlc_ml_entry_point_t& output );
+input_item_t* MediaToInputItem( const medialibrary::IMedia* media );
 
 template <typename To, typename ItemType, typename From>
 To* ml_convert_list( const std::vector<std::shared_ptr<From>>& input )
@@ -180,7 +231,7 @@ To* ml_convert_list( const std::vector<std::shared_ptr<From>>& input )
 
     // Allocate the ml_*_list_t
     auto list = vlc::wrap_cptr(
-        static_cast<To*>( malloc( sizeof( To ) + input.size() * sizeof( ItemType ) ) ),
+        static_cast<To*>( calloc( 1, sizeof( To ) + input.size() * sizeof( ItemType ) ) ),
         static_cast<void(*)(To*)>( &vlc_ml_release ) );
     if ( unlikely( list == nullptr ) )
         return nullptr;
@@ -202,7 +253,7 @@ T* CreateAndConvert( const Input* input )
     if ( input == nullptr )
         return nullptr;
     auto res = vlc::wrap_cptr(
-                static_cast<T*>( malloc( sizeof( T ) ) ),
+                static_cast<T*>( calloc( 1, sizeof( T ) ) ),
                 static_cast<void(*)(T*)>( &vlc_ml_release ) );
     if ( unlikely( res == nullptr ) )
         return nullptr;

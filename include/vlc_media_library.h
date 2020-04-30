@@ -2,7 +2,6 @@
  * vlc_media_library.h: SQL-based media library
  *****************************************************************************
  * Copyright (C) 2008-2010 the VideoLAN Team and AUTHORS
- * $Id$
  *
  * Authors: Antoine Lejeune <phytos@videolan.org>
  *          Jean-Philippe André <jpeg@videolan.org>
@@ -40,8 +39,6 @@ typedef enum vlc_ml_media_type_t
     VLC_ML_MEDIA_TYPE_UNKNOWN,
     VLC_ML_MEDIA_TYPE_VIDEO,
     VLC_ML_MEDIA_TYPE_AUDIO,
-    VLC_ML_MEDIA_TYPE_EXTERNAL,
-    VLC_ML_MEDIA_TYPE_STREAM,
 } vlc_ml_media_type_t;
 
 typedef enum vlc_ml_media_subtype_t
@@ -68,6 +65,30 @@ typedef enum vlc_ml_track_type_t
     VLC_ML_TRACK_TYPE_VIDEO,
     VLC_ML_TRACK_TYPE_AUDIO,
 } vlc_ml_track_type_t;
+
+typedef enum vlc_ml_thumbnail_size_t
+{
+    VLC_ML_THUMBNAIL_SMALL,
+    VLC_ML_THUMBNAIL_BANNER,
+
+    VLC_ML_THUMBNAIL_SIZE_COUNT
+} vlc_ml_thumbnail_size_t;
+
+typedef enum vlc_ml_history_type_t
+{
+    VLC_ML_HISTORY_TYPE_MEDIA,
+    VLC_ML_HISTORY_TYPE_NETWORK,
+} vlc_ml_history_type_t;
+
+typedef struct vlc_ml_thumbnail_t
+{
+    char* psz_mrl;
+    /**
+     * True if a thumbnail is available, or if thumbnail generation was
+     * attempted but failed
+     */
+    bool b_generated;
+} vlc_ml_thumbnail_t;
 
 typedef struct vlc_ml_movie_t
 {
@@ -122,6 +143,8 @@ typedef struct vlc_ml_file_t
     char* psz_mrl;
     vlc_ml_file_type_t i_type;
     bool b_external;
+    bool b_removable;
+    bool b_present;
 } vlc_ml_file_t;
 
 typedef struct vlc_ml_file_list_t
@@ -181,7 +204,8 @@ typedef struct vlc_ml_media_t
     time_t i_last_played_date;
     char* psz_title;
 
-    char* psz_artwork_mrl;
+    vlc_ml_thumbnail_t thumbnails[VLC_ML_THUMBNAIL_SIZE_COUNT];
+
     bool b_is_favorite;
 
     union
@@ -205,7 +229,7 @@ typedef struct vlc_ml_artist_t
     int64_t i_id;
     char* psz_name;
     char* psz_shortbio;
-    char* psz_artwork_mrl;
+    vlc_ml_thumbnail_t thumbnails[VLC_ML_THUMBNAIL_SIZE_COUNT];
     char* psz_mb_id;
 
     unsigned int i_nb_album;
@@ -222,7 +246,7 @@ typedef struct vlc_ml_album_t {
     int64_t i_id;
     char* psz_title;
     char* psz_summary;
-    char* psz_artwork_mrl;
+    vlc_ml_thumbnail_t thumbnails[VLC_ML_THUMBNAIL_SIZE_COUNT];
     char* psz_artist;
     int64_t i_artist_id;
 
@@ -322,6 +346,9 @@ struct vlc_ml_query_params_t
 enum vlc_ml_get_queries
 {
     VLC_ML_GET_MEDIA,           /**< arg1: Media    ID; ret: vlc_ml_media_t*    */
+    VLC_ML_GET_MEDIA_BY_MRL,    /**< arg1: Media   MRL; ret: vlc_ml_media_t*    */
+    VLC_ML_GET_INPUT_ITEM,      /**< arg1: Media    ID; ret: input_item_t*      */
+    VLC_ML_GET_INPUT_ITEM_BY_MRL,/**< arg1: Media  MRL; ret: input_item_t*      */
     VLC_ML_GET_ALBUM,           /**< arg1: Album    ID; ret: vlc_ml_album_t*    */
     VLC_ML_GET_ARTIST,          /**< arg1: Artist   ID; ret: vlc_ml_artist_t*   */
     VLC_ML_GET_GENRE,           /**< arg1: Genre    ID; ret: vlc_ml_genre_t*    */
@@ -393,7 +420,8 @@ enum vlc_ml_list_queries
 
 enum vlc_ml_parent_type
 {
-    VLC_ML_PARENT_ALBUM = 1,
+    VLC_ML_PARENT_UNKNOWN,
+    VLC_ML_PARENT_ALBUM,
     VLC_ML_PARENT_ARTIST,
     VLC_ML_PARENT_SHOW,
     VLC_ML_PARENT_GENRE,
@@ -408,6 +436,7 @@ enum vlc_ml_control
     VLC_ML_BAN_FOLDER,              /**< arg1: mrl (const char*)  res: can't fail */
     VLC_ML_UNBAN_FOLDER,            /**< arg1: mrl (const char*)  res: can't fail */
     VLC_ML_LIST_FOLDERS,            /**< arg1: entrypoints (vlc_ml_entry_point_list_t**); res: can fail */
+    VLC_ML_IS_INDEXED,              /**< arg1: mrl (const char*) arg2 (out): bool*;       res: can fail */
     /**
      * Reload a specific folder, or all.
      * arg1: mrl (const char*), NULL to reload all folders
@@ -428,10 +457,14 @@ enum vlc_ml_control
 
     /* Media management */
     VLC_ML_MEDIA_INCREASE_PLAY_COUNT,       /**< arg1: media id; can fail */
-    VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_PREF,   /**< arg1: media id; arg2: vlc_ml_playback_pref; arg3: char**; */
-    VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_PREF,   /**< arg1: media id; arg2: vlc_ml_playback_pref; arg3: const char*; */
-    VLC_ML_MEDIA_SET_THUMBNAIL,             /**< arg1: media id; arg2: const char*; */
+    VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_STATE,  /**< arg1: media id; arg2: vlc_ml_playback_state; arg3: char**; */
+    VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_STATE,  /**< arg1: media id; arg2: vlc_ml_playback_state; arg3: const char*; */
+    VLC_ML_MEDIA_GET_ALL_MEDIA_PLAYBACK_STATES, /**< arg1: media id; arg2(out): vlc_ml_playback_states_all* */
+    VLC_ML_MEDIA_SET_ALL_MEDIA_PLAYBACK_STATES, /**< arg1: media id; arg2: const vlc_ml_playback_states_all* */
+    VLC_ML_MEDIA_SET_THUMBNAIL,             /**< arg1: media id; arg2: const char*; arg3: vlc_ml_thumbnail_size_t */
+    VLC_ML_MEDIA_GENERATE_THUMBNAIL,        /**< arg1: media id; arg2: vlc_ml_thumbnail_size_t; arg3: width; arg4: height; arg5: position */
     VLC_ML_MEDIA_ADD_EXTERNAL_MRL,          /**< arg1: media id; arg2: const char*; arg3: type(vlc_ml_file_type_t) */
+    VLC_ML_MEDIA_SET_TYPE,                  /**< arg1: media id; arg2: vlc_ml_media_type_t */
 };
 
 /**
@@ -439,33 +472,48 @@ enum vlc_ml_control
  * All values/units are up to the caller and are not interpreted by the media
  * library.
  * All values are stored and returned as strings.
- * When calling vlc_medialibrary_t::pf_control with vlc_ml_MEDIA_GET_MEDIA_PLAYBACK_PREF,
- * the value will be returned stored in the provided char**. If the preference was
+ * When calling vlc_medialibrary_t::pf_control with vlc_ml_MEDIA_GET_MEDIA_PLAYBACK_STATE,
+ * the value will be returned stored in the provided char**. If the state was
  * not set yet, NULL will be returned.
- * When setting a preference, NULL can be provided as a value to unset it.
+ * When setting a state, NULL can be provided as a value to unset it.
  */
-enum vlc_ml_playback_pref
+enum vlc_ml_playback_state
 {
-    VLC_ML_PLAYBACK_PREF_RATING,
-    VLC_ML_PLAYBACK_PREF_PROGRESS,
-    VLC_ML_PLAYBACK_PREF_SPEED,
-    VLC_ML_PLAYBACK_PREF_TITLE,
-    VLC_ML_PLAYBACK_PREF_CHAPTER,
-    VLC_ML_PLAYBACK_PREF_PROGRAM,
-    VLC_ML_PLAYBACK_PREF_SEEN,
-    VLC_ML_PLAYBACK_PREF_VIDEO_TRACK,
-    VLC_ML_PLAYBACK_PREF_ASPECT_RATIO,
-    VLC_ML_PLAYBACK_PREF_ZOOM,
-    VLC_ML_PLAYBACK_PREF_CROP,
-    VLC_ML_PLAYBACK_PREF_DEINTERLACE,
-    VLC_ML_PLAYBACK_PREF_VIDEO_FILTER,
-    VLC_ML_PLAYBACK_PREF_AUDIO_TRACK,
-    VLC_ML_PLAYBACK_PREF_GAIN,
-    VLC_ML_PLAYBACK_PREF_AUDIO_DELAY,
-    VLC_ML_PLAYBACK_PREF_SUBTITLE_TRACK,
-    VLC_ML_PLAYBACK_PREF_SUBTITLE_DELAY,
-    VLC_ML_PLAYBACK_PREF_APP_SPECIFIC,
+    VLC_ML_PLAYBACK_STATE_RATING,
+    VLC_ML_PLAYBACK_STATE_PROGRESS,
+    VLC_ML_PLAYBACK_STATE_SPEED,
+    VLC_ML_PLAYBACK_STATE_TITLE,
+    VLC_ML_PLAYBACK_STATE_CHAPTER,
+    VLC_ML_PLAYBACK_STATE_PROGRAM,
+    VLC_ML_PLAYBACK_STATE_SEEN,
+    VLC_ML_PLAYBACK_STATE_VIDEO_TRACK,
+    VLC_ML_PLAYBACK_STATE_ASPECT_RATIO,
+    VLC_ML_PLAYBACK_STATE_ZOOM,
+    VLC_ML_PLAYBACK_STATE_CROP,
+    VLC_ML_PLAYBACK_STATE_DEINTERLACE,
+    VLC_ML_PLAYBACK_STATE_VIDEO_FILTER,
+    VLC_ML_PLAYBACK_STATE_AUDIO_TRACK,
+    VLC_ML_PLAYBACK_STATE_GAIN,
+    VLC_ML_PLAYBACK_STATE_AUDIO_DELAY,
+    VLC_ML_PLAYBACK_STATE_SUBTITLE_TRACK,
+    VLC_ML_PLAYBACK_STATE_SUBTITLE_DELAY,
+    VLC_ML_PLAYBACK_STATE_APP_SPECIFIC,
 };
+
+typedef struct vlc_ml_playback_states_all
+{
+    float progress;
+    float rate;
+    float zoom;
+    int current_title;
+    char* current_video_track;
+    char* current_audio_track;
+    char *current_subtitle_track;
+    char* aspect_ratio;
+    char* crop;
+    char* deinterlace;
+    char* video_filter;
+} vlc_ml_playback_states_all;
 
 enum vlc_ml_event_type
 {
@@ -497,7 +545,7 @@ enum vlc_ml_event_type
      * A discovery started.
      * For each VLC_ML_EVENT_DISCOVERY_STARTED event, there will be
      * 1 VLC_ML_EVENT_DISCOVERY_COMPLETED event, and N
-     * VLC_ML_EVENT_DISCOVERY_COMPLETED events.
+     * VLC_ML_EVENT_DISCOVERY_PROGRESS events.
      * The entry point being discovered is stored in
      * vlc_ml_event_t::discovery_started::psz_entry_point.
      */
@@ -532,6 +580,16 @@ enum vlc_ml_event_type
      * vlc_ml_event_t::reload_completed::b_success
      */
     VLC_ML_EVENT_RELOAD_COMPLETED,
+    /**
+     * Sent when a new entry point gets added to the database.
+     * The entry point that was added is stored in
+     * vlc::ml_event_t::entry_point_added::psz_entry_point, and the success or failure
+     * state is stored in vlc_ml_event_t::entry_point_added::b_success
+     * If successful, this event won't be emited again for this entry point.
+     * In case of failure, this event will be fired again if the same entry point
+     * is queued for discovery again.
+     */
+    VLC_ML_EVENT_ENTRY_POINT_ADDED,
     /**
      * Sent when an entry point removal request has been processed.
      * The removed entry point is stored in
@@ -568,6 +626,24 @@ enum vlc_ml_event_type
      * increase once all discovery operations are completed.
      */
     VLC_ML_EVENT_PARSING_PROGRESS_UPDATED,
+    /**
+     * Sent after a media thumbnail was generated, or if it's generation failed.
+     * The media is stored in vlc_ml_event_t::media_thumbnail_generated::p_media
+     * and the success state is stored in
+     * vlc_ml_event_t::media_thumbnail_generated::b_success
+     */
+    VLC_ML_EVENT_MEDIA_THUMBNAIL_GENERATED,
+    /**
+     * Sent after the history gets changed. It can be either cleaned, or simply
+     * modified because a media was recently played/removed from the history.
+     * The history type (media/network) is stored in
+     * vlc_ml_event_t::history_changed::history_type
+     */
+    VLC_ML_EVENT_HISTORY_CHANGED,
+    /**
+     * Sent when an application requested rescan starts being processed.
+     */
+    VLC_ML_EVENT_RESCAN_STARTED,
 };
 
 typedef struct vlc_ml_event_t
@@ -601,6 +677,11 @@ typedef struct vlc_ml_event_t
         {
             const char* psz_entry_point;
             bool b_success;
+        } entry_point_added;
+        struct
+        {
+            const char* psz_entry_point;
+            bool b_success;
         } entry_point_removed;
         struct
         {
@@ -623,6 +704,10 @@ typedef struct vlc_ml_event_t
             const vlc_ml_album_t* p_album;
             const vlc_ml_playlist_t* p_playlist;
             const vlc_ml_genre_t* p_genre;
+        } creation;
+        struct
+        {
+            int64_t i_entity_id;
         } modification;
         struct
         {
@@ -632,6 +717,16 @@ typedef struct vlc_ml_event_t
         {
             bool b_idle;
         } background_idle_changed;
+        struct
+        {
+            const vlc_ml_media_t* p_media;
+            vlc_ml_thumbnail_size_t i_size;
+            bool b_success;
+        } media_thumbnail_generated;
+        struct
+        {
+            vlc_ml_history_type_t history_type;
+        } history_changed;
     };
 } vlc_ml_event_t;
 
@@ -644,7 +739,7 @@ typedef struct vlc_medialibrary_callbacks_t
 
 struct vlc_medialibrary_module_t
 {
-    struct vlc_common_members obj;
+    struct vlc_object_t obj;
 
     module_t *p_module;
 
@@ -668,13 +763,13 @@ struct vlc_medialibrary_module_t
                     const vlc_ml_query_params_t* p_params, va_list args );
 
     /**
-     * Get a specific entity by its id.
+     * Get a specific entity by its id or another unique value
      *
      * \return The required entity, or a NULL pointer if couldn't be found.
      *
      * Refer to the list of queries for the specific return type
      */
-    void* (*pf_get)( struct vlc_medialibrary_module_t* p_ml, int i_query, int64_t i_id );
+    void* (*pf_get)( struct vlc_medialibrary_module_t* p_ml, int i_query, va_list args );
 
     const vlc_medialibrary_callbacks_t* cbs;
 };
@@ -685,7 +780,7 @@ void libvlc_MlRelease( vlc_medialibrary_t* p_ml );
 VLC_API vlc_medialibrary_t* vlc_ml_instance_get( vlc_object_t* p_obj ) VLC_USED;
 #define vlc_ml_instance_get(x) vlc_ml_instance_get( VLC_OBJECT(x) )
 
-VLC_API void* vlc_ml_get( vlc_medialibrary_t* p_ml, int i_query, int64_t i_id ) VLC_USED;
+VLC_API void* vlc_ml_get( vlc_medialibrary_t* p_ml, int i_query, ... ) VLC_USED;
 VLC_API int vlc_ml_control( vlc_medialibrary_t* p_ml, int i_query, ... ) VLC_USED;
 VLC_API int vlc_ml_list( vlc_medialibrary_t* p_ml, int i_query,
                              const vlc_ml_query_params_t* p_params, ... );
@@ -703,6 +798,16 @@ vlc_ml_event_register_callback( vlc_medialibrary_t* p_ml, vlc_ml_callback_t cb, 
  */
 VLC_API void vlc_ml_event_unregister_callback( vlc_medialibrary_t* p_ml,
                                                vlc_ml_event_callback_t* p_callback );
+/**
+ * \brief Unregisters a medialibrary callback from the said callback.
+ * \param p_callback The handle returned by vlc_ml_register_callback
+ *
+ * This must only be called synchronously from the callback function provided to
+ * vlc_ml_event_register_callback
+ * The p_callback handle must be considered invalid when this function returns
+ */
+VLC_API void vlc_ml_event_unregister_from_callback( vlc_medialibrary_t* p_ml,
+                                                    vlc_ml_event_callback_t* p_callback );
 
 
 VLC_API void vlc_ml_show_release( vlc_ml_show_t* p_show );
@@ -721,6 +826,7 @@ VLC_API void vlc_ml_show_list_release( vlc_ml_show_list_t* p_list );
 VLC_API void vlc_ml_genre_list_release( vlc_ml_genre_list_t* p_list );
 VLC_API void vlc_ml_playlist_list_release( vlc_ml_playlist_list_t* p_list );
 VLC_API void vlc_ml_entry_point_list_release( vlc_ml_entry_point_list_t* p_list );
+VLC_API void vlc_ml_playback_states_all_release( vlc_ml_playback_states_all* prefs );
 
 static inline vlc_ml_query_params_t vlc_ml_query_params_create()
 {
@@ -757,6 +863,12 @@ static inline int vlc_ml_list_folder( vlc_medialibrary_t* p_ml,
                                       vlc_ml_entry_point_list_t** pp_entrypoints )
 {
     return vlc_ml_control( p_ml, VLC_ML_LIST_FOLDERS, pp_entrypoints );
+}
+
+static inline int vlc_ml_is_indexed( vlc_medialibrary_t* p_ml,
+                                     const char* psz_mrl, bool* p_res )
+{
+    return vlc_ml_control( p_ml, VLC_ML_IS_INDEXED, psz_mrl, p_res );
 }
 
 static inline int vlc_ml_reload_folder( vlc_medialibrary_t* p_ml, const char* psz_mrl )
@@ -800,19 +912,44 @@ static inline int vlc_ml_media_increase_playcount( vlc_medialibrary_t* p_ml, int
     return vlc_ml_control( p_ml, VLC_ML_MEDIA_INCREASE_PLAY_COUNT, i_media_id );
 }
 
-static inline int vlc_ml_media_get_playback_pref( vlc_medialibrary_t* p_ml, int64_t i_media_id, int i_pref, char** ppsz_result )
+static inline int vlc_ml_media_get_playback_state( vlc_medialibrary_t* p_ml, int64_t i_media_id, int i_state, char** ppsz_result )
 {
-    return vlc_ml_control( p_ml, VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_PREF, i_media_id, i_pref, ppsz_result );
+    return vlc_ml_control( p_ml, VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_STATE, i_media_id, i_state, ppsz_result );
 }
 
-static inline int vlc_ml_media_set_playback_pref( vlc_medialibrary_t* p_ml, int64_t i_media_id, int i_pref, const char* psz_value )
+static inline int vlc_ml_media_set_playback_state( vlc_medialibrary_t* p_ml, int64_t i_media_id, int i_state, const char* psz_value )
 {
-    return vlc_ml_control( p_ml, VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_PREF, i_media_id, i_pref, psz_value );
+    return vlc_ml_control( p_ml, VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_STATE, i_media_id, i_state, psz_value );
 }
 
-static inline int vlc_ml_media_set_thumbnail( vlc_medialibrary_t* p_ml, int64_t i_media_id, const char* psz_mrl )
+static inline int vlc_ml_media_get_all_playback_pref( vlc_medialibrary_t* p_ml,
+                                                      int64_t i_media_id,
+                                                      vlc_ml_playback_states_all* prefs )
 {
-    return vlc_ml_control( p_ml, VLC_ML_MEDIA_SET_THUMBNAIL, i_media_id, psz_mrl );
+    return vlc_ml_control( p_ml,VLC_ML_MEDIA_GET_ALL_MEDIA_PLAYBACK_STATES, i_media_id, prefs );
+}
+
+static inline int vlc_ml_media_set_all_playback_states( vlc_medialibrary_t* p_ml,
+                                                        int64_t i_media_id,
+                                                        const vlc_ml_playback_states_all* prefs )
+{
+    return vlc_ml_control( p_ml, VLC_ML_MEDIA_SET_ALL_MEDIA_PLAYBACK_STATES, i_media_id, prefs );
+}
+
+static inline int vlc_ml_media_set_thumbnail( vlc_medialibrary_t* p_ml, int64_t i_media_id,
+                                              const char* psz_mrl, vlc_ml_thumbnail_size_t sizeType )
+{
+    return vlc_ml_control( p_ml, VLC_ML_MEDIA_SET_THUMBNAIL, i_media_id, psz_mrl, sizeType );
+}
+
+static inline int vlc_ml_media_generate_thumbnail( vlc_medialibrary_t* p_ml, int64_t i_media_id,
+                                                   vlc_ml_thumbnail_size_t size_type,
+                                                   uint32_t i_desired_width,
+                                                   uint32_t i_desired_height,
+                                                   float position )
+{
+    return vlc_ml_control( p_ml, VLC_ML_MEDIA_GENERATE_THUMBNAIL, i_media_id,
+                           size_type, i_desired_width, i_desired_height, position );
 }
 
 static inline int vlc_ml_media_add_external_mrl( vlc_medialibrary_t* p_ml, int64_t i_media_id,
@@ -821,9 +958,32 @@ static inline int vlc_ml_media_add_external_mrl( vlc_medialibrary_t* p_ml, int64
     return vlc_ml_control( p_ml, VLC_ML_MEDIA_ADD_EXTERNAL_MRL, i_media_id, psz_mrl, i_type );
 }
 
+static inline int vlc_ml_media_set_type( vlc_medialibrary_t* p_ml, int64_t i_media_id,
+                                         vlc_ml_media_type_t i_type )
+{
+    return vlc_ml_control( p_ml, VLC_ML_MEDIA_SET_TYPE, i_media_id, (int)i_type );
+}
+
 static inline vlc_ml_media_t* vlc_ml_get_media( vlc_medialibrary_t* p_ml, int64_t i_media_id )
 {
     return (vlc_ml_media_t*)vlc_ml_get( p_ml, VLC_ML_GET_MEDIA, i_media_id );
+}
+
+static inline vlc_ml_media_t* vlc_ml_get_media_by_mrl( vlc_medialibrary_t* p_ml,
+                                                       const char* psz_mrl )
+{
+    return (vlc_ml_media_t*)vlc_ml_get( p_ml, VLC_ML_GET_MEDIA_BY_MRL, psz_mrl );
+}
+
+static inline input_item_t* vlc_ml_get_input_item( vlc_medialibrary_t* p_ml, int64_t i_media_id )
+{
+    return (input_item_t*)vlc_ml_get( p_ml, VLC_ML_GET_INPUT_ITEM, i_media_id );
+}
+
+static inline input_item_t* vlc_ml_get_input_item_by_mrl( vlc_medialibrary_t* p_ml,
+                                                          const char* psz_mrl )
+{
+    return (input_item_t*)vlc_ml_get( p_ml, VLC_ML_GET_INPUT_ITEM_BY_MRL, psz_mrl );
 }
 
 static inline vlc_ml_album_t* vlc_ml_get_album( vlc_medialibrary_t* p_ml, int64_t i_album_id )
@@ -1091,10 +1251,10 @@ static inline size_t vlc_ml_count_shows( vlc_medialibrary_t* p_ml, const vlc_ml_
     return count;
 }
 
-static inline vlc_ml_media_list_t* vlc_ml_list_genre_artists( vlc_medialibrary_t* p_ml, const vlc_ml_query_params_t* params, int64_t i_genre_id )
+static inline vlc_ml_artist_list_t* vlc_ml_list_genre_artists( vlc_medialibrary_t* p_ml, const vlc_ml_query_params_t* params, int64_t i_genre_id )
 {
     vlc_assert( p_ml != NULL );
-    vlc_ml_media_list_t* res;
+    vlc_ml_artist_list_t* res;
     if ( vlc_ml_list( p_ml, VLC_ML_LIST_GENRE_ARTISTS, params, i_genre_id, &res ) != VLC_SUCCESS )
         return NULL;
     return res;
@@ -1217,6 +1377,24 @@ static inline size_t vlc_ml_count_playlists( vlc_medialibrary_t* p_ml, const vlc
     return count;
 }
 
+static inline vlc_ml_media_list_t* vlc_ml_list_playlist_media( vlc_medialibrary_t* p_ml, const vlc_ml_query_params_t* params, int64_t i_playlist_id )
+{
+    vlc_assert( p_ml != NULL );
+    vlc_ml_media_list_t* res;
+    if ( vlc_ml_list( p_ml, VLC_ML_LIST_PLAYLIST_MEDIA, params, i_playlist_id, &res ) != VLC_SUCCESS )
+        return NULL;
+    return res;
+}
+
+static inline size_t vlc_ml_count_playlist_media( vlc_medialibrary_t* p_ml, const vlc_ml_query_params_t* params, int64_t i_playlist_id )
+{
+    vlc_assert( p_ml != NULL );
+    size_t count;
+    if ( vlc_ml_list( p_ml, VLC_ML_COUNT_PLAYLIST_MEDIA, params, i_playlist_id, &count ) != VLC_SUCCESS )
+        return 0;
+    return count;
+}
+
 #ifdef __cplusplus
 }
 #endif /* C++ */
@@ -1237,7 +1415,8 @@ static inline size_t vlc_ml_count_playlists( vlc_medialibrary_t* p_ml, const vlc
     vlc_ml_show_list_t*: vlc_ml_show_list_release, \
     vlc_ml_genre_list_t*: vlc_ml_genre_list_release, \
     vlc_ml_playlist_list_t*: vlc_ml_playlist_list_release, \
-    vlc_ml_entry_point_list_t*: vlc_ml_entry_point_list_release \
+    vlc_ml_entry_point_list_t*: vlc_ml_entry_point_list_release, \
+    vlc_ml_playback_states_all*: vlc_ml_playback_states_all_release \
     )( OBJ )
 #else
 static inline void vlc_ml_release( vlc_ml_show_t* show ) { vlc_ml_show_release( show ); }
@@ -1255,6 +1434,7 @@ static inline void vlc_ml_release( vlc_ml_show_list_t* list ) { vlc_ml_show_list
 static inline void vlc_ml_release( vlc_ml_genre_list_t* list ) { vlc_ml_genre_list_release( list ); }
 static inline void vlc_ml_release( vlc_ml_playlist_list_t* list ) { vlc_ml_playlist_list_release( list ); }
 static inline void vlc_ml_release( vlc_ml_entry_point_list_t* list ) { vlc_ml_entry_point_list_release( list ); }
+static inline void vlc_ml_release( vlc_ml_playback_states_all* prefs ) { vlc_ml_playback_states_all_release( prefs ); }
 #endif
 
 #endif /* VLC_MEDIA_LIBRARY_H */

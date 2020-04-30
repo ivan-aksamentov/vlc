@@ -2,7 +2,6 @@
  * access.c
  *****************************************************************************
  * Copyright (C) 1999-2008 VLC authors and VideoLAN
- * $Id$
  *
  * Author: Laurent Aimar <fenrir _AT_ videolan _DOT_ org>
  *
@@ -314,6 +313,12 @@ stream_t *stream_AccessNew(vlc_object_t *parent, input_thread_t *input,
 
         s->p_input_item = input ? input_GetItem(input) : NULL;
         s->psz_url = strdup(access->psz_url);
+        if (unlikely(s->psz_url == NULL))
+        {
+            vlc_object_delete(s);
+            vlc_stream_Delete(access);
+            return NULL;
+        }
 
         if (access->pf_block != NULL)
             s->pf_block = AStreamReadBlock;

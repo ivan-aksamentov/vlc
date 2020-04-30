@@ -2,7 +2,6 @@
  * preparser.c
  *****************************************************************************
  * Copyright © 2017-2017 VLC authors and VideoLAN
- * $Id$
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by
@@ -43,6 +42,7 @@ struct input_preparser_t
 typedef struct input_preparser_req_t
 {
     input_item_t *item;
+    input_item_meta_request_option_t options;
     const input_preparser_callbacks_t *cbs;
     void *userdata;
     vlc_atomic_rc_t rc;
@@ -53,12 +53,13 @@ typedef struct input_preparser_task_t
     input_preparser_req_t *req;
     input_preparser_t* preparser;
     int preparse_status;
-    input_thread_t* input;
+    input_item_parser_id_t *parser;
     atomic_int state;
     atomic_bool done;
 } input_preparser_task_t;
 
 static input_preparser_req_t *ReqCreate(input_item_t *item,
+                                        input_item_meta_request_option_t options,
                                         const input_preparser_callbacks_t *cbs,
                                         void *userdata)
 {
@@ -67,6 +68,7 @@ static input_preparser_req_t *ReqCreate(input_item_t *item,
         return NULL;
 
     req->item = item;
+    req->options = options;
     req->cbs = cbs;
     req->userdata = userdata;
     vlc_atomic_rc_init(&req->rc);
@@ -90,31 +92,25 @@ static void ReqRelease(input_preparser_req_t *req)
     }
 }
 
-static void InputEvent( input_thread_t *input,
-                        const struct vlc_input_event *event, void *task_ )
+static void OnParserEnded(input_item_t *item, int status, void *task_)
 {
-    VLC_UNUSED( input );
+    VLC_UNUSED(item);
     input_preparser_task_t* task = task_;
 
-    switch( event->type )
-    {
-        case INPUT_EVENT_STATE:
-            atomic_store( &task->state, event->state );
-            break;
+    atomic_store( &task->state, status );
+    atomic_store( &task->done, true );
+    background_worker_RequestProbe( task->preparser->worker );
+}
 
-        case INPUT_EVENT_DEAD:
-            atomic_store( &task->done, true );
-            background_worker_RequestProbe( task->preparser->worker );
-            break;
-        case INPUT_EVENT_SUBITEMS:
-        {
-            input_preparser_req_t *req = task->req;
-            if (req->cbs && req->cbs->on_subtree_added)
-                req->cbs->on_subtree_added(req->item, event->subitems, req->userdata);
-            break;
-        }
-        default: ;
-    }
+static void OnParserSubtreeAdded(input_item_t *item, input_item_node_t *subtree,
+                                 void *task_)
+{
+    VLC_UNUSED(item);
+    input_preparser_task_t* task = task_;
+    input_preparser_req_t *req = task->req;
+
+    if (req->cbs && req->cbs->on_subtree_added)
+        req->cbs->on_subtree_added(req->item, subtree, req->userdata);
 }
 
 static int PreparserOpenInput( void* preparser_, void* req_, void** out )
@@ -126,23 +122,21 @@ static int PreparserOpenInput( void* preparser_, void* req_, void** out )
     if( unlikely( !task ) )
         goto error;
 
-    atomic_init( &task->state, INIT_S );
+    static const input_item_parser_cbs_t cbs = {
+        .on_ended = OnParserEnded,
+        .on_subtree_added = OnParserSubtreeAdded,
+    };
+
+    atomic_init( &task->state, VLC_ETIMEOUT );
     atomic_init( &task->done, false );
 
     task->preparser = preparser_;
-    task->input = input_CreatePreparser( preparser->owner, InputEvent,
-                                         task, req->item );
-    if( !task->input )
-        goto error;
-
     task->req = req;
     task->preparse_status = -1;
-
-    if( input_Start( task->input ) )
-    {
-        input_Close( task->input );
+    task->parser = input_item_Parse( req->item, preparser->owner, &cbs,
+                                     task );
+    if( !task->parser )
         goto error;
-    }
 
     *out = task;
 
@@ -188,34 +182,35 @@ static void PreparserCloseInput( void* preparser_, void* task_ )
     input_preparser_req_t *req = task->req;
 
     input_preparser_t* preparser = preparser_;
-    input_thread_t* input = task->input;
-    input_item_t* item = input_priv(task->input)->p_item;
+    input_item_t* item = req->item;
 
     int status;
     switch( atomic_load( &task->state ) )
     {
-        case END_S:
+        case VLC_SUCCESS:
             status = ITEM_PREPARSE_DONE;
             break;
-        case ERROR_S:
-            status = ITEM_PREPARSE_FAILED;
+        case VLC_ETIMEOUT:
+            status = ITEM_PREPARSE_TIMEOUT;
             break;
         default:
-            status = ITEM_PREPARSE_TIMEOUT;
+            status = ITEM_PREPARSE_FAILED;
+            break;
     }
 
-    input_Stop( input );
-    input_Close( input );
+    input_item_parser_id_Release( task->parser );
 
-    if( preparser->fetcher )
+    if( preparser->fetcher && (req->options & META_REQUEST_OPTION_FETCH_ANY) )
     {
         task->preparse_status = status;
-        if (!input_fetcher_Push(preparser->fetcher, item, 0,
-                               &input_fetcher_callbacks, task))
+        ReqHold(task->req);
+        if (!input_fetcher_Push(preparser->fetcher, item,
+                                req->options & META_REQUEST_OPTION_FETCH_ANY,
+                                &input_fetcher_callbacks, task))
         {
-            ReqHold(task->req);
             return;
         }
+        ReqRelease(task->req);
     }
 
     free(task);
@@ -273,6 +268,8 @@ void input_preparser_Push( input_preparser_t *preparser,
     vlc_mutex_lock( &item->lock );
     enum input_item_type_e i_type = item->i_type;
     int b_net = item->b_net;
+    if( i_options & META_REQUEST_OPTION_DO_INTERACT )
+        item->b_preparse_interact = true;
     vlc_mutex_unlock( &item->lock );
 
     switch( i_type )
@@ -290,7 +287,8 @@ void input_preparser_Push( input_preparser_t *preparser,
             return;
     }
 
-    struct input_preparser_req_t *req = ReqCreate(item, cbs, cbs_userdata);
+    struct input_preparser_req_t *req = ReqCreate(item, i_options,
+                                                  cbs, cbs_userdata);
 
     if (background_worker_Push(preparser->worker, req, id, timeout))
         if (req->cbs && cbs->on_preparse_ended)

@@ -138,26 +138,32 @@ static block_t *ConvertWEBVTT( const webvtt_cue_t *p_cue, bool b_continued )
         return NULL;
 }
 
-static void memstream_Append( struct vlc_memstream *ms, const char *psz )
+struct memstream_wrap
 {
-    if( ms->stream != NULL )
+    struct vlc_memstream memstream;
+    bool b_opened;
+};
+
+static void memstream_Append( struct memstream_wrap *mw, const char *psz )
+{
+    if( mw->b_opened )
     {
-        vlc_memstream_puts( ms, psz );
-        vlc_memstream_putc( ms, '\n' );
+        vlc_memstream_puts( &mw->memstream, psz );
+        vlc_memstream_putc( &mw->memstream, '\n' );
     }
 }
 
-static void memstream_Grab( struct vlc_memstream *ms, void **pp, size_t *pi )
+static void memstream_Grab( struct memstream_wrap *mw, void **pp, size_t *pi )
 {
-    if( ms->stream != NULL && vlc_memstream_close( ms ) == VLC_SUCCESS )
+    if( mw->b_opened && vlc_memstream_close( &mw->memstream ) == VLC_SUCCESS )
     {
-        if( ms->length == 0 )
+        if( mw->memstream.length == 0 )
         {
-            free( ms->ptr );
-            ms->ptr = NULL;
+            free( mw->memstream.ptr );
+            mw->memstream.ptr = NULL;
         }
-        *pp = ms->ptr;
-        *pi = ms->length;
+        *pp = mw->memstream.ptr;
+        *pi = mw->memstream.length;
     }
 }
 
@@ -167,7 +173,7 @@ static void memstream_Grab( struct vlc_memstream *ms, void **pp, size_t *pi )
 struct callback_ctx
 {
     demux_t *p_demux;
-    struct vlc_memstream regions, styles;
+    struct memstream_wrap regions, styles;
     bool b_ordered;
 };
 
@@ -379,8 +385,8 @@ static int ReadWEBVTT( demux_t *p_demux )
     if( p_parser == NULL )
         return VLC_EGENERIC;
 
-    (void) vlc_memstream_open( &ctx.regions );
-    (void) vlc_memstream_open( &ctx.styles );
+    ctx.regions.b_opened = !vlc_memstream_open( &ctx.regions.memstream );
+    ctx.styles.b_opened = !vlc_memstream_open( &ctx.styles.memstream );
 
     char *psz_line;
     while( (psz_line = vlc_stream_ReadLine( p_demux->s )) )
@@ -412,7 +418,15 @@ static void MakeExtradata( demux_sys_t *p_sys, void **p_extra, size_t *pi_extra 
                                      p_sys->regions_headers.i_data );
     vlc_memstream_write( &extradata, p_sys->styles_headers.p_data,
                                      p_sys->styles_headers.i_data );
-    memstream_Grab( &extradata, p_extra, pi_extra );
+    if( vlc_memstream_close( &extradata ) == VLC_SUCCESS )
+    {
+        if( extradata.length )
+        {
+            *p_extra = extradata.ptr;
+            *pi_extra = extradata.length;
+        }
+        else free( extradata.ptr );
+    }
 }
 
 /*****************************************************************************
@@ -438,12 +452,16 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_SET_TIME:
-            p_sys->index.i_current = getIndexByTime( p_sys, va_arg( args, vlc_tick_t ) );
-            p_sys->b_first_time = true;
-            p_sys->i_next_demux_time =
-                    p_sys->index.p_array[p_sys->index.i_current].time;
-            p_sys->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
-            return VLC_SUCCESS;
+            if( p_sys->cues.i_count )
+            {
+                p_sys->index.i_current = getIndexByTime( p_sys, va_arg( args, vlc_tick_t ) );
+                p_sys->b_first_time = true;
+                p_sys->i_next_demux_time =
+                        p_sys->index.p_array[p_sys->index.i_current].time;
+                p_sys->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
+                return VLC_SUCCESS;
+            }
+            break;
 
         case DEMUX_GET_POSITION:
             pf = va_arg( args, double * );
@@ -651,6 +669,7 @@ int webvtt_OpenDemux ( vlc_object_t *p_this )
     size_t i_extra = 0;
     MakeExtradata( p_sys, &fmt.p_extra, &i_extra );
     fmt.i_extra = i_extra;
+    fmt.i_id = 0;
     p_sys->es = es_out_Add( p_demux->out, &fmt );
     es_format_Clean( &fmt );
     if( p_sys->es == NULL )

@@ -3,6 +3,9 @@ GCRYPT_VERSION := 1.7.10
 GCRYPT_URL := http://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-$(GCRYPT_VERSION).tar.bz2
 
 PKGS += gcrypt
+ifeq ($(call need_pkg,"libgcrypt"),)
+PKGS_FOUND += gcrypt
+endif
 
 $(TARBALLS)/libgcrypt-$(GCRYPT_VERSION).tar.bz2:
 	$(call download_pkg,$(GCRYPT_URL),gcrypt)
@@ -62,11 +65,6 @@ GCRYPT_CONF += ac_cv_sys_symbol_underscore=no
 endif
 ifeq ($(ARCH),aarch64)
 GCRYPT_CONF += --disable-arm-crypto-support
-endif
-endif
-ifdef HAVE_TIZEN
-ifeq ($(TIZEN_ABI), x86)
-GCRYPT_CONF += ac_cv_sys_symbol_underscore=no
 endif
 endif
 ifdef HAVE_NACL

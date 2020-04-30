@@ -47,8 +47,7 @@ endif
 
 vlc_osx_SOURCES = darwinvlc.m
 vlc_osx_LDFLAGS = $(LDFLAGS_vlc) -Wl,-framework,CoreFoundation,-framework,Cocoa
-vlc_osx_LDFLAGS += -Xlinker -rpath -Xlinker "@executable_path/lib/"
-vlc_osx_LDFLAGS += -Xlinker -rpath -Xlinker "@executable_path/plugins/"
+vlc_osx_LDFLAGS += -Xlinker -rpath -Xlinker "$(libdir)"
 if HAVE_BREAKPAD
 vlc_osx_LDFLAGS += -Wl,-framework,Breakpad
 vlc_osx_OBJCFLAGS = -F$(CONTRIB_DIR)/Frameworks
@@ -133,7 +132,7 @@ MOSTLYCLEANFILES = $(noinst_DATA)
 if HAVE_OSX
 if BUILD_VLC
 install-data-local:
-	cd $(bindir); mv vlc-osx vlc
+	cd "$(DESTDIR)$(bindir)"; mv vlc-osx vlc
 
 endif
 endif

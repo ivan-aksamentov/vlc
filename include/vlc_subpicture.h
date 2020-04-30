@@ -2,7 +2,6 @@
  * vlc_subpicture.h: subpicture definitions
  *****************************************************************************
  * Copyright (C) 1999 - 2009 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Vincent Seguin <seguin@via.ecp.fr>
  *          Samuel Hocevar <sam@via.ecp.fr>
@@ -47,6 +46,7 @@
  */
 typedef struct subpicture_region_private_t subpicture_region_private_t;
 typedef struct vlc_spu_highlight_t vlc_spu_highlight_t;
+typedef struct filter_t vlc_blender_t;
 
 /**
  * Video subtitle region
@@ -73,6 +73,9 @@ struct subpicture_region_t
     bool            b_balanced_text; /** try to balance wrapped text lines */
     int             i_max_width;     /** horizontal rendering/cropping target/limit */
     int             i_max_height;    /** vertical rendering/cropping target/limit */
+
+    vlc_rational_t  zoom_h;
+    vlc_rational_t  zoom_v;
 
     subpicture_region_t *p_next;                /**< next region in the list */
     subpicture_region_private_t *p_private;  /**< Private data for spu_t *only* */
@@ -163,7 +166,7 @@ struct subpicture_t
 {
     /** \name Channel ID */
     /**@{*/
-    int             i_channel;                    /**< subpicture channel ID */
+    ssize_t         i_channel;                    /**< subpicture channel ID */
     /**@}*/
 
     /** \name Type and flags
@@ -239,7 +242,7 @@ VLC_API void subpicture_Update( subpicture_t *, const video_format_t *src, const
  *  - contains only picture (no text rendering).
  * \return the number of region(s) successfully blent
  */
-VLC_API unsigned picture_BlendSubpicture( picture_t *, filter_t *p_blend, subpicture_t * );
+VLC_API unsigned picture_BlendSubpicture( picture_t *, vlc_blender_t *, subpicture_t * );
 
 /**@}*/
 

@@ -36,7 +36,6 @@
 #include <vlc_meta.h>                  /* vlc_meta_Set*, vlc_meta_New */
 #include <vlc_access.h>                /* GET_PRIVATE_ID_STATE */
 #include <vlc_codecs.h>                /* VLC_BITMAPINFOHEADER, WAVEFORMATEX */
-#include <vlc_input.h>
 #include <vlc_vout.h>
 
 #include <limits.h>
@@ -151,7 +150,7 @@ static int Open( vlc_object_t * p_this )
 {
     demux_t     *p_demux = (demux_t *)p_this;
     demux_sys_t *p_sys;
-    guid_t      guid;
+    vlc_guid_t      guid;
     const uint8_t     *p_peek;
 
     /* A little test to see if it could be a asf stream */
@@ -226,7 +225,7 @@ static int Demux( demux_t *p_demux )
             const uint8_t *p_peek;
             if( vlc_stream_Peek( p_demux->s, &p_peek, 16 ) == 16 )
             {
-                guid_t guid;
+                vlc_guid_t guid;
 
                 ASF_GetGUID( &guid, p_peek );
                 p_sys->b_eof = !guidcmp( &guid, &asf_object_header_guid );
@@ -429,7 +428,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         return VLC_SUCCESS;
 
     case DEMUX_SET_TIME:
-        if ( p_sys->p_fp &&
+        if ( !p_sys->p_fp ||
              ! ( p_sys->p_fp->i_flags & ASF_FILE_PROPERTIES_SEEKABLE ) )
             return VLC_EGENERIC;
 
@@ -491,6 +490,9 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         return i_ret;
     }
 
+    case DEMUX_SET_ES_LIST:
+        return VLC_EGENERIC; /* TODO */
+
     case DEMUX_GET_POSITION:
         if( p_sys->i_time == VLC_TICK_INVALID ) return VLC_EGENERIC;
         if( p_sys->i_length != 0 )
@@ -507,8 +509,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                                        i_query, args );
 
     case DEMUX_SET_POSITION:
-        if ( p_sys->p_fp &&
-             ! ( p_sys->p_fp->i_flags & ASF_FILE_PROPERTIES_SEEKABLE ) )
+        if ( !p_sys->p_fp ||
+             ( !( p_sys->p_fp->i_flags & ASF_FILE_PROPERTIES_SEEKABLE ) && !p_sys->b_index ) )
             return VLC_EGENERIC;
 
         SeekPrepare( p_demux );
@@ -531,8 +533,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         return VLC_SUCCESS;
 
     case DEMUX_CAN_SEEK:
-        if ( p_sys->p_fp &&
-             ! ( p_sys->p_fp->i_flags & ASF_FILE_PROPERTIES_SEEKABLE ) )
+        if ( !p_sys->p_fp ||
+             ( !( p_sys->p_fp->i_flags & ASF_FILE_PROPERTIES_SEEKABLE ) && !p_sys->b_index ) )
         {
             bool *pb_bool = va_arg( args, bool * );
             *pb_bool = false;
@@ -871,6 +873,10 @@ static int DemuxInit( demux_t *p_demux )
                                i_stream );
         p_esp = NULL;
 
+        /* Ignore duplicated streams numbers */
+        if (p_sys->track[p_sp->i_stream_number])
+            continue;
+
         tk = p_sys->track[p_sp->i_stream_number] = malloc( sizeof( asf_track_t ) );
         if (!tk)
             goto error;
@@ -1048,12 +1054,12 @@ static int DemuxInit( demux_t *p_demux )
         else if( guidcmp( &p_sp->i_stream_type, &asf_object_stream_type_binary ) &&
             p_sp->i_type_specific_data_length >= 64 )
         {
-            guid_t i_major_media_type;
+            vlc_guid_t i_major_media_type;
             ASF_GetGUID( &i_major_media_type, p_sp->p_type_specific_data );
             msg_Dbg( p_demux, "stream(ID:%d) major type " GUID_FMT, p_sp->i_stream_number,
                      GUID_PRINT(i_major_media_type) );
 
-            guid_t i_media_subtype;
+            vlc_guid_t i_media_subtype;
             ASF_GetGUID( &i_media_subtype, &p_sp->p_type_specific_data[16] );
             msg_Dbg( p_demux, "stream(ID:%d) subtype " GUID_FMT, p_sp->i_stream_number,
                      GUID_PRINT(i_media_subtype) );
@@ -1062,7 +1068,7 @@ static int DemuxInit( demux_t *p_demux )
             //uint32_t i_temporal_compression = GetDWBE( &p_sp->p_type_specific_data[36] );
             //uint32_t i_sample_size = GetDWBE( &p_sp->p_type_specific_data[40] );
 
-            guid_t i_format_type;
+            vlc_guid_t i_format_type;
             ASF_GetGUID( &i_format_type, &p_sp->p_type_specific_data[44] );
             msg_Dbg( p_demux, "stream(ID:%d) format type " GUID_FMT, p_sp->i_stream_number,
                      GUID_PRINT(i_format_type) );
@@ -1099,7 +1105,7 @@ static int DemuxInit( demux_t *p_demux )
                 {
                     GET_CHECKED( fmt.i_extra, __MIN( GetWLE( &p_data[16] ),
                                          p_sp->i_type_specific_data_length -
-                                         sizeof( WAVEFORMATEX ) ),
+                                         sizeof( WAVEFORMATEX ) - 64),
                                  INT_MAX, uint32_t );
                     fmt.p_extra = malloc( fmt.i_extra );
                     if ( fmt.p_extra )
@@ -1385,6 +1391,7 @@ static void DemuxEnd( demux_t *p_demux )
     {
         ASF_FreeObjectRoot( p_demux->s, p_sys->p_root );
         p_sys->p_root = NULL;
+        p_sys->p_fp = NULL;
     }
     if( p_sys->meta )
     {

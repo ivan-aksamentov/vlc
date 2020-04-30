@@ -2,7 +2,6 @@
  * mpeg4video.c: mpeg 4 video packetizer
  *****************************************************************************
  * Copyright (C) 2001-2006 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Gildas Bazin <gbazin@videolan.org>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -146,7 +145,8 @@ static int Open( vlc_object_t *p_this )
     packetizer_Init( &p_sys->packetizer,
                      p_mp4v_startcode, sizeof(p_mp4v_startcode), startcode_FindAnnexB,
                      NULL, 0, 4,
-                     PacketizeReset, PacketizeParse, PacketizeValidate, p_dec );
+                     PacketizeReset, PacketizeParse, PacketizeValidate, NULL,
+                     p_dec );
 
     p_sys->p_frame = NULL;
     p_sys->pp_last = &p_sys->p_frame;
@@ -205,12 +205,12 @@ static void PacketizeFlush( decoder_t *p_dec )
 /*****************************************************************************
  * Helpers:
  *****************************************************************************/
-static void PacketizeReset( void *p_private, bool b_broken )
+static void PacketizeReset( void *p_private, bool b_flush )
 {
     decoder_t *p_dec = p_private;
     decoder_sys_t *p_sys = p_dec->p_sys;
 
-    if( b_broken )
+    if( b_flush )
     {
         if( p_sys->p_frame )
             block_ChainRelease( p_sys->p_frame );
@@ -475,7 +475,7 @@ static int ParseVO( decoder_t *p_dec, block_t *p_vo )
             p_dec->fmt_out.video.primaries = iso_23001_8_cp_to_vlc_primaries( colour_primaries );
             p_dec->fmt_out.video.transfer = iso_23001_8_tc_to_vlc_xfer( colour_xfer );
             p_dec->fmt_out.video.space = iso_23001_8_mc_to_vlc_coeffs( colour_matrix_coeff );
-            p_dec->fmt_out.video.b_color_range_full = full_range;
+            p_dec->fmt_out.video.color_range = full_range ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
         }
     }
 

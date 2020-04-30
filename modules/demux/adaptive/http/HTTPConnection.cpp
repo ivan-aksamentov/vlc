@@ -29,6 +29,7 @@
 
 #include <cstdio>
 #include <sstream>
+#include <algorithm>
 #include <vlc_stream.h>
 
 using namespace adaptive::http;
@@ -70,7 +71,14 @@ HTTPConnection::HTTPConnection(vlc_object_t *p_object_, AuthStorage *auth,
     : AbstractConnection( p_object_ )
 {
     transport = socket_;
-    psz_useragent = var_InheritString(p_object_, "http-user-agent");
+    char *psz_useragent = var_InheritString(p_object_, "http-user-agent");
+    useragent = psz_useragent ? std::string(psz_useragent) : std::string("");
+    free(psz_useragent);
+    char *psz_referer = var_InheritString(p_object_, "http-referrer");
+    referer = psz_referer ? std::string(psz_referer) : std::string("");
+    free(psz_referer);
+    std::replace_if(useragent.begin(), useragent.end(), [](const char &c){return !::isprint(c);}, ' ');
+    std::replace_if(referer.begin(), referer.end(), [](const char &c){return !::isprint(c);}, ' ');
     queryOk = false;
     retries = 0;
     authStorage = auth;
@@ -83,7 +91,6 @@ HTTPConnection::HTTPConnection(vlc_object_t *p_object_, AuthStorage *auth,
 
 HTTPConnection::~HTTPConnection()
 {
-    free(psz_useragent);
     delete transport;
 }
 
@@ -289,6 +296,11 @@ enum RequestStatus
        !locationparams.getUrl().empty())
     {
         msg_Info(p_object, "%d redirection to %s", replycode, locationparams.getUrl().c_str());
+        if(locationparams.isLocal() && !params.isLocal())
+        {
+            msg_Err(p_object, "redirection to local rejected");
+            return RequestStatus::GenericError;
+        }
         return RequestStatus::Redirection;
     }
     else if (replycode != 200 && replycode != 206)
@@ -434,8 +446,11 @@ std::string HTTPConnection::buildRequestHeader(const std::string &path) const
         if(!cookie.empty())
             req << "Cookie: " << cookie << "\r\n";
     }
-    req << "Cache-Control: no-cache" << "\r\n" <<
-           "User-Agent: " << std::string(psz_useragent) << "\r\n";
+    req << "Cache-Control: no-cache" << "\r\n";
+    if(!useragent.empty())
+        req << "User-Agent: " << useragent << "\r\n";
+    if(!referer.empty())
+        req << "Referer: " << referer << "\r\n";
     req << extraRequestHeaders();
     return req.str();
 }

@@ -2,7 +2,6 @@
  * idummy.c: dummy input plugin, to manage "vlc://" special options
  *****************************************************************************
  * Copyright (C) 2001, 2002 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Samuel Hocevar <sam@zoy.org>
  *
@@ -41,7 +40,7 @@ vlc_module_begin ()
     set_shortname( N_("Dummy") )
     set_description( N_("Dummy input") )
     set_capability( "access", 0 )
-    set_callbacks( OpenDemux, NULL )
+    set_callback( OpenDemux )
     add_shortcut( "dummy", "vlc" )
 vlc_module_end ()
 
@@ -160,7 +159,7 @@ nop:
         msg_Info( p_demux, "command `quit'" );
         p_demux->pf_demux = DemuxNoOp;
         p_demux->pf_control = DemuxControl;
-        libvlc_Quit( p_demux->obj.libvlc );
+        libvlc_Quit( vlc_object_instance(p_demux) );
         return VLC_SUCCESS;
     }
 

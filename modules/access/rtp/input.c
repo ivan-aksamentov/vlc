@@ -41,7 +41,7 @@
 
 #include "rtp.h"
 #ifdef HAVE_SRTP
-# include <srtp.h>
+# include "srtp.h"
 #endif
 
 #define DEFAULT_MRU (1500u - (20 + 8))
@@ -185,49 +185,5 @@ void *rtp_dgram_thread (void *opaque)
             deadline = VLC_TICK_INVALID;
         vlc_restorecancel (canc);
     }
-    return NULL;
-}
-
-/**
- * RTP/RTCP session thread for stream sockets (framed RTP)
- */
-void *rtp_stream_thread (void *opaque)
-{
-#ifndef _WIN32
-    demux_t *demux = opaque;
-    demux_sys_t *sys = demux->p_sys;
-    int fd = sys->fd;
-
-    for (;;)
-    {
-        /* There is no reordering on stream sockets, so no timeout. */
-        ssize_t val;
-
-        uint16_t frame_len;
-        if (recv (fd, &frame_len, 2, MSG_WAITALL) != 2)
-            break;
-
-        block_t *block = block_Alloc (ntohs (frame_len));
-        if (unlikely(block == NULL))
-            break;
-
-        block_cleanup_push (block);
-        val = recv (fd, block->p_buffer, block->i_buffer, MSG_WAITALL);
-        vlc_cleanup_pop ();
-
-        if (val != (ssize_t)block->i_buffer)
-        {
-            block_Release (block);
-            break;
-        }
-
-        int canc = vlc_savecancel ();
-        rtp_process (demux, block);
-        rtp_dequeue_force (demux, sys->session);
-        vlc_restorecancel (canc);
-    }
-#else
-    (void) opaque;
-#endif
     return NULL;
 }

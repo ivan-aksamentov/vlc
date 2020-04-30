@@ -2,7 +2,6 @@
  * zvbi.c : VBI and Teletext PES demux and decoder using libzvbi
  *****************************************************************************
  * Copyright (C) 2007, M2X
- * $Id$
  *
  * Authors: Derk-Jan Hartman <djhartman at m2x dot nl>
  *          Jean-Paul Saman <jpsaman at m2x dot nl>
@@ -101,7 +100,7 @@ vlc_module_begin ()
 
     add_integer_with_range( "vbi-page", 100, 0, 'z' << 16,
                  PAGE_TEXT, PAGE_LONGTEXT, false )
-    add_bool( "vbi-opaque", false,
+    add_bool( "vbi-opaque", true,
                  OPAQUE_TEXT, OPAQUE_LONGTEXT, false )
     add_integer( "vbi-position", 8, POS_TEXT, POS_LONGTEXT, false )
         change_integer_list( pi_pos_values, ppsz_pos_descriptions );
@@ -118,6 +117,7 @@ vlc_module_end ()
 // #define ZVBI_DEBUG
 
 //Guessing table for missing "default region triplet"
+/* Triplet 1 values from Table 32 */
 static const int pi_default_triplet[] = {
  0, 0, 0, 0,     // slo slk cze ces
  8,              // pol
@@ -126,7 +126,7 @@ static const int pi_default_triplet[] = {
  32,32,32,32,32, //est lit rus bul ukr
  48,48,          //gre ell
  64,             //ara
- 88,             //heb
+ 80,             //heb
  16 };           //default
 static const char *const ppsz_default_triplet[] = {
  "slo", "slk", "cze", "ces",
@@ -254,7 +254,7 @@ static int Open( vlc_object_t *p_this )
     var_AddCallback( p_dec, "vbi-page", RequestPage, p_sys );
 
     /* Check if the Teletext track has a known "initial page". */
-    if( p_sys->i_wanted_page == 100 && p_dec->fmt_in.subs.teletext.i_magazine != -1 )
+    if( p_sys->i_wanted_page == 100 && p_dec->fmt_in.subs.teletext.i_magazine < 9 )
     {
         p_sys->i_wanted_page = 100 * p_dec->fmt_in.subs.teletext.i_magazine +
                                vbi_bcd2dec( p_dec->fmt_in.subs.teletext.i_page );
@@ -287,8 +287,6 @@ static void Close( vlc_object_t *p_this )
 
     var_DelCallback( p_dec, "vbi-opaque", Opaque, p_sys );
     var_DelCallback( p_dec, "vbi-page", RequestPage, p_sys );
-
-    vlc_mutex_destroy( &p_sys->lock );
 
     if( p_sys->p_vbi_dec )
         vbi_decoder_delete( p_sys->p_vbi_dec );
@@ -393,8 +391,6 @@ static int Decode( decoder_t *p_dec, block_t *p_block )
                                 i_align, p_block->i_pts );
             if( !p_spu )
                 goto error;
-            subtext_updater_sys_t *p_spu_sys = p_spu->updater.p_sys;
-            p_spu_sys->region.p_segments = text_segment_New("");
 
             p_sys->b_update = true;
             p_sys->i_last_page = i_wanted_page;
@@ -452,7 +448,13 @@ static int Decode( decoder_t *p_dec, block_t *p_block )
 
         subtext_updater_sys_t *p_spu_sys = p_spu->updater.p_sys;
         p_spu_sys->region.p_segments = text_segment_New( &p_text[offset] );
-        if( p_spu_sys->region.p_segments && b_opaque )
+        if( !p_spu_sys->region.p_segments )
+        {
+            subpicture_Delete( p_spu );
+            goto error;
+        }
+
+        if( b_opaque )
         {
             p_spu_sys->region.p_segments->style = text_style_Create( STYLE_NO_DEFAULTS );
             if( p_spu_sys->region.p_segments->style )
@@ -652,10 +654,6 @@ static int OpaquePage( picture_t *p_src, const vbi_page *p_page,
 
             switch( opacity )
             {
-            /* Show video instead of this character */
-            case VBI_TRANSPARENT_SPACE:
-                *p_pixel = 0;
-                break;
             /* Display foreground and background color */
             /* To make the boxed text "closed captioning" transparent
              * change true to false.
@@ -665,10 +663,15 @@ static int OpaquePage( picture_t *p_src, const vbi_page *p_page,
             case VBI_SEMI_TRANSPARENT:
                 if( b_opaque )
                     break;
+                /* fallthrough */
             /* Full text transparency. only foreground color is show */
             case VBI_TRANSPARENT_FULL:
-                if( (*p_pixel) == (0xff000000 | p_page->color_map[background] ) )
-                    *p_pixel = 0;
+                if( (*p_pixel) != (0xff000000 | p_page->color_map[background] ) )
+                    break;
+                /* fallthrough */
+            /* Show video instead of this character */
+            case VBI_TRANSPARENT_SPACE:
+                *p_pixel = 0;
                 break;
             }
         }

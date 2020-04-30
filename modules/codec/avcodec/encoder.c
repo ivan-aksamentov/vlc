@@ -2,7 +2,6 @@
  * encoder.c: video and audio encoder using the libavcodec library
  *****************************************************************************
  * Copyright (C) 1999-2004 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Gildas Bazin <gbazin@videolan.org>
@@ -71,7 +70,7 @@ struct thread_context_t;
  *****************************************************************************/
 struct thread_context_t
 {
-    struct vlc_common_members obj;
+    struct vlc_object_t obj;
 
     AVCodecContext  *p_context;
     int             (* pf_func)(AVCodecContext *c, void *arg);
@@ -344,12 +343,14 @@ int InitVideoEnc( vlc_object_t *p_this )
         if( !p_codec )
         {
             msg_Err( p_this, "Encoder `%s' not found", psz_encoder );
+            free( psz_encoder );
             return VLC_EGENERIC;
         }
         else if( p_codec->id != i_codec_id )
         {
             msg_Err( p_this, "Encoder `%s' can't handle %4.4s",
                     psz_encoder, (char*)&p_enc->fmt_out.i_codec );
+            free( psz_encoder );
             return VLC_EGENERIC;
         }
     }
@@ -499,6 +500,8 @@ int InitVideoEnc( vlc_object_t *p_this )
 
         p_context->codec_type = AVMEDIA_TYPE_VIDEO;
 
+        p_context->coded_width = p_enc->fmt_in.video.i_width;
+        p_context->coded_height = p_enc->fmt_in.video.i_height;
         p_context->width = p_enc->fmt_in.video.i_visible_width;
         p_context->height = p_enc->fmt_in.video.i_visible_height;
 
@@ -577,8 +580,14 @@ int InitVideoEnc( vlc_object_t *p_this )
 
         if ( p_sys->b_mpeg4_matrix )
         {
-            p_context->intra_matrix = mpeg4_default_intra_matrix;
-            p_context->inter_matrix = mpeg4_default_non_intra_matrix;
+            p_context->intra_matrix = av_malloc( sizeof(mpeg4_default_intra_matrix) );
+            if ( p_context->intra_matrix )
+                memcpy( p_context->intra_matrix, mpeg4_default_intra_matrix,
+                        sizeof(mpeg4_default_intra_matrix));
+            p_context->inter_matrix = av_malloc( sizeof(mpeg4_default_non_intra_matrix) );
+            if ( p_context->inter_matrix )
+                memcpy( p_context->inter_matrix, mpeg4_default_non_intra_matrix,
+                        sizeof(mpeg4_default_non_intra_matrix));
         }
 
         if ( p_sys->b_pre_me )

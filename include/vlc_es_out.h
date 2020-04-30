@@ -2,7 +2,6 @@
  * vlc_es_out.h: es_out (demuxer output) descriptor, queries and methods
  *****************************************************************************
  * Copyright (C) 1999-2004 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -23,6 +22,8 @@
 
 #ifndef VLC_ES_OUT_H
 #define VLC_ES_OUT_H 1
+
+#include <assert.h>
 
 /**
  * \defgroup es_out ES output
@@ -105,10 +106,9 @@ enum es_out_query_e
 
     ES_OUT_VOUT_ADD_OVERLAY, /* arg1= es_out_id_t* (video es),
                               * arg2= subpicture_t *,
-                              * arg3= int * (channel id), res= can fail */
-
-    ES_OUT_VOUT_FLUSH_OVERLAY, /* arg1= es_out_id_t* (video es),
-                                * arg2= int (channel id), res= can fail */
+                              * arg3= size_t * (channel id), res= can fail */
+    ES_OUT_VOUT_DEL_OVERLAY, /* arg1= es_out_id_t* (video es),
+                              * arg2= size_t (channel id), res= can fail */
 
     ES_OUT_SPU_SET_HIGHLIGHT, /* arg1= es_out_id_t* (spu es),
                                  arg2= const vlc_spu_highlight_t *, res=can fail  */
@@ -121,15 +121,22 @@ enum es_out_policy_e
 {
     ES_OUT_ES_POLICY_EXCLUSIVE = 0,/* Enforces single ES selection only */
     ES_OUT_ES_POLICY_SIMULTANEOUS, /* Allows multiple ES per cat */
+    /* Exclusive by default, and simultaneous if specifically requested more
+     * than one track at once */
+    ES_OUT_ES_POLICY_AUTO,
 };
 
 struct es_out_callbacks
 {
-    es_out_id_t *(*add)(es_out_t *, const es_format_t *);
+    es_out_id_t *(*add)(es_out_t *, input_source_t *in, const es_format_t *);
     int          (*send)(es_out_t *, es_out_id_t *, block_t *);
     void         (*del)(es_out_t *, es_out_id_t *);
-    int          (*control)(es_out_t *, int query, va_list);
+    int          (*control)(es_out_t *, input_source_t *in, int query, va_list);
     void         (*destroy)(es_out_t *);
+    /**
+     * Private control callback, must be NULL for es_out created from modules.
+     */
+    int          (*priv_control)(es_out_t *, int query, va_list);
 };
 
 struct es_out_t
@@ -140,7 +147,7 @@ struct es_out_t
 VLC_USED
 static inline es_out_id_t * es_out_Add( es_out_t *out, const es_format_t *fmt )
 {
-    return out->cbs->add( out, fmt );
+    return out->cbs->add( out, NULL, fmt );
 }
 
 static inline void es_out_Del( es_out_t *out, es_out_id_t *id )
@@ -156,7 +163,7 @@ static inline int es_out_Send( es_out_t *out, es_out_id_t *id,
 
 static inline int es_out_vaControl( es_out_t *out, int i_query, va_list args )
 {
-    return out->cbs->control( out, i_query, args );
+    return out->cbs->control( out, NULL, i_query, args );
 }
 
 static inline int es_out_Control( es_out_t *out, int i_query, ... )

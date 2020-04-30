@@ -2,7 +2,6 @@
  * netconf.m : Network configuration
  *****************************************************************************
  * Copyright (C) 2013-2018 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Felix Paul Kühne <fkuehne # videolan org>
  *
@@ -47,7 +46,7 @@ char *vlc_getProxyUrl(const char *url)
     if (url == NULL) {
         return NULL;
     }
-
+#if !TARGET_OS_IPHONE
     NSDictionary *proxySettings = CFBridgingRelease(CFNetworkCopySystemProxySettings());
     if (NULL != proxySettings) {
         NSURL *requestedURL = [[NSURL alloc] initWithString:[NSString stringWithUTF8String:url]];
@@ -76,6 +75,7 @@ char *vlc_getProxyUrl(const char *url)
         NSString *returnValue = [[NSString alloc] initWithFormat:@"%@://%@:%i", scheme, proxyHost, proxyPort.intValue];
         return strdup([returnValue UTF8String]);
     }
+#endif
 
     return NULL;
 }

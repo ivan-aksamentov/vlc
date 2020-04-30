@@ -2,7 +2,6 @@
  * vlc_input_item.h: Core input item
  *****************************************************************************
  * Copyright (C) 1999-2009 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Christophe Massiot <massiot@via.ecp.fr>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -172,7 +171,7 @@ enum slave_priority
     "psb", "rt", "sami", "sbv", \
     "scc", "smi", "srt", \
     "ssa",  "stl", "sub", \
-    "ttml", "tt", "usf", \
+    "tt", "ttml", "usf", \
     "vtt", "webvtt"
 
 #define SLAVE_AUDIO_EXTENSIONS \
@@ -218,8 +217,8 @@ VLC_API void input_item_node_AppendNode( input_item_node_t *p_parent, input_item
 /**
  * Remove a node from its parent.
  */
-void input_item_node_RemoveNode( input_item_node_t *parent,
-                                 input_item_node_t *child );
+VLC_API void input_item_node_RemoveNode( input_item_node_t *parent,
+                                         input_item_node_t *child );
 
 /**
  * Delete a node created with input_item_node_Create() and all its children.
@@ -271,6 +270,7 @@ VLC_API bool input_item_HasErrorWhenReading( input_item_t * );
 VLC_API void input_item_SetMeta( input_item_t *, vlc_meta_type_t meta_type, const char *psz_val );
 VLC_API bool input_item_MetaMatch( input_item_t *p_i, vlc_meta_type_t meta_type, const char *psz );
 VLC_API char * input_item_GetMeta( input_item_t *p_i, vlc_meta_type_t meta_type ) VLC_USED;
+VLC_API const char *input_item_GetMetaLocked(input_item_t *, vlc_meta_type_t meta_type);
 VLC_API char * input_item_GetName( input_item_t * p_i ) VLC_USED;
 VLC_API char * input_item_GetTitleFbName( input_item_t * p_i ) VLC_USED;
 VLC_API char * input_item_GetURI( input_item_t * p_i ) VLC_USED;
@@ -371,13 +371,101 @@ VLC_API input_item_t *input_item_Hold(input_item_t *);
 /** Releases an input item, i.e. decrements its reference counter. */
 VLC_API void input_item_Release(input_item_t *);
 
+/**
+ * Record prefix string.
+ * TODO make it configurable.
+ */
+#define INPUT_RECORD_PREFIX "vlc-record-%Y-%m-%d-%Hh%Mm%Ss-$ N-$ p"
+
+/**
+ * This function creates a sane filename path.
+ */
+VLC_API char * input_item_CreateFilename( input_item_t *,
+                                          const char *psz_path, const char *psz_prefix,
+                                          const char *psz_extension ) VLC_USED;
+
+/**
+ * input item parser opaque structure
+ */
+typedef struct input_item_parser_id_t input_item_parser_id_t;
+
+/**
+ * input item parser callbacks
+ */
+typedef struct input_item_parser_cbs_t
+{
+    /**
+     * Event received when the parser ends
+     *
+     * @note This callback is mandatory.
+     *
+     * @param item the parsed item
+     * @param status VLC_SUCCESS in case of success, an error otherwise
+     * @param userdata user data set by input_item_Parse()
+     */
+    void (*on_ended)(input_item_t *item, int status, void *userdata);
+
+    /**
+     * Event received when a new subtree is added
+     *
+     * @note This callback is optional.
+     *
+     * @param item the parsed item
+     * @param subtree sub items of the current item
+     * @param userdata user data set by input_item_Parse()
+     */
+    void (*on_subtree_added)(input_item_t *item, input_item_node_t *subtree, void *userdata);
+} input_item_parser_cbs_t;
+
+/**
+ * Parse an item asynchronously
+ *
+ * @note The parsing is done asynchronously. The user can call
+ * input_item_parser_id_Interrupt() before receiving the on_ended() event in
+ * order to interrupt it.
+ *
+ * @param item the item to parse
+ * @param parent the parent obj
+ * @param cbs callbacks to be notified of the end of the parsing
+ * @param userdata opaque data used by parser callbacks
+ *
+ * @return a parser instance or NULL in case of error, the parser needs to be
+ * released with input_item_parser_id_Release()
+ */
+VLC_API input_item_parser_id_t *
+input_item_Parse(input_item_t *item, vlc_object_t *parent,
+                 const input_item_parser_cbs_t *cbs, void *userdata) VLC_USED;
+
+/**
+ * Interrupts & cancels the parsing
+ *
+ * @note The parser still needs to be released with input_item_parser_id_Release
+ * afterward.
+ * @note Calling this function will cause the on_ended callback to be invoked.
+ *
+ * @param the parser to interrupt
+ */
+VLC_API void
+input_item_parser_id_Interrupt(input_item_parser_id_t *parser);
+
+/**
+ * Release (and interrupt if needed) a parser
+ *
+ * @param parser the parser returned by input_item_Parse
+ */
+VLC_API void
+input_item_parser_id_Release(input_item_parser_id_t *parser);
+
 typedef enum input_item_meta_request_option_t
 {
     META_REQUEST_OPTION_NONE          = 0x00,
     META_REQUEST_OPTION_SCOPE_LOCAL   = 0x01,
     META_REQUEST_OPTION_SCOPE_NETWORK = 0x02,
     META_REQUEST_OPTION_SCOPE_ANY     = 0x03,
-    META_REQUEST_OPTION_DO_INTERACT   = 0x04
+    META_REQUEST_OPTION_FETCH_LOCAL   = 0x04,
+    META_REQUEST_OPTION_FETCH_NETWORK = 0x08,
+    META_REQUEST_OPTION_FETCH_ANY     = 0x0C,
+    META_REQUEST_OPTION_DO_INTERACT   = 0x10,
 } input_item_meta_request_option_t;
 
 /* status of the on_preparse_ended() callback */

@@ -2,7 +2,6 @@
  * subtitle.c: Demux for subtitle text files.
  *****************************************************************************
  * Copyright (C) 1999-2007 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Derk-Jan Hartman <hartman at videolan dot org>
@@ -33,7 +32,6 @@
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
-#include <vlc_input.h>
 
 #include <ctype.h>
 #include <math.h>
@@ -709,6 +707,7 @@ static int Open ( vlc_object_t *p_this )
         fmt.i_extra = strlen( p_sys->props.psz_header ) + 1;
     }
 
+    fmt.i_id = 0;
     p_sys->es = es_out_Add( p_demux->out, &fmt );
     es_format_Clean( &fmt );
     if( p_sys->es == NULL )
@@ -809,7 +808,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             *va_arg( args, bool * ) = true;
             return VLC_SUCCESS;
         case DEMUX_SET_RATE:
-            p_sys->f_rate = (double)INPUT_RATE_DEFAULT / *va_arg( args, int * );
+            p_sys->f_rate = *va_arg( args, float * );
             ResetCurrentIndex( p_demux );
             return VLC_SUCCESS;
         case DEMUX_SET_NEXT_DEMUX_TIME:

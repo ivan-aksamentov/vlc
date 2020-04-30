@@ -2,7 +2,6 @@
  * vlc_demux.h: Demuxer descriptor, queries and methods
  *****************************************************************************
  * Copyright (C) 1999-2005 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -54,7 +53,7 @@
 /* demux_meta_t is returned by "meta reader" module to the demuxer */
 typedef struct demux_meta_t
 {
-    struct vlc_common_members obj;
+    struct vlc_object_t obj;
     input_item_t *p_item; /***< the input item that is being read */
 
     vlc_meta_t *p_meta;                 /**< meta data */
@@ -179,6 +178,8 @@ enum demux_query_e
     DEMUX_GET_LENGTH,           /* arg1= vlc_tick_t *   res=    */
     DEMUX_GET_TIME,             /* arg1= vlc_tick_t *   res=    */
     DEMUX_SET_TIME,             /* arg1= vlc_tick_t arg2= bool b_precise   res=can fail    */
+    /* Normal or original time, used mainly by the ts module */
+    DEMUX_GET_NORMAL_TIME,      /* arg1= vlc_tick_t *   res= can fail, in that case VLC_TICK_0 will be used as NORMAL_TIME */
 
     /**
      * \todo Document
@@ -198,7 +199,8 @@ enum demux_query_e
     DEMUX_SET_GROUP_DEFAULT,
     DEMUX_SET_GROUP_ALL,
     DEMUX_SET_GROUP_LIST,       /* arg1= size_t, arg2= const int *, can fail */
-    DEMUX_SET_ES,               /* arg1= int                            can fail */
+    DEMUX_SET_ES,               /* arg1= int                        can fail */
+    DEMUX_SET_ES_LIST,          /* arg1= size_t, arg2= const int * (can be NULL) can fail */
 
     /* Ask the demux to demux until the given date at the next pf_demux call
      * but not more (and not less, at the precision available of course).
@@ -237,8 +239,8 @@ enum demux_query_e
      * (using DEMUX_SET_RATE). */
     DEMUX_CAN_CONTROL_RATE,     /* arg1= bool*pb_rate */
     /* DEMUX_SET_RATE is called only if DEMUX_CAN_CONTROL_RATE has returned true.
-     * It should return the value really used in *pi_rate */
-    DEMUX_SET_RATE,             /* arg1= int*pi_rate                                        can fail */
+     * It should return the value really used in *p_rate */
+    DEMUX_SET_RATE,             /* arg1= float*p_rate res=can fail */
 
     /** Checks whether the stream is actually a playlist, rather than a real
      * stream.

@@ -2,7 +2,6 @@
  * duplicate.c: duplicate stream output module
  *****************************************************************************
  * Copyright (C) 2003-2004 the VideoLAN team
- * $Id$
  *
  * Author: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -42,7 +41,7 @@ static void     Close   ( vlc_object_t * );
 
 vlc_module_begin ()
     set_description( N_("Duplicate stream output") )
-    set_capability( "sout stream", 50 )
+    set_capability( "sout output", 50 )
     add_shortcut( "duplicate", "dup" )
     set_category( CAT_SOUT )
     set_subcategory( SUBCAT_SOUT_STREAM )

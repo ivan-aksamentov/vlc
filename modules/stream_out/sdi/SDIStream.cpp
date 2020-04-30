@@ -40,24 +40,49 @@ AbstractStreamOutputBuffer::~AbstractStreamOutputBuffer()
 {
 }
 
+AbstractQueueStreamOutputBuffer::AbstractQueueStreamOutputBuffer()
+{
+    b_draining = false;
+}
+
+AbstractQueueStreamOutputBuffer::~AbstractQueueStreamOutputBuffer()
+{
+
+}
+
 void AbstractQueueStreamOutputBuffer::Enqueue(void *p)
 {
-    queue_mutex.lock();
+    buffer_mutex.lock();
     queued.push(p);
-    queue_mutex.unlock();
+    buffer_mutex.unlock();
 }
 
 void *AbstractQueueStreamOutputBuffer::Dequeue()
 {
     void *p = NULL;
-    queue_mutex.lock();
+    buffer_mutex.lock();
     if(!queued.empty())
     {
         p = queued.front();
         queued.pop();
     }
-    queue_mutex.unlock();
+    buffer_mutex.unlock();
     return p;
+}
+
+void AbstractQueueStreamOutputBuffer::Drain()
+{
+    buffer_mutex.lock();
+    b_draining = true;
+    buffer_mutex.unlock();
+}
+
+bool AbstractQueueStreamOutputBuffer::isEOS()
+{
+    buffer_mutex.lock();
+    bool b = b_draining && queued.empty();
+    buffer_mutex.unlock();
+    return b;
 }
 
 BlockStreamOutputBuffer::BlockStreamOutputBuffer()
@@ -82,12 +107,26 @@ void BlockStreamOutputBuffer::FlushQueued()
 PictureStreamOutputBuffer::PictureStreamOutputBuffer()
     : AbstractQueueStreamOutputBuffer()
 {
-
+    vlc_sem_init(&pool_semaphore, 16);
 }
 
 PictureStreamOutputBuffer::~PictureStreamOutputBuffer()
 {
+}
 
+void * PictureStreamOutputBuffer::Dequeue()
+{
+    void *p = AbstractQueueStreamOutputBuffer::Dequeue();
+    if(p)
+        vlc_sem_post(&pool_semaphore);
+    return p;
+}
+
+void PictureStreamOutputBuffer::Enqueue(void *p)
+{
+    if(p)
+        vlc_sem_wait(&pool_semaphore);
+    AbstractQueueStreamOutputBuffer::Enqueue(p);
 }
 
 void PictureStreamOutputBuffer::FlushQueued()
@@ -95,6 +134,18 @@ void PictureStreamOutputBuffer::FlushQueued()
     picture_t *p;
     while((p = reinterpret_cast<picture_t *>(Dequeue())))
         picture_Release(p);
+}
+
+vlc_tick_t PictureStreamOutputBuffer::NextPictureTime()
+{
+    vlc_tick_t t;
+    buffer_mutex.lock();
+    if(!queued.empty())
+        t = reinterpret_cast<picture_t *>(queued.front())->date;
+    else
+        t = VLC_TICK_INVALID;
+    buffer_mutex.unlock();
+    return t;
 }
 
 unsigned StreamID::i_next_sequence_id = 0;
@@ -163,6 +214,7 @@ struct decoder_owner
     bool b_error;
     es_format_t last_fmt_update;
     es_format_t decoder_out;
+    vlc_decoder_device *dec_dev;
 };
 
 AbstractDecodedStream::AbstractDecodedStream(vlc_object_t *p_obj,
@@ -172,26 +224,32 @@ AbstractDecodedStream::AbstractDecodedStream(vlc_object_t *p_obj,
 {
     p_decoder = NULL;
     es_format_Init(&requestedoutput, 0, 0);
+    vlc_mutex_init(&inputLock);
+    vlc_cond_init(&inputWait);
+    threadEnd = false;
+    status = DECODING;
+    pcr = VLC_TICK_INVALID;
 }
 
 AbstractDecodedStream::~AbstractDecodedStream()
 {
+    Flush();
+    deinit();
     es_format_Clean(&requestedoutput);
+}
 
-    if(!p_decoder)
-        return;
-
-    struct decoder_owner *p_owner;
-    p_owner = container_of(p_decoder, struct decoder_owner, dec);
-    if(p_decoder->p_module)
-        module_unneed(p_decoder, p_decoder->p_module);
-    es_format_Clean(&p_owner->dec.fmt_in);
-    es_format_Clean(&p_owner->dec.fmt_out);
-    es_format_Clean(&p_owner->decoder_out);
-    es_format_Clean(&p_owner->last_fmt_update);
-    if(p_decoder->p_description)
-        vlc_meta_Delete(p_decoder->p_description);
-    vlc_object_release(p_decoder);
+void AbstractDecodedStream::deinit()
+{
+    if(p_decoder)
+    {
+        Flush();
+        vlc_mutex_lock(&inputLock);
+        vlc_cond_signal(&inputWait);
+        threadEnd = true;
+        vlc_mutex_unlock(&inputLock);
+        vlc_join(thread, NULL);
+        ReleaseDecoder();
+    }
 }
 
 bool AbstractDecodedStream::init(const es_format_t *p_fmt)
@@ -217,25 +275,23 @@ bool AbstractDecodedStream::init(const es_format_t *p_fmt)
     p_owner->id = this;
 
     p_decoder = &p_owner->dec;
-    p_decoder->p_module = NULL;
-    es_format_Init(&p_decoder->fmt_out, p_fmt->i_cat, 0);
-    es_format_Copy(&p_decoder->fmt_in, p_fmt);
-    p_decoder->b_frame_drop_allowed = false;
+    decoder_Init( p_decoder, p_fmt );
 
     setCallbacks();
-
-    p_decoder->pf_decode = NULL;
-    p_decoder->pf_get_cc = NULL;
 
     p_decoder->p_module = module_need_var(p_decoder, category, "codec");
     if(!p_decoder->p_module)
     {
         msg_Err(p_stream, "cannot find %s for %4.4s", category, (char *)&p_fmt->i_codec);
-        es_format_Clean(&p_decoder->fmt_in);
-        es_format_Clean(&p_decoder->fmt_out);
+        ReleaseDecoder();
+        return false;
+    }
+
+    if(vlc_clone(&thread, decoderThreadCallback, this, VLC_THREAD_PRIORITY_VIDEO))
+    {
         es_format_Clean(&p_owner->decoder_out);
         es_format_Clean(&p_owner->last_fmt_update);
-        vlc_object_release(p_decoder);
+        decoder_Destroy( p_decoder );
         p_decoder = NULL;
         return false;
     }
@@ -243,43 +299,132 @@ bool AbstractDecodedStream::init(const es_format_t *p_fmt)
     return true;
 }
 
-int AbstractDecodedStream::Send(block_t *p_block)
+void * AbstractDecodedStream::decoderThreadCallback(void *me)
 {
-    assert(p_decoder);
+    reinterpret_cast<AbstractDecodedStream *>(me)->decoderThread();
+    return NULL;
+}
 
+void AbstractDecodedStream::decoderThread()
+{
     struct decoder_owner *p_owner =
             container_of(p_decoder, struct decoder_owner, dec);
 
-     if(!p_owner->b_error)
+    vlc_savecancel();
+    vlc_mutex_lock(&inputLock);
+    for(;;)
     {
-        int ret = p_decoder->pf_decode(p_decoder, p_block);
-        switch(ret)
+        while(inputQueue.empty() && !threadEnd)
+            vlc_cond_wait(&inputWait, &inputLock);
+        if(threadEnd)
         {
-            case VLCDEC_SUCCESS:
-                break;
-            case VLCDEC_ECRITICAL:
-                p_owner->b_error = true;
-                break;
-            case VLCDEC_RELOAD:
-                p_owner->b_error = true;
-                if(p_block)
-                    block_Release(p_block);
-                break;
-            default:
-                vlc_assert_unreachable();
+            vlc_mutex_unlock(&inputLock);
+            break;
+        }
+
+        block_t *p_block = inputQueue.front();
+        inputQueue.pop();
+
+        bool b_draincall = (status == DRAINING) && (p_block == NULL);
+        vlc_mutex_unlock(&inputLock);
+
+        if(!p_owner->b_error)
+        {
+            int ret = p_decoder->pf_decode(p_decoder, p_block);
+            switch(ret)
+            {
+                case VLCDEC_SUCCESS:
+                    break;
+                case VLCDEC_ECRITICAL:
+                    p_owner->b_error = true;
+                    break;
+                case VLCDEC_RELOAD:
+                    p_owner->b_error = true;
+                    if(p_block)
+                        block_Release(p_block);
+                    break;
+                default:
+                    vlc_assert_unreachable();
+            }
+        }
+
+        vlc_mutex_lock(&inputLock);
+        if(p_owner->b_error)
+        {
+            status = FAILED;
+            outputbuffer->Drain();
+        }
+        else if(b_draincall)
+        {
+            status = DRAINED;
+            outputbuffer->Drain();
         }
     }
+}
 
-    return p_owner->b_error ? VLC_EGENERIC : VLC_SUCCESS;
+int AbstractDecodedStream::Send(block_t *p_block)
+{
+    assert(p_decoder);
+    vlc_mutex_lock(&inputLock);
+    inputQueue.push(p_block);
+    if(p_block)
+    {
+        vlc_tick_t t = std::min(p_block->i_dts, p_block->i_pts);
+        if(t == VLC_TICK_INVALID)
+            t = std::max(p_block->i_dts, p_block->i_pts);
+        pcr = std::max(pcr, t);
+    }
+    vlc_cond_signal(&inputWait);
+    vlc_mutex_unlock(&inputLock);
+    return VLC_SUCCESS;
 }
 
 void AbstractDecodedStream::Flush()
 {
+    vlc_mutex_lock(&inputLock);
+    while(!inputQueue.empty())
+    {
+        if(inputQueue.front())
+            block_Release(inputQueue.front());
+        inputQueue.pop();
+    }
+    vlc_mutex_unlock(&inputLock);
 }
 
 void AbstractDecodedStream::Drain()
 {
     Send(NULL);
+    vlc_mutex_lock(&inputLock);
+    if(status != FAILED && status != DRAINED)
+        status = DRAINING;
+    vlc_mutex_unlock(&inputLock);
+}
+
+bool AbstractDecodedStream::isEOS()
+{
+    vlc_mutex_lock(&inputLock);
+    bool b = (status == FAILED || status == DRAINED);
+    vlc_mutex_unlock(&inputLock);
+    return b;
+}
+
+bool AbstractDecodedStream::ReachedPlaybackTime(vlc_tick_t t)
+{
+    vlc_mutex_lock(&inputLock);
+    bool b = (pcr != VLC_TICK_INVALID) && t < pcr;
+    b |= (status == DRAINED) || (status == FAILED);
+    vlc_mutex_unlock(&inputLock);
+    return b;
+}
+
+void AbstractDecodedStream::ReleaseDecoder()
+{
+    struct decoder_owner *p_owner;
+    p_owner = container_of(p_decoder, struct decoder_owner, dec);
+    es_format_Clean(&p_owner->decoder_out);
+    es_format_Clean(&p_owner->last_fmt_update);
+    decoder_Destroy( p_decoder );
+    p_decoder = NULL;
 }
 
 void AbstractDecodedStream::setOutputFormat(const es_format_t *p_fmt)
@@ -294,10 +439,12 @@ VideoDecodedStream::VideoDecodedStream(vlc_object_t *p_obj,
     :AbstractDecodedStream(p_obj, id, buffer)
 {
     p_filters_chain = NULL;
+    captionsOutputBuffer = NULL;
 }
 
 VideoDecodedStream::~VideoDecodedStream()
 {
+    deinit();
     if(p_filters_chain)
         filter_chain_Delete(p_filters_chain);
 }
@@ -306,10 +453,10 @@ void VideoDecodedStream::setCallbacks()
 {
     static struct decoder_owner_callbacks dec_cbs;
     memset(&dec_cbs, 0, sizeof(dec_cbs));
+    dec_cbs.video.get_device = VideoDecCallback_get_device;
     dec_cbs.video.format_update = VideoDecCallback_update_format;
-    dec_cbs.video.buffer_new = VideoDecCallback_new_buffer;
     dec_cbs.video.queue = VideoDecCallback_queue;
-    dec_cbs.video.queue_cc = VideoDecCallback_queue_cc;
+    dec_cbs.video.queue_cc = captionsOutputBuffer ? VideoDecCallback_queue_cc : NULL;
 
     p_decoder->cbs = &dec_cbs;
 }
@@ -334,25 +481,41 @@ void VideoDecodedStream::VideoDecCallback_queue_cc(decoder_t *p_dec, block_t *p_
     static_cast<VideoDecodedStream *>(p_owner->id)->QueueCC(p_block);
 }
 
-int VideoDecodedStream::VideoDecCallback_update_format(decoder_t *p_dec)
+vlc_decoder_device * VideoDecodedStream::VideoDecCallback_get_device(decoder_t *p_dec)
 {
     struct decoder_owner *p_owner;
     p_owner = container_of(p_dec, struct decoder_owner, dec);
+    if (p_owner->dec_dev == NULL)
+    {
+        p_owner->dec_dev = vlc_decoder_device_Create(&p_dec->obj, NULL);
+    }
+    return p_owner->dec_dev ? vlc_decoder_device_Hold(p_owner->dec_dev) : NULL;
+}
 
-    /* fixup */
-    p_dec->fmt_out.video.i_chroma = p_dec->fmt_out.i_codec;
+void VideoDecodedStream::ReleaseDecoder()
+{
+    AbstractDecodedStream::ReleaseDecoder();
+
+    struct decoder_owner *p_owner;
+    p_owner = container_of(p_decoder, struct decoder_owner, dec);
+    if (p_owner->dec_dev)
+    {
+        vlc_decoder_device_Release(p_owner->dec_dev);
+        p_owner->dec_dev = NULL;
+    }
+}
+
+int VideoDecodedStream::VideoDecCallback_update_format(decoder_t *p_dec,
+                                                       vlc_video_context *)
+{
+    struct decoder_owner *p_owner;
+    p_owner = container_of(p_dec, struct decoder_owner, dec);
 
     es_format_Clean(&p_owner->last_fmt_update);
     es_format_Copy(&p_owner->last_fmt_update, &p_dec->fmt_out);
 
     return VLC_SUCCESS;
 }
-
-picture_t *VideoDecodedStream::VideoDecCallback_new_buffer(decoder_t *p_dec)
-{
-    return picture_NewFromFormat(&p_dec->fmt_out.video);
-}
-
 
 static picture_t *transcode_video_filter_buffer_new(filter_t *p_filter)
 {
@@ -362,10 +525,10 @@ static picture_t *transcode_video_filter_buffer_new(filter_t *p_filter)
 
 static const struct filter_video_callbacks transcode_filter_video_cbs =
 {
-    .buffer_new = transcode_video_filter_buffer_new,
+    transcode_video_filter_buffer_new, NULL,
 };
 
-filter_chain_t * VideoDecodedStream::VideoFilterCreate(const es_format_t *p_srcfmt)
+filter_chain_t * VideoDecodedStream::VideoFilterCreate(const es_format_t *p_srcfmt, vlc_video_context *vctx)
 {
     filter_chain_t *p_chain;
     filter_owner_t owner;
@@ -375,22 +538,22 @@ filter_chain_t * VideoDecodedStream::VideoFilterCreate(const es_format_t *p_srcf
     p_chain = filter_chain_NewVideo(p_stream, false, &owner);
     if(!p_chain)
         return NULL;
-    filter_chain_Reset(p_chain, p_srcfmt, &requestedoutput);
+    filter_chain_Reset(p_chain, p_srcfmt, vctx, &requestedoutput);
 
     if(p_srcfmt->video.i_chroma != requestedoutput.video.i_chroma)
     {
-        if(filter_chain_AppendConverter(p_chain, p_srcfmt, &requestedoutput) != VLC_SUCCESS)
+        if(filter_chain_AppendConverter(p_chain, &requestedoutput) != VLC_SUCCESS)
         {
             filter_chain_Delete(p_chain);
             return NULL;
         }
-    }
 
-    const es_format_t *p_fmt_out = filter_chain_GetFmtOut(p_chain);
-    if(!es_format_IsSimilar(&requestedoutput, p_fmt_out))
-    {
-        filter_chain_Delete(p_chain);
-        return NULL;
+        const es_format_t *p_fmt_out = filter_chain_GetFmtOut(p_chain);
+        if(!es_format_IsSimilar(&requestedoutput, p_fmt_out))
+        {
+            filter_chain_Delete(p_chain);
+            return NULL;
+        }
     }
 
     return p_chain;
@@ -401,28 +564,27 @@ void VideoDecodedStream::Output(picture_t *p_pic)
     struct decoder_owner *p_owner;
     p_owner = container_of(p_decoder, struct decoder_owner, dec);
 
-    if(!es_format_IsSimilar(&p_owner->last_fmt_update, &p_owner->decoder_out))
+    if(!es_format_IsSimilar(&p_owner->decoder_out, &p_owner->last_fmt_update))
     {
+        es_format_Clean(&p_owner->decoder_out);
+        es_format_Copy(&p_owner->decoder_out, &p_owner->last_fmt_update);
 
         msg_Dbg(p_stream, "decoder output format now %4.4s",
-                (char*)&p_owner->last_fmt_update.i_codec);
+                (char*)&p_owner->decoder_out.i_codec);
 
         if(p_filters_chain)
             filter_chain_Delete(p_filters_chain);
-        p_filters_chain = VideoFilterCreate(&p_owner->last_fmt_update);
+        p_filters_chain = VideoFilterCreate(&p_owner->decoder_out,
+                                            picture_GetVideoContext(p_pic));
         if(!p_filters_chain)
         {
             picture_Release(p_pic);
             return;
         }
-
-        es_format_Clean(&p_owner->decoder_out);
-        es_format_Copy(&p_owner->decoder_out, &p_owner->last_fmt_update);
     }
 
     if(p_filters_chain)
         p_pic = filter_chain_VideoFilter(p_filters_chain, p_pic);
-
     if(p_pic)
         outputbuffer->Enqueue(p_pic);
 }
@@ -442,6 +604,7 @@ AudioDecodedStream::AudioDecodedStream(vlc_object_t *p_obj,
 
 AudioDecodedStream::~AudioDecodedStream()
 {
+    deinit();
     if(p_filters)
         aout_FiltersDelete(p_stream, p_filters);
 }
@@ -458,24 +621,24 @@ void AudioDecodedStream::Output(block_t *p_block)
     struct decoder_owner *p_owner;
     p_owner = container_of(p_decoder, struct decoder_owner, dec);
 
-    if(!es_format_IsSimilar(&p_owner->last_fmt_update, &p_owner->decoder_out))
+    if(!es_format_IsSimilar(&p_owner->decoder_out, &p_owner->last_fmt_update))
     {
+        es_format_Clean(&p_owner->decoder_out);
+        es_format_Copy(&p_owner->decoder_out, &p_owner->last_fmt_update);
+
         msg_Dbg(p_stream, "decoder output format now %4.4s %u channels",
-                (char*)&p_owner->last_fmt_update.i_codec,
-                p_owner->last_fmt_update.audio.i_channels);
+                (char*)&p_owner->decoder_out.i_codec,
+                p_owner->decoder_out.audio.i_channels);
 
         if(p_filters)
             aout_FiltersDelete(p_stream, p_filters);
-        p_filters = AudioFiltersCreate(&p_owner->last_fmt_update);
+        p_filters = AudioFiltersCreate(&p_owner->decoder_out);
         if(!p_filters)
         {
             msg_Err(p_stream, "filter creation failed");
             block_Release(p_block);
             return;
         }
-
-        es_format_Clean(&p_owner->decoder_out);
-        es_format_Copy(&p_owner->decoder_out, &p_owner->last_fmt_update);
     }
 
     /* Run filter chain */
@@ -483,10 +646,10 @@ void AudioDecodedStream::Output(block_t *p_block)
         p_block = aout_FiltersPlay(p_filters, p_block, 1.f);
 
     if(p_block && !p_block->i_nb_samples &&
-       p_owner->last_fmt_update.audio.i_bytes_per_frame )
+       p_owner->decoder_out.audio.i_bytes_per_frame )
     {
         p_block->i_nb_samples = p_block->i_buffer /
-                p_owner->last_fmt_update.audio.i_bytes_per_frame;
+                p_owner->decoder_out.audio.i_bytes_per_frame;
     }
 
     if(p_block)
@@ -495,7 +658,7 @@ void AudioDecodedStream::Output(block_t *p_block)
 
 aout_filters_t * AudioDecodedStream::AudioFiltersCreate(const es_format_t *afmt)
 {
-    return aout_FiltersNew(p_stream, &afmt->audio, &requestedoutput.audio, NULL, NULL);
+    return aout_FiltersNew(p_stream, &afmt->audio, &requestedoutput.audio, NULL);
 }
 
 int AudioDecodedStream::AudioDecCallback_update_format(decoder_t *p_dec)
@@ -532,7 +695,8 @@ AbstractRawStream::AbstractRawStream(vlc_object_t *p_obj, const StreamID &id,
                                AbstractStreamOutputBuffer *buffer)
     : AbstractStream(p_obj, id, buffer)
 {
-
+    pcr = VLC_TICK_INVALID;
+    b_draining = false;
 }
 
 AbstractRawStream::~AbstractRawStream()
@@ -542,10 +706,16 @@ AbstractRawStream::~AbstractRawStream()
 
 int AbstractRawStream::Send(block_t *p_block)
 {
+    vlc_tick_t t = std::min(p_block->i_dts, p_block->i_pts);
+    if(t == VLC_TICK_INVALID)
+        t = std::max(p_block->i_dts, p_block->i_pts);
     if(p_block->i_buffer)
         outputbuffer->Enqueue(p_block);
     else
         block_Release(p_block);
+    buffer_mutex.lock();
+    pcr = std::max(pcr, t);
+    buffer_mutex.unlock();
     return VLC_SUCCESS;
 }
 
@@ -556,7 +726,26 @@ void AbstractRawStream::Flush()
 
 void AbstractRawStream::Drain()
 {
+    buffer_mutex.lock();
+    b_draining = true;
+    buffer_mutex.unlock();
+}
 
+bool AbstractRawStream::ReachedPlaybackTime(vlc_tick_t t)
+{
+    buffer_mutex.lock();
+    bool b = (pcr != VLC_TICK_INVALID) && t < pcr;
+    b |= b_draining;
+    buffer_mutex.unlock();
+    return b;
+}
+
+bool AbstractRawStream::isEOS()
+{
+    buffer_mutex.lock();
+    bool b = b_draining;
+    buffer_mutex.unlock();
+    return b;
 }
 
 void AbstractRawStream::FlushQueued()

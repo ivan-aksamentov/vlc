@@ -2,7 +2,6 @@
  * matroska_segment.cpp : matroska demuxer
  *****************************************************************************
  * Copyright (C) 2003-2010 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Steve Lhomme <steve.lhomme@free.fr>
@@ -612,7 +611,6 @@ bool matroska_segment_c::Preload( )
             if ( tracks.size() == 0 )
             {
                 msg_Err( &sys.demuxer, "No tracks supported" );
-                return false;
             }
             i_tracks_position = el->GetElementPosition();
         }
@@ -1119,13 +1117,20 @@ bool matroska_segment_c::ESCreate()
             track.p_es = NULL;
             continue;
         }
+        track.fmt.i_id = static_cast<int>( track_id );
 
         if( !track.p_es )
         {
             track.p_es = es_out_Add( sys.demuxer.out, &track.fmt );
 
             if( track.p_es )
-                sys.ev.AddES( track.p_es, track.fmt.i_cat );
+            {
+                if (!sys.ev.AddES( track.p_es, track.fmt.i_cat ))
+                {
+                    es_out_Del( sys.demuxer.out, track.p_es );
+                    track.p_es = NULL;
+                }
+            }
         }
 
         /* Turn on a subtitles track if it has been flagged as default -
@@ -1207,7 +1212,6 @@ int matroska_segment_c::BlockGet( KaxBlock * & pp_block, KaxSimpleBlock * & pp_s
         {
             VLC_UNUSED( kcue );
             msg_Warn( vars.p_demuxer, "find KaxCues FIXME" );
-            throw VLC_EGENERIC;
         }
         E_CASE_DEFAULT(element)
         {

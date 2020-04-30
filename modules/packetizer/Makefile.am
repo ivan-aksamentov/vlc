@@ -6,11 +6,13 @@ libpacketizer_av1_plugin_la_SOURCES = packetizer/av1.c \
                                       packetizer/av1_obu.h
 libpacketizer_copy_plugin_la_SOURCES = packetizer/copy.c
 libpacketizer_mpegvideo_plugin_la_SOURCES = packetizer/mpegvideo.c \
+                                            packetizer/mpegvideo.h \
                                             packetizer/iso_color_tables.h
 libpacketizer_mpeg4video_plugin_la_SOURCES = packetizer/mpeg4video.c \
                                              packetizer/iso_color_tables.h
 libpacketizer_mjpeg_plugin_la_SOURCES = packetizer/mjpeg.c
-libpacketizer_mpeg4audio_plugin_la_SOURCES = packetizer/mpeg4audio.c
+libpacketizer_mpeg4audio_plugin_la_SOURCES = packetizer/mpeg4audio.c \
+                                             packetizer/mpeg4audio.h
 libpacketizer_mpegaudio_plugin_la_SOURCES = packetizer/mpegaudio.c
 libpacketizer_h264_plugin_la_SOURCES = \
 	packetizer/h264_nal.c packetizer/h264_nal.h \
@@ -22,7 +24,8 @@ libpacketizer_h264_plugin_la_SOURCES = \
         packetizer/iso_color_tables.h
 libpacketizer_vc1_plugin_la_SOURCES = packetizer/vc1.c \
         packetizer/hxxx_ep3b.h \
-        packetizer/hxxx_nal.h
+        packetizer/hxxx_nal.h \
+        packetizer/iso_color_tables.h
 libpacketizer_mlp_plugin_la_SOURCES = packetizer/mlp.c
 libpacketizer_flac_plugin_la_SOURCES = packetizer/flac.c \
         packetizer/flac.h

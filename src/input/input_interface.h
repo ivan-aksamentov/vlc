@@ -2,7 +2,6 @@
  * input_interface.h: Input functions usable outside input code.
  *****************************************************************************
  * Copyright (C) 1998-2008 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar < fenrir _AT_ videolan _DOT_ org >
  *
@@ -43,12 +42,5 @@ void input_item_SetEpgOffline( input_item_t * );
  * This function deletes the current sout in the resources.
  */
 void input_resource_TerminateSout( input_resource_t *p_resource );
-
-/**
- * This function return true if there is at least one vout in the resources.
- *
- * It can only be called on detached resources.
- */
-bool input_resource_HasVout( input_resource_t *p_resource );
 
 #endif

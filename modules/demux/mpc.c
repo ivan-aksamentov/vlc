@@ -2,7 +2,6 @@
  * mpc.c : MPC stream input module for vlc
  *****************************************************************************
  * Copyright (C) 2001 the VideoLAN team
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr.com>
  *
@@ -31,7 +30,6 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
-#include <vlc_input.h>
 #include <vlc_codec.h>
 #include <math.h>
 
@@ -191,6 +189,7 @@ static int Open( vlc_object_t * p_this )
 #undef CONVERT_GAIN
 #undef CONVERT_PEAK
 
+    fmt.i_id = 0;
     p_sys->p_es = es_out_Add( p_demux->out, &fmt );
     if( !p_sys->p_es )
         goto error;

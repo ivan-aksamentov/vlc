@@ -2,7 +2,6 @@
  * core.c management of the modules configuration
  *****************************************************************************
  * Copyright (C) 2001-2007 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Gildas Bazin <gbazin@videolan.org>
  *
@@ -206,15 +205,13 @@ ssize_t config_GetIntChoices(const char *name,
     size_t count = cfg->list_count;
     if (count == 0)
     {
-        if (module_Map(NULL, cfg->owner))
-        {
-            errno = EIO;
-            return -1;
-        }
+        int (*cb)(const char *, int64_t **, char ***);
 
-        if (cfg->list.i_cb == NULL)
+        cb = module_Symbol(NULL, cfg->owner, "vlc_entry_cfg_int_enum");
+        if (cb == NULL)
             return 0;
-        return cfg->list.i_cb(name, values, texts);
+
+        return cb(name, values, texts);
     }
 
     int64_t *vals = vlc_alloc (count, sizeof (*vals));
@@ -339,15 +336,13 @@ ssize_t config_GetPszChoices(const char *name,
     size_t count = cfg->list_count;
     if (count == 0)
     {
-        if (module_Map(NULL, cfg->owner))
-        {
-            errno = EIO;
-            return -1;
-        }
+        int (*cb)(const char *, char ***, char ***);
 
-        if (cfg->list.psz_cb == NULL)
+        cb = module_Symbol(NULL, cfg->owner, "vlc_entry_cfg_str_enum");
+        if (cb == NULL)
             return 0;
-        return cfg->list.psz_cb(name, values, texts);
+
+        return cb(name, values, texts);
     }
 
     char **vals = malloc (sizeof (*vals) * count);

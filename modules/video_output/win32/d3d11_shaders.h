@@ -23,30 +23,27 @@
 #ifndef VLC_D3D11_SHADERS_H
 #define VLC_D3D11_SHADERS_H
 
+#include <d3dcompiler.h>
 #include "../../video_chroma/d3d11_fmt.h"
-#include <dxgi1_4.h>
+
+typedef struct
+{
+    HINSTANCE                 compiler_dll; /* handle of the opened d3dcompiler dll */
+    pD3DCompile               OurD3DCompile;
+} d3d11_shaders_t;
+
+#include <vlc_es.h>
 
 #define DEFAULT_BRIGHTNESS         100
 #define DEFAULT_SRGB_BRIGHTNESS    100
+#define MAX_HLG_BRIGHTNESS        1000
 #define MAX_PQ_BRIGHTNESS        10000
 
-typedef enum video_color_axis {
-    COLOR_AXIS_RGB,
-    COLOR_AXIS_YCBCR,
-} video_color_axis;
-
 typedef struct {
-    DXGI_COLOR_SPACE_TYPE   dxgi;
-    const char              *name;
-    video_color_axis        axis;
-    video_color_primaries_t primaries;
-    video_transfer_func_t   transfer;
-    video_color_space_t     color;
-    bool                    b_full_range;
-} dxgi_color_space;
-
-typedef struct {
-    const dxgi_color_space   *colorspace;
+    video_color_primaries_t  primaries;
+    video_transfer_func_t    transfer;
+    video_color_space_t      color;
+    bool                     b_full_range;
     unsigned                 luminance_peak;
     const d3d_format_t       *pixelFormat;
 } display_info_t;
@@ -66,10 +63,8 @@ typedef struct {
 } PS_COLOR_TRANSFORM;
 
 typedef struct {
-    FLOAT RotX[4*4];
-    FLOAT RotY[4*4];
-    FLOAT RotZ[4*4];
     FLOAT View[4*4];
+    FLOAT Zoom[4*4];
     FLOAT Projection[4*4];
 } VS_PROJECTION_CONST;
 
@@ -85,7 +80,7 @@ typedef struct {
 /* A Quad is texture that can be displayed in a rectangle */
 typedef struct
 {
-    picture_sys_t             picSys;
+    picture_sys_d3d11_t       picSys;
     const d3d_format_t        *textureFormat;
     UINT                      resourceCount;
     ID3D11Buffer              *pVertexBuffer;
@@ -106,13 +101,14 @@ typedef struct
     PS_CONSTANT_BUFFER        shaderConstants;
 } d3d_quad_t;
 
-ID3DBlob* D3D11_CompileShader(vlc_object_t *, const d3d11_handle_t *, const d3d11_device_t *,
-                              const char *psz_shader, bool pixel);
-#define D3D11_CompileShader(a,b,c,d,e)  D3D11_CompileShader(VLC_OBJECT(a),b,c,d,e)
+#define D3D11_MAX_RENDER_TARGET    2
 
 bool IsRGBShader(const d3d_format_t *);
 
-HRESULT D3D11_CompilePixelShader(vlc_object_t *, d3d11_handle_t *, bool legacy_shader,
+int D3D11_InitShaders(vlc_object_t *, d3d11_shaders_t *);
+void D3D11_ReleaseShaders(d3d11_shaders_t *);
+
+HRESULT D3D11_CompilePixelShader(vlc_object_t *, const d3d11_shaders_t *, bool legacy_shader,
                                  d3d11_device_t *, const display_info_t *,
                                  video_transfer_func_t, video_color_primaries_t,
                                  bool src_full_range,
@@ -121,20 +117,20 @@ HRESULT D3D11_CompilePixelShader(vlc_object_t *, d3d11_handle_t *, bool legacy_s
     D3D11_CompilePixelShader(VLC_OBJECT(a),b,c,d,e,f,g,h,i)
 void D3D11_ReleasePixelShader(d3d_quad_t *);
 
-HRESULT D3D11_CompileFlatVertexShader(vlc_object_t *, d3d11_handle_t *, d3d11_device_t *, d3d_vshader_t *);
+HRESULT D3D11_CompileFlatVertexShader(vlc_object_t *, const d3d11_shaders_t *, d3d11_device_t *, d3d_vshader_t *);
 #define D3D11_CompileFlatVertexShader(a,b,c,d) D3D11_CompileFlatVertexShader(VLC_OBJECT(a),b,c,d)
 
-HRESULT D3D11_CompileProjectionVertexShader(vlc_object_t *, d3d11_handle_t *, d3d11_device_t *, d3d_vshader_t *);
+HRESULT D3D11_CompileProjectionVertexShader(vlc_object_t *, const d3d11_shaders_t *, d3d11_device_t *, d3d_vshader_t *);
 #define D3D11_CompileProjectionVertexShader(a,b,c,d) D3D11_CompileProjectionVertexShader(VLC_OBJECT(a),b,c,d)
 
 float GetFormatLuminance(vlc_object_t *, const video_format_t *);
 #define GetFormatLuminance(a,b)  GetFormatLuminance(VLC_OBJECT(a),b)
 
 HRESULT D3D11_CreateRenderTargets(d3d11_device_t *, ID3D11Resource *, const d3d_format_t *,
-                                  ID3D11RenderTargetView *output[D3D11_MAX_SHADER_VIEW]);
+                                  ID3D11RenderTargetView *output[D3D11_MAX_RENDER_TARGET]);
 
 void D3D11_ClearRenderTargets(d3d11_device_t *, const d3d_format_t *,
-                              ID3D11RenderTargetView *targets[D3D11_MAX_SHADER_VIEW]);
+                              ID3D11RenderTargetView *targets[D3D11_MAX_RENDER_TARGET]);
 
 void D3D11_SetVertexShader(d3d_vshader_t *dst, d3d_vshader_t *src);
 void D3D11_ReleaseVertexShader(d3d_vshader_t *);

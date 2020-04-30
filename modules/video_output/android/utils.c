@@ -186,7 +186,7 @@ NativeSurface_fromSurface(JNIEnv *p_env, jobject jsurf)
         return NULL;
     p_ns->p_surface_handle = p_surface_handle;
 
-    for (size_t i = 0; i < sizeof(libs) / sizeof(*libs); i++)
+    for (size_t i = 0; i < ARRAY_SIZE(libs); i++)
     {
         void *p_dl_handle = NativeSurface_Load(libs[i], p_ns);
         if (p_dl_handle)
@@ -537,6 +537,21 @@ AWindowHandler_new(vout_window_t *wnd, awh_events_t *p_events)
     p_awh->b_has_video_layout_listener =
         flags & AWINDOW_REGISTER_FLAGS_HAS_VIDEO_LAYOUT_LISTENER;
 
+    if (p_awh->b_has_video_layout_listener)
+    {
+        /* XXX: HACK: force mediacodec to setup an OpenGL surface when the vout
+         * is forced to gles2. Indeed, setting b_has_video_layout_listener to
+         * false will result in mediacodec using the AWindow_SurfaceTexture
+         * surface.
+         */
+        char *vout_modules = var_InheritString(wnd, "vout");
+        if (vout_modules
+         && (strncmp(vout_modules, "gles2", sizeof("gles2") - 1) == 0
+          || strncmp(vout_modules, "opengles2", sizeof("opengles2") - 1) == 0))
+            p_awh->b_has_video_layout_listener = false;
+        free(vout_modules);
+    }
+
     return p_awh;
 }
 
@@ -602,6 +617,8 @@ WindowHandler_NewSurfaceEnv(AWindowHandler *p_awh, JNIEnv *p_env,
         case AWindow_SurfaceTexture:
             jsurface = JNI_STEXCALL(CallObjectMethod, getSurface);
             break;
+        default:
+            vlc_assert_unreachable();
     }
     if (!jsurface)
         return VLC_EGENERIC;

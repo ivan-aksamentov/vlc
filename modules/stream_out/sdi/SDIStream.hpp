@@ -39,16 +39,22 @@ namespace sdi_sout
             virtual void FlushQueued() = 0;
             virtual void Enqueue(void *) = 0;
             virtual void * Dequeue() = 0;
+            virtual void Drain() = 0;
     };
 
     class AbstractQueueStreamOutputBuffer : public AbstractStreamOutputBuffer
     {
         public:
+            AbstractQueueStreamOutputBuffer();
+            ~AbstractQueueStreamOutputBuffer();
             virtual void Enqueue(void *);
             virtual void * Dequeue();
+            virtual void Drain();
+            virtual bool isEOS();
 
-        private:
-            std::mutex queue_mutex;
+        protected:
+            bool b_draining;
+            std::mutex buffer_mutex;
             std::queue<void *> queued;
     };
 
@@ -66,6 +72,12 @@ namespace sdi_sout
             PictureStreamOutputBuffer();
             virtual ~PictureStreamOutputBuffer();
             virtual void FlushQueued();
+            vlc_tick_t NextPictureTime();
+            virtual void Enqueue(void *); /* reimpl */
+            virtual void * Dequeue(); /* reimpl */
+
+        private:
+            vlc_sem_t pool_semaphore;
     };
 
     class StreamID
@@ -73,6 +85,7 @@ namespace sdi_sout
         public:
             StreamID(int);
             StreamID(int, int);
+            StreamID(const StreamID &) = default;
             StreamID& operator=(const StreamID &);
             bool      operator==(const StreamID &) const;
             std::string toString() const;
@@ -93,6 +106,8 @@ namespace sdi_sout
             virtual int Send(block_t*) = 0;
             virtual void Drain() = 0;
             virtual void Flush() = 0;
+            virtual bool ReachedPlaybackTime(vlc_tick_t) = 0;
+            virtual bool isEOS() = 0;
             const StreamID & getID() const;
 
         protected:
@@ -113,12 +128,31 @@ namespace sdi_sout
             virtual int Send(block_t*);
             virtual void Flush();
             virtual void Drain();
+            virtual bool ReachedPlaybackTime(vlc_tick_t); /* impl */
+            virtual bool isEOS(); /* impl */
             void setOutputFormat(const es_format_t *);
 
         protected:
             decoder_t *p_decoder;
             virtual void setCallbacks() = 0;
+            static void *decoderThreadCallback(void *);
+            void decoderThread();
+            void deinit();
+            virtual void ReleaseDecoder();
             es_format_t requestedoutput;
+            std::queue<block_t *> inputQueue;
+            vlc_mutex_t inputLock;
+            vlc_cond_t inputWait;
+            vlc_thread_t thread;
+            bool threadEnd;
+            enum
+            {
+                DECODING,
+                DRAINING,
+                DRAINED,
+                FAILED,
+            } status;
+            vlc_tick_t pcr;
     };
 
     class VideoDecodedStream : public AbstractDecodedStream
@@ -134,9 +168,10 @@ namespace sdi_sout
             static void VideoDecCallback_queue(decoder_t *, picture_t *);
             static void VideoDecCallback_queue_cc( decoder_t *, block_t *,
                                                    const decoder_cc_desc_t * );
-            static int VideoDecCallback_update_format(decoder_t *);
-            static picture_t *VideoDecCallback_new_buffer(decoder_t *);
-            filter_chain_t * VideoFilterCreate(const es_format_t *);
+            static vlc_decoder_device * VideoDecCallback_get_device(decoder_t *);
+            static int VideoDecCallback_update_format(decoder_t *, vlc_video_context *);
+            filter_chain_t * VideoFilterCreate(const es_format_t *, vlc_video_context *);
+            virtual void ReleaseDecoder();
             void Output(picture_t *);
             void QueueCC(block_t *);
             filter_chain_t *p_filters_chain;
@@ -168,8 +203,13 @@ namespace sdi_sout
             virtual int Send(block_t*); /* impl */
             virtual void Flush(); /* impl */
             virtual void Drain(); /* impl */
+            virtual bool ReachedPlaybackTime(vlc_tick_t); /* impl */
+            virtual bool isEOS(); /* impl */
 
         protected:
+            std::mutex buffer_mutex;
+            vlc_tick_t pcr;
+            bool b_draining;
             void FlushQueued();
     };
 

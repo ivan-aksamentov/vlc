@@ -54,23 +54,28 @@ static inline void input_SendEventCapabilities(input_thread_t *p_input,
     });
 }
 
-static inline void input_SendEventPosition(input_thread_t *p_input,
-                                            double f_position,
-                                            vlc_tick_t i_time)
+static inline void input_SendEventTimes(input_thread_t *p_input,
+                                        double f_position, vlc_tick_t i_time,
+                                        vlc_tick_t i_normal_time,
+                                        vlc_tick_t i_length)
 {
     input_SendEvent(p_input, &(struct vlc_input_event) {
-        .type = INPUT_EVENT_POSITION,
-        .position = { f_position, i_time }
+        .type = INPUT_EVENT_TIMES,
+        .times = { f_position, i_time, i_normal_time, i_length }
     });
 }
 
-static inline void input_SendEventLength(input_thread_t *p_input,
-                                          vlc_tick_t i_length)
+static inline void input_SendEventOutputClock(input_thread_t *p_input,
+                                              vlc_es_id_t *id, bool master,
+                                              vlc_tick_t system_ts,
+                                              vlc_tick_t ts, double rate,
+                                              unsigned frame_rate,
+                                              unsigned frame_rate_base)
 {
-    input_item_SetDuration(input_priv(p_input)->p_item, i_length);
     input_SendEvent(p_input, &(struct vlc_input_event) {
-        .type = INPUT_EVENT_LENGTH,
-        .length = i_length,
+        .type = INPUT_EVENT_OUTPUT_CLOCK,
+        .output_clock = { id, master, system_ts, ts, rate,
+                          frame_rate, frame_rate_base }
     });
 }
 
@@ -83,29 +88,11 @@ static inline void input_SendEventStatistics(input_thread_t *p_input,
     });
 }
 
-static inline void input_SendEventRate(input_thread_t *p_input, int i_rate)
+static inline void input_SendEventRate(input_thread_t *p_input, float rate)
 {
     input_SendEvent(p_input, &(struct vlc_input_event) {
         .type = INPUT_EVENT_RATE,
-        .rate = (float)INPUT_RATE_DEFAULT / (float)i_rate,
-    });
-}
-
-static inline void input_SendEventAudioDelay(input_thread_t *p_input,
-                                              vlc_tick_t i_delay)
-{
-    input_SendEvent(p_input, &(struct vlc_input_event) {
-        .type = INPUT_EVENT_AUDIO_DELAY,
-        .audio_delay = i_delay,
-    });
-}
-
-static inline void input_SendEventSubtitleDelay(input_thread_t *p_input,
-                                                 vlc_tick_t i_delay)
-{
-    input_SendEvent(p_input, &(struct vlc_input_event) {
-        .type = INPUT_EVENT_SUBTITLE_DELAY,
-        .subtitle_delay = i_delay,
+        .rate = rate,
     });
 }
 
@@ -145,11 +132,12 @@ static inline void input_SendEventSignal(input_thread_t *p_input,
     });
 }
 
-static inline void input_SendEventState(input_thread_t *p_input, int i_state)
+static inline void input_SendEventState(input_thread_t *p_input, int i_state,
+                                        vlc_tick_t state_date)
 {
     input_SendEvent(p_input, &(struct vlc_input_event) {
         .type = INPUT_EVENT_STATE,
-        .state = i_state
+        .state = { i_state, state_date, },
     });
 }
 

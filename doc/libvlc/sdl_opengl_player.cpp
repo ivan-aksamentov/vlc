@@ -16,7 +16,7 @@
 #include <vlc/vlc.h>
 
 /*
- * This program show how to use libvlc_video_set_opengl_callbacks API.
+ * This program show how to use libvlc_video_set_output_callbacks API.
  *
  * The main idea is to set up libvlc to render into FBO, and to use a
  * triple buffer mechanism to share textures between VLC and the rendering
@@ -79,9 +79,9 @@ public:
             return false;
         }
         // Define the opengl rendering callbacks
-        libvlc_video_set_opengl_callbacks(m_mp, libvlc_gl_engine_opengl,
-            setup, cleanup, resize, swap,
-            make_current, get_proc_address,
+        libvlc_video_set_output_callbacks(m_mp, libvlc_video_engine_opengl,
+            setup, cleanup, nullptr, resize, swap,
+            make_current, get_proc_address, nullptr, nullptr,
             this);
 
         // Play the video
@@ -116,10 +116,11 @@ public:
     }
 
     /// this callback will create the surfaces and FBO used by VLC to perform its rendering
-    static void resize(void* data, unsigned width, unsigned height)
+    static bool resize(void* data, const libvlc_video_render_cfg_t *cfg,
+                       libvlc_video_output_cfg_t *render_cfg)
     {
         VLCVideo* that = static_cast<VLCVideo*>(data);
-        if (width != that->m_width || height != that->m_height)
+        if (cfg->width != that->m_width || cfg->height != that->m_height)
             cleanup(data);
 
         glGenTextures(3, that->m_tex);
@@ -127,7 +128,7 @@ public:
 
         for (int i = 0; i < 3; i++) {
             glBindTexture(GL_TEXTURE_2D, that->m_tex[i]);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cfg->width, cfg->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -144,18 +145,27 @@ public:
             return;
         }
 
-        that->m_width = width;
-        that->m_height = height;
+        that->m_width = cfg->width;
+        that->m_height = cfg->height;
 
         glBindFramebuffer(GL_FRAMEBUFFER, that->m_fbo[that->m_idx_render]);
+
+        render_cfg->opengl_format = GL_RGBA;
+        render_cfg->full_range = true;
+        render_cfg->colorspace = libvlc_video_colorspace_BT709;
+        render_cfg->primaries  = libvlc_video_primaries_BT709;
+        render_cfg->transfer   = libvlc_video_transfer_func_SRGB;
+
+        return true;
     }
 
     // This callback is called during initialisation.
-    static bool setup(void* data)
+    static bool setup(void** data, const libvlc_video_setup_device_cfg_t *cfg,
+                      libvlc_video_setup_device_info_t *out)
     {
-        VLCVideo* that = static_cast<VLCVideo*>(data);
-        that->m_width = 0;
-        that->m_height = 0;
+        VLCVideo** that = static_cast<VLCVideo**>(data);
+        (*that)->m_width = 0;
+        (*that)->m_height = 0;
         return true;
     }
 

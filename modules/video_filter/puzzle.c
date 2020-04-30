@@ -3,7 +3,6 @@
  *****************************************************************************
  * Copyright (C) 2005-2009 VLC authors and VideoLAN
  * Copyright (C) 2013      Vianney Boyer
- * $Id$
  *
  * Authors: Antoine Cellerier <dionoea -at- videolan -dot- org>
  *          Vianney Boyer <vlcvboyer -at- gmail -dot- com>
@@ -71,10 +70,10 @@
 #define ROTATION_TEXT N_("Rotation")
 #define ROTATION_LONGTEXT N_("Rotation parameter: none;180;90-270;mirror")
 
-const int pi_mode_values[] = { (int) 0, (int) 1, (int) 2, (int) 3 };
-const char *const ppsz_mode_descriptions[] = { N_("jigsaw puzzle"), N_("sliding puzzle"), N_("swap puzzle"), N_("exchange puzzle") };
-const int pi_rotation_values[] = { (int) 0, (int) 1, (int) 2, (int) 3 };
-const char *const ppsz_rotation_descriptions[] = { N_("0"), N_("0/180"), N_("0/90/180/270"), N_("0/90/180/270/mirror") };
+static const int pi_mode_values[] = { (int) 0, (int) 1, (int) 2, (int) 3 };
+static const char *const ppsz_mode_descriptions[] = { N_("jigsaw puzzle"), N_("sliding puzzle"), N_("swap puzzle"), N_("exchange puzzle") };
+static const int pi_rotation_values[] = { (int) 0, (int) 1, (int) 2, (int) 3 };
+static const char *const ppsz_rotation_descriptions[] = { N_("0"), N_("0/180"), N_("0/90/180/270"), N_("0/90/180/270/mirror") };
 
 #define CFG_PREFIX "puzzle-"
 
@@ -226,9 +225,6 @@ static void Close( vlc_object_t *p_this ) {
     var_DelCallback( p_filter, CFG_PREFIX "auto-solve",    puzzle_Callback, p_sys );
     var_DelCallback( p_filter, CFG_PREFIX "rotation",      puzzle_Callback, p_sys );
     var_DelCallback( p_filter, CFG_PREFIX "mode",          puzzle_Callback, p_sys );
-
-    vlc_mutex_destroy( &p_sys->lock );
-    vlc_mutex_destroy( &p_sys->pce_lock );
 
     /* Free allocated memory */
     puzzle_free_ps_puzzle_array ( p_filter );

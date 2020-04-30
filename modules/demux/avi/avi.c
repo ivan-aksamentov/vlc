@@ -2,7 +2,6 @@
  * avi.c : AVI file Stream input module for vlc
  *****************************************************************************
  * Copyright (C) 2001-2009 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -243,6 +242,26 @@ static int        AVI_TrackStopFinishedStreams( demux_t *);
     (from mplayer 2002/08/02)
  - to complete....
  */
+
+#define QNAP_HEADER_SIZE 56
+static bool IsQNAPCodec(vlc_fourcc_t codec)
+{
+    switch (codec)
+    {
+        case VLC_FOURCC('w', '2', '6', '4'):
+        case VLC_FOURCC('q', '2', '6', '4'):
+        case VLC_FOURCC('Q', '2', '6', '4'):
+        case VLC_FOURCC('w', 'M', 'P', '4'):
+        case VLC_FOURCC('q', 'M', 'P', '4'):
+        case VLC_FOURCC('Q', 'M', 'P', '4'):
+        case VLC_FOURCC('w', 'I', 'V', 'G'):
+        case VLC_FOURCC('q', 'I', 'V', 'G'):
+        case VLC_FOURCC('Q', 'I', 'V', 'G'):
+            return true;
+        default:
+            return false;
+    }
+}
 
 /*****************************************************************************
  * Close: frees unused data
@@ -596,6 +615,9 @@ static int Open( vlc_object_t * p_this )
                     tk->fmt.i_original_fourcc = VLC_FOURCC( 'X', 'V', 'I', 'D' );
                 }
 
+                if( IsQNAPCodec( tk->fmt.i_codec ) )
+                    tk->fmt.b_packetized = false;
+
                 tk->i_samplesize = 0;
                 tk->fmt.video.i_frame_rate = tk->i_rate;
                 tk->fmt.video.i_frame_rate_base = tk->i_scale;
@@ -615,8 +637,9 @@ static int Open( vlc_object_t * p_this )
 
                 msg_Dbg( p_demux, "stream[%u] video(%4.4s) %"PRIu32"x%"PRIu32" %dbpp %ffps",
                          i, (char*)&p_vids->p_bih->biCompression,
-                         (uint32_t)p_vids->p_bih->biWidth,
-                         (uint32_t)p_vids->p_bih->biHeight,
+                         p_vids->p_bih->biWidth,
+                         (p_vids->p_bih->biHeight <= INT_MAX) ? p_vids->p_bih->biHeight
+                                                              : -1 * p_vids->p_bih->biHeight,
                          p_vids->p_bih->biBitCount,
                          (float)tk->i_rate/(float)tk->i_scale );
                 break;
@@ -650,6 +673,7 @@ static int Open( vlc_object_t * p_this )
                 free( tk );
                 continue;
         }
+        tk->fmt.i_id = i;
         if( p_strn && p_strn->p_str )
             tk->fmt.psz_description = FromACP( p_strn->p_str );
         tk->p_es = es_out_Add( p_demux->out, &tk->fmt );
@@ -816,7 +840,7 @@ static block_t * ReadFrame( demux_t *p_demux, const avi_track_t *tk,
         p_frame->i_buffer--;
     }
 
-    if( i_header >= p_frame->i_buffer )
+    if( i_header >= p_frame->i_buffer || tk->bihprops.i_stride > INT32_MAX - 3 )
     {
         p_frame->i_buffer = 0;
         return p_frame;
@@ -826,7 +850,7 @@ static block_t * ReadFrame( demux_t *p_demux, const avi_track_t *tk,
     p_frame->p_buffer += i_header;
     p_frame->i_buffer -= i_header;
 
-    const unsigned int i_stride_bytes = ((( (tk->bihprops.i_stride << 3) + 31) & ~31) >> 3);
+    const unsigned int i_stride_bytes = (tk->bihprops.i_stride + 3) & ~3;
 
     if ( !tk->bihprops.i_stride || !i_stride_bytes )
         return p_frame;
@@ -881,6 +905,47 @@ static block_t * ReadFrame( demux_t *p_demux, const avi_track_t *tk,
     }
 
     return p_frame;
+}
+
+/*****************************************************************************
+ * SendFrame: Sends frame to ES and does payload processing
+ *****************************************************************************/
+static void AVI_SendFrame( demux_t *p_demux, avi_track_t *tk, block_t *p_frame )
+{
+    if( tk->fmt.i_cat != VIDEO_ES )
+        p_frame->i_dts = p_frame->i_pts;
+    else
+    {
+        p_frame->i_dts = p_frame->i_pts;
+        p_frame->i_pts = VLC_TICK_INVALID;
+    }
+
+    if( tk->i_dv_audio_rate )
+        AVI_DvHandleAudio( p_demux, tk, p_frame );
+
+    /* Strip QNAP header */
+    if( IsQNAPCodec( tk->fmt.i_codec ) )
+    {
+        if( p_frame->i_buffer <= QNAP_HEADER_SIZE )
+        {
+            block_Release( p_frame );
+            return;
+        }
+
+        p_frame->i_buffer -= QNAP_HEADER_SIZE;
+        p_frame->p_buffer += QNAP_HEADER_SIZE;
+    }
+
+    if( tk->i_next_block_flags )
+    {
+        p_frame->i_flags = tk->i_next_block_flags;
+        tk->i_next_block_flags = 0;
+    }
+
+    if( tk->p_es )
+        es_out_Send( p_demux->out, tk->p_es, p_frame );
+    else
+        block_Release( p_frame );
 }
 
 /*****************************************************************************
@@ -1037,7 +1102,7 @@ static int Demux_Seekable( demux_t *p_demux )
         {
             for( i = 0; i < p_sys->i_track; i++ )
             {
-                if( toread[i].b_ok )
+                if( toread[i].b_ok && toread[i].i_toread >= 0 )
                     return VLC_DEMUXER_SUCCESS;
             }
             msg_Warn( p_demux, "all tracks have failed, exiting..." );
@@ -1046,13 +1111,15 @@ static int Demux_Seekable( demux_t *p_demux )
 
         if( i_pos == -1 )
         {
-            int i_loop_count = 0;
+            unsigned short i_loop_count = 0;
 
             /* no valid index, we will parse directly the stream
              * in case we fail we will disable all finished stream */
             if( p_sys->b_seekable && p_sys->i_movi_lastchunk_pos >= p_sys->i_movi_begin + 12 )
             {
-                vlc_stream_Seek( p_demux->s, p_sys->i_movi_lastchunk_pos );
+                if (vlc_stream_Seek(p_demux->s, p_sys->i_movi_lastchunk_pos))
+                    return VLC_DEMUXER_EGENERIC;
+
                 if( AVI_PacketNext( p_demux ) )
                 {
                     return( AVI_TrackStopFinishedStreams( p_demux ) ? 0 : 1 );
@@ -1060,7 +1127,8 @@ static int Demux_Seekable( demux_t *p_demux )
             }
             else
             {
-                vlc_stream_Seek( p_demux->s, p_sys->i_movi_begin + 12 );
+                if (vlc_stream_Seek(p_demux->s, p_sys->i_movi_begin + 12))
+                    return VLC_DEMUXER_EGENERIC;
             }
 
             for( ;; )
@@ -1083,17 +1151,8 @@ static int Demux_Seekable( demux_t *p_demux )
                         return( AVI_TrackStopFinishedStreams( p_demux ) ? 0 : 1 );
                     }
 
-                    /* Prevents from eating all the CPU with broken files.
-                     * This value should be low enough so that it doesn't
-                     * affect the reading speed too much. */
-                    if( !(++i_loop_count % 1024) )
-                    {
-                        vlc_tick_sleep( VLC_HARD_MIN_SLEEP );
-
-                        if( !(i_loop_count % (1024 * 10)) )
-                            msg_Warn( p_demux,
-                                      "don't seem to find any data..." );
-                    }
+                    if( !++i_loop_count )
+                         msg_Warn( p_demux, "don't seem to find any data..." );
                     continue;
                 }
                 else
@@ -1130,7 +1189,8 @@ static int Demux_Seekable( demux_t *p_demux )
         }
         else
         {
-            vlc_stream_Seek( p_demux->s, i_pos );
+            if (vlc_stream_Seek(p_demux->s, i_pos))
+                return VLC_DEMUXER_EGENERIC;
         }
 
         /* Set the track to use */
@@ -1229,27 +1289,7 @@ static int Demux_Seekable( demux_t *p_demux )
             toread[i_track].i_posf = -1;
         }
 
-        if( tk->fmt.i_cat != VIDEO_ES )
-            p_frame->i_dts = p_frame->i_pts;
-        else
-        {
-            p_frame->i_dts = p_frame->i_pts;
-            p_frame->i_pts = VLC_TICK_INVALID;
-        }
-
-        if( tk->i_dv_audio_rate )
-            AVI_DvHandleAudio( p_demux, tk, p_frame );
-
-        if( tk->i_next_block_flags )
-        {
-            p_frame->i_flags = tk->i_next_block_flags;
-            tk->i_next_block_flags = 0;
-        }
-
-        if( tk->p_es )
-            es_out_Send( p_demux->out, tk->p_es, p_frame );
-        else
-            block_Release( p_frame );
+        AVI_SendFrame( p_demux, tk, p_frame );
     }
 }
 
@@ -1367,21 +1407,7 @@ static int Demux_UnSeekable( demux_t *p_demux )
                 }
                 p_frame->i_pts = VLC_TICK_0 + AVI_GetPTS( p_stream );
 
-                if( avi_pk.i_cat != VIDEO_ES )
-                    p_frame->i_dts = p_frame->i_pts;
-                else
-                {
-                    p_frame->i_dts = p_frame->i_pts;
-                    p_frame->i_pts = VLC_TICK_INVALID;
-                }
-
-                if( p_stream->i_dv_audio_rate )
-                    AVI_DvHandleAudio( p_demux, p_stream, p_frame );
-
-                if( p_stream->p_es )
-                    es_out_Send( p_demux->out, p_stream->p_es, p_frame );
-                else
-                    block_Release( p_frame );
+                AVI_SendFrame( p_demux, p_stream, p_frame );
             }
             else
             {
@@ -1435,8 +1461,9 @@ static int Seek( demux_t *p_demux, vlc_tick_t i_date, double f_ratio, bool b_acc
             if ( i_ret )
             {
                 /* Go back to position before index failure */
-                if ( vlc_stream_Tell( p_demux->s ) - i_pos_backup )
-                    vlc_stream_Seek( p_demux->s, i_pos_backup );
+                if (vlc_stream_Tell(p_demux->s) != i_pos_backup
+                 && vlc_stream_Seek(p_demux->s, i_pos_backup))
+                    return VLC_EGENERIC;
 
                 if ( p_sys->i_avih_flags & AVIF_MUSTUSEINDEX )
                     return VLC_EGENERIC;
@@ -1727,7 +1754,7 @@ static int64_t AVI_PTSToByte( avi_track_t *tk, vlc_tick_t i_pts )
         return 0;
 
     i_pts = AVI_Rescale( i_pts, tk->i_scale, tk->i_rate );
-    return samples_from_vlc_tick(i_pts, tk->i_samplesize);
+    return i_pts / CLOCK_FREQ * tk->i_samplesize;
 }
 
 static vlc_tick_t AVI_GetDPTS( avi_track_t *tk, int64_t i_count )
@@ -1782,13 +1809,14 @@ static int AVI_StreamChunkFind( demux_t *p_demux, unsigned int i_stream )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
     avi_packet_t avi_pk;
-    int i_loop_count = 0;
+    unsigned short i_loop_count = 0;
 
     /* find first chunk of i_stream that isn't in index */
 
     if( p_sys->i_movi_lastchunk_pos >= p_sys->i_movi_begin + 12 )
     {
-        vlc_stream_Seek( p_demux->s, p_sys->i_movi_lastchunk_pos );
+        if (vlc_stream_Seek(p_demux->s, p_sys->i_movi_lastchunk_pos))
+            return VLC_EGENERIC;
         if( AVI_PacketNext( p_demux ) )
         {
             return VLC_EGENERIC;
@@ -1796,7 +1824,8 @@ static int AVI_StreamChunkFind( demux_t *p_demux, unsigned int i_stream )
     }
     else
     {
-        vlc_stream_Seek( p_demux->s, p_sys->i_movi_begin + 12 );
+        if (vlc_stream_Seek(p_demux->s, p_sys->i_movi_begin + 12))
+            return VLC_EGENERIC;
     }
 
     for( ;; )
@@ -1814,16 +1843,8 @@ static int AVI_StreamChunkFind( demux_t *p_demux, unsigned int i_stream )
                 return VLC_EGENERIC;
             }
 
-            /* Prevents from eating all the CPU with broken files.
-             * This value should be low enough so that it doesn't
-             * affect the reading speed too much. */
-            if( !(++i_loop_count % 1024) )
-            {
-                vlc_tick_sleep( VLC_HARD_MIN_SLEEP );
-
-                if( !(i_loop_count % (1024 * 10)) )
-                    msg_Warn( p_demux, "don't seem to find any data..." );
-            }
+            if( !++i_loop_count )
+                 msg_Warn( p_demux, "don't seem to find any data..." );
         }
         else
         {
@@ -2209,7 +2230,7 @@ static int AVI_PacketSearch( demux_t *p_demux )
 {
     demux_sys_t     *p_sys = p_demux->p_sys;
     avi_packet_t    avi_pk;
-    int             i_count = 0;
+    unsigned short  i_count = 0;
 
     for( ;; )
     {
@@ -2232,16 +2253,8 @@ static int AVI_PacketSearch( demux_t *p_demux )
                 return VLC_SUCCESS;
         }
 
-        /* Prevents from eating all the CPU with broken files.
-         * This value should be low enough so that it doesn't affect the
-         * reading speed too much (not that we care much anyway because
-         * this code is called only on broken files). */
-        if( !(++i_count % 1024) )
-        {
-            vlc_tick_sleep( VLC_HARD_MIN_SLEEP );
-            if( !(i_count % (1024 * 10)) )
-                msg_Warn( p_demux, "trying to resync..." );
-        }
+        if( !++i_count )
+            msg_Warn( p_demux, "trying to resync..." );
     }
 }
 

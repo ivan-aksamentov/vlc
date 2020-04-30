@@ -2,7 +2,6 @@
  * vc1.c : VC1 Video demuxer
  *****************************************************************************
  * Copyright (C) 2002-2004 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -151,8 +150,8 @@ static int Demux( demux_t *p_demux)
     else
     {
         /*  */
-        p_block_in->i_dts = VLC_TICK_0;
-        p_block_in->i_pts = VLC_TICK_0;
+        p_block_in->i_dts = p_sys->i_dts != VLC_TICK_INVALID ? p_sys->i_dts : VLC_TICK_0;
+        p_block_in->i_pts = p_block_in->i_dts;
     }
 
     while( (p_block_out = p_sys->p_packetizer->pf_packetize( p_sys->p_packetizer,
@@ -167,6 +166,7 @@ static int Demux( demux_t *p_demux)
             if( p_sys->p_es == NULL )
             {
                 p_sys->p_packetizer->fmt_out.b_packetized = true;
+                p_sys->p_packetizer->fmt_out.i_id = 0;
                 p_sys->p_es = es_out_Add( p_demux->out, &p_sys->p_packetizer->fmt_out);
             }
 

@@ -24,12 +24,12 @@
 #include "SDIOutput.hpp"
 
 #include <vlc_es.h>
-
-#include <DeckLinkAPI.h>
+#include "../../access/vlc_decklink.h"
 
 namespace sdi_sout
 {
-    class DBMSDIOutput : public SDIOutput
+    class DBMSDIOutput : public SDIOutput,
+                         public IDeckLinkVideoOutputCallback
     {
         public:
             DBMSDIOutput(sout_stream_t *);
@@ -37,6 +37,12 @@ namespace sdi_sout
             virtual AbstractStream *Add(const es_format_t *); /* reimpl */
             virtual int Open(); /* impl */
             virtual int Process(); /* impl */
+
+            virtual HRESULT STDMETHODCALLTYPE QueryInterface (REFIID, LPVOID *);
+            virtual ULONG STDMETHODCALLTYPE AddRef ();
+            virtual ULONG STDMETHODCALLTYPE Release ();
+            virtual HRESULT ScheduledFrameCompleted (IDeckLinkVideoFrame *, BMDOutputFrameCompletionResult);
+            virtual HRESULT ScheduledPlaybackHasStopped (void);
 
         protected:
             int ProcessVideo(picture_t *, block_t *);
@@ -52,14 +58,30 @@ namespace sdi_sout
             BMDTimeValue frameduration;
             vlc_tick_t lasttimestamp;
             /* XXX: workaround card clock drift */
-            vlc_tick_t offset;
+            struct
+            {
+                vlc_tick_t offset; /* > 0 if clock card is slower */
+                vlc_tick_t system_reference;
+                BMDTimeValue hardware_reference;
+            } clock;
             bool b_running;
-            int Start();
-            const char *ErrorToString(long i_code);
-            IDeckLinkDisplayMode * MatchDisplayMode(const video_format_t *,
-                                                    BMDDisplayMode = bmdDisplayModeNotSupported);
+            bool b_prerolled;
+            vlc_tick_t streamStartTime;
+            int StartPlayback();
+            struct
+            {
+                vlc_mutex_t lock; /* Driver calls callback... until buffer is empty :/ */
+                vlc_cond_t cond;
+                vlc_thread_t thread;
+            } feeder;
+            static void *feederThreadCallback(void *);
+            void feederThread();
+            int doSchedule();
             int doProcessVideo(picture_t *, block_t *);
-            picture_t * CreateNoSignalPicture(const char*, const video_format_t *);
+            int FeedOneFrame();
+            int FeedAudio(vlc_tick_t, vlc_tick_t, bool);
+            void checkClockDrift();
+            bool isDrained();
     };
 }
 

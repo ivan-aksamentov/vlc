@@ -40,7 +40,6 @@
 #include <vlc_demux.h>
 #include <vlc_es.h>
 #include <vlc_es_out.h>
-#include <vlc_input.h>
 
 #include "sections.h"
 #include "ts_pid.h"
@@ -294,6 +293,7 @@ ts_stream_t *ts_stream_New( demux_t *p_demux, ts_pmt_t *p_program )
     pes->p_proc = NULL;
     pes->prepcr.p_head = NULL;
     pes->prepcr.pp_last = &pes->prepcr.p_head;
+    pes->i_last_dts = -1;
 
     return pes;
 }

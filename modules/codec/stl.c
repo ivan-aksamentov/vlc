@@ -2,7 +2,6 @@
  * stl.c: EBU STL decoder
  *****************************************************************************
  * Copyright (C) 2010 Laurent Aimar
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir _AT_ videolan _DOT_ org>
  *
@@ -435,7 +434,7 @@ static int Decode(decoder_t *p_dec, block_t *p_block)
     return VLCDEC_SUCCESS;
 }
 
-static int ParseGSI(const decoder_t *dec, decoder_sys_t *p_sys)
+static int ParseGSI(decoder_t *dec, decoder_sys_t *p_sys)
 {
     uint8_t *header = dec->fmt_in.p_extra;
     if (!header) {

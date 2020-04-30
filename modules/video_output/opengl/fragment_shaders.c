@@ -28,176 +28,361 @@
 #ifdef HAVE_LIBPLACEBO
 #include <libplacebo/shaders.h>
 #include <libplacebo/shaders/colorspace.h>
+#include "../placebo_utils.h"
 #endif
 
 #include <vlc_common.h>
 #include <vlc_memstream.h>
+#include "interop.h"
 #include "internal.h"
 #include "vout_helper.h"
 
-#ifndef GL_RED
-# define GL_RED 0x1903
-#endif
-#ifndef GL_RG
-# define GL_RG 0x8227
-#endif
-#ifndef GL_R16
-# define GL_R16 0x822A
-#endif
-#ifndef GL_BGRA
-# define GL_BGRA 0x80E1
-#endif
-#ifndef GL_RG16
-# define GL_RG16 0x822C
-#endif
-#ifndef GL_LUMINANCE16
-# define GL_LUMINANCE16 0x8042
-#endif
-#ifndef GL_TEXTURE_RED_SIZE
-# define GL_TEXTURE_RED_SIZE 0x805C
-#endif
-#ifndef GL_TEXTURE_LUMINANCE_SIZE
-# define GL_TEXTURE_LUMINANCE_SIZE 0x8060
-#endif
+static const float MATRIX_COLOR_RANGE_LIMITED[4*3] = {
+    255.0/219,         0,         0, -255.0/219 *  16.0/255,
+            0, 255.0/224,         0, -255.0/224 * 128.0/255,
+            0,         0, 255.0/224, -255.0/224 * 128.0/255,
+};
 
-static int GetTexFormatSize(opengl_tex_converter_t *tc, int target,
-                            int tex_format, int tex_internal, int tex_type)
+static const float MATRIX_COLOR_RANGE_FULL[4*3] = {
+    1, 0, 0,          0,
+    0, 1, 0, -128.0/255,
+    0, 0, 1, -128.0/255,
+};
+
+/*
+ * Construct the transformation matrix from the luma weight of the red and blue
+ * component (the green component is deduced).
+ */
+#define MATRIX_YUV_TO_RGB(KR, KB) \
+    MATRIX_YUV_TO_RGB_(KR, (1-(KR)-(KB)), KB)
+
+/*
+ * Construct the transformation matrix from the luma weight of the RGB
+ * components.
+ *
+ * KR: luma weight of the red component
+ * KG: luma weight of the green component
+ * KB: luma weight of the blue component
+ *
+ * By definition, KR + KG + KB == 1.
+ *
+ * Ref: <https://en.wikipedia.org/wiki/YCbCr#ITU-R_BT.601_conversion>
+ * Ref: libplacebo: src/colorspace.c:luma_coeffs()
+ * */
+#define MATRIX_YUV_TO_RGB_(KR, KG, KB) { \
+    1,                         0,              2*(1.0-(KR)), \
+    1, -2*(1.0-(KB))*((KB)/(KG)), -2*(1.0-(KR))*((KR)/(KG)), \
+    1,              2*(1.0-(KB)),                         0, \
+}
+
+static const float MATRIX_BT601[3*3] = MATRIX_YUV_TO_RGB(0.299, 0.114);
+static const float MATRIX_BT709[3*3] = MATRIX_YUV_TO_RGB(0.2126, 0.0722);
+static const float MATRIX_BT2020[3*3] = MATRIX_YUV_TO_RGB(0.2627, 0.0593);
+
+static void
+init_conv_matrix(float conv_matrix_out[],
+                 video_color_space_t color_space,
+                 video_color_range_t color_range)
 {
-    if (!tc->vt->GetTexLevelParameteriv)
-        return -1;
-
-    GLint tex_param_size;
-    int mul = 1;
-    switch (tex_format)
-    {
-        case GL_BGRA:
-            mul = 4;
-            /* fall through */
-        case GL_RED:
-        case GL_RG:
-            tex_param_size = GL_TEXTURE_RED_SIZE;
+    const float *space_matrix;
+    switch (color_space) {
+        case COLOR_SPACE_BT601:
+            space_matrix = MATRIX_BT601;
             break;
-        case GL_LUMINANCE:
-            tex_param_size = GL_TEXTURE_LUMINANCE_SIZE;
+        case COLOR_SPACE_BT2020:
+            space_matrix = MATRIX_BT2020;
             break;
         default:
-            return -1;
+            space_matrix = MATRIX_BT709;
     }
-    GLuint texture;
 
-    tc->vt->GenTextures(1, &texture);
-    tc->vt->BindTexture(target, texture);
-    tc->vt->TexImage2D(target, 0, tex_internal, 64, 64, 0, tex_format, tex_type, NULL);
-    GLint size = 0;
-    tc->vt->GetTexLevelParameteriv(target, 0, tex_param_size, &size);
+    /* Init the conversion matrix in column-major order (OpenGL expects
+     * column-major order by default, and OpenGL ES does not support row-major
+     * order at all). */
 
-    tc->vt->DeleteTextures(1, &texture);
-    return size > 0 ? size * mul : size;
+    const float *range_matrix = color_range == COLOR_RANGE_FULL
+                              ? MATRIX_COLOR_RANGE_FULL
+                              : MATRIX_COLOR_RANGE_LIMITED;
+    /* Multiply the matrices on CPU once for all */
+    for (int x = 0; x < 4; ++x)
+    {
+        for (int y = 0; y < 3; ++y)
+        {
+            /* Perform intermediate computation in double precision even if the
+             * result is in single-precision, to avoid unnecessary errors. */
+            double sum = 0;
+            for (int k = 0; k < 3; ++k)
+                sum += space_matrix[y * 3 + k] * range_matrix[k * 4 + x];
+            /* Notice the reversed indices: x is now the row, y is the
+             * column. */
+            conv_matrix_out[x * 4 + y] = sum;
+        }
+    }
+
+    /* Add a row to fill a 4x4 matrix (remember it's in column-major order).
+     * (non-square matrices are not supported on old OpenGL ES versions) */
+    conv_matrix_out[3] = 0;
+    conv_matrix_out[7] = 0;
+    conv_matrix_out[11] = 0;
+    conv_matrix_out[15] = 1;
 }
 
 static int
-tc_yuv_base_init(opengl_tex_converter_t *tc, GLenum tex_target,
-                 vlc_fourcc_t chroma, const vlc_chroma_description_t *desc,
-                 video_color_space_t yuv_space,
-                 bool *swap_uv, const char *swizzle_per_tex[])
+renderer_yuv_base_init(struct vlc_gl_renderer *renderer, vlc_fourcc_t chroma,
+                       const vlc_chroma_description_t *desc,
+                       video_color_space_t yuv_space)
 {
-    GLint oneplane_texfmt, oneplane16_texfmt,
-          twoplanes_texfmt, twoplanes16_texfmt;
+    /* The current implementation always converts from limited to full range. */
+    const video_color_range_t range = COLOR_RANGE_LIMITED;
+    float *matrix = renderer->conv_matrix;
+    init_conv_matrix(matrix, yuv_space, range);
 
-    if (vlc_gl_StrHasToken(tc->glexts, "GL_ARB_texture_rg"))
-    {
-        oneplane_texfmt = GL_RED;
-        oneplane16_texfmt = GL_R16;
-        twoplanes_texfmt = GL_RG;
-        twoplanes16_texfmt = GL_RG16;
-    }
-    else
-    {
-        oneplane_texfmt = GL_LUMINANCE;
-        oneplane16_texfmt = GL_LUMINANCE16;
-        twoplanes_texfmt = GL_LUMINANCE_ALPHA;
-        twoplanes16_texfmt = 0;
-    }
-
-    float yuv_range_correction = 1.0;
     if (desc->pixel_size == 2)
     {
-        if (GetTexFormatSize(tc, tex_target, oneplane_texfmt,
-                             oneplane16_texfmt, GL_UNSIGNED_SHORT) != 16)
-            return VLC_EGENERIC;
-
-        /* Do a bit shift if samples are stored on LSB */
-        if (chroma != VLC_CODEC_P010)
-            yuv_range_correction = (float)((1 << 16) - 1)
-                                 / ((1 << desc->pixel_bits) - 1);
+        if (chroma != VLC_CODEC_P010 && chroma != VLC_CODEC_P016) {
+            /* Do a bit shift if samples are stored on LSB. */
+            float yuv_range_correction = (float)((1 << 16) - 1)
+                                         / ((1 << desc->pixel_bits) - 1);
+            /* We want to transform the input color (y, u, v, 1) to
+             * (r*y, r*u, r*v, 1), where r = yuv_range_correction.
+             *
+             * This can be done by left-multiplying the color vector by a
+             * matrix R:
+             *
+             *                 R
+             *  / r*y \   / r 0 0 0 \   / y \
+             *  | r*u | = | 0 r 0 0 | * | u |
+             *  | r*v |   | 0 0 r 0 |   | v |
+             *  \  1  /   \ 0 0 0 1 /   \ 1 /
+             *
+             * Combine this transformation with the color conversion matrix:
+             *
+             *     matrix := matrix * R
+             *
+             * This is equivalent to multipying the 3 first rows by r
+             * (yuv_range_conversion).
+             */
+            for (int i = 0; i < 4*3; ++i)
+                matrix[i] *= yuv_range_correction;
+        }
     }
+
+    renderer->yuv_color = true;
+
+    /* Some formats require to swap the U and V components.
+     *
+     * This can be done by left-multiplying the color vector by a matrix S:
+     *
+     *               S
+     *  / y \   / 1 0 0 0 \   / y \
+     *  | v | = | 0 0 1 0 | * | u |
+     *  | u |   | 0 1 0 0 |   | v |
+     *  \ 1 /   \ 0 0 0 1 /   \ 1 /
+     *
+     * Combine this transformation with the color conversion matrix:
+     *
+     *     matrix := matrix * S
+     *
+     * This is equivalent to swap columns 1 and 2.
+     */
+    bool swap_uv = chroma == VLC_CODEC_YV12 || chroma == VLC_CODEC_YV9 ||
+                   chroma == VLC_CODEC_NV21;
+    if (swap_uv)
+    {
+        /* Remember, the matrix in column-major order */
+        float tmp[4];
+        /* tmp <- column1 */
+        memcpy(tmp, matrix + 4, sizeof(tmp));
+        /* column1 <- column2 */
+        memcpy(matrix + 4, matrix + 8, sizeof(tmp));
+        /* column2 <- tmp */
+        memcpy(matrix + 8, tmp, sizeof(tmp));
+    }
+    return VLC_SUCCESS;
+}
+
+static int
+renderer_base_fetch_locations(struct vlc_gl_renderer *renderer, GLuint program)
+{
+    struct vlc_gl_interop *interop = renderer->interop;
+    const opengl_vtable_t *vt = renderer->vt;
+
+    if (renderer->yuv_color)
+    {
+        renderer->uloc.ConvMatrix = vt->GetUniformLocation(program,
+                                                           "ConvMatrix");
+        if (renderer->uloc.ConvMatrix == -1)
+            return VLC_EGENERIC;
+    }
+
+    for (unsigned int i = 0; i < interop->tex_count; ++i)
+    {
+        char name[sizeof("TextureX")];
+        snprintf(name, sizeof(name), "Texture%1u", i);
+        renderer->uloc.Texture[i] = vt->GetUniformLocation(program, name);
+        if (renderer->uloc.Texture[i] == -1)
+            return VLC_EGENERIC;
+        if (interop->tex_target == GL_TEXTURE_RECTANGLE)
+        {
+            snprintf(name, sizeof(name), "TexSize%1u", i);
+            renderer->uloc.TexSize[i] = vt->GetUniformLocation(program, name);
+            if (renderer->uloc.TexSize[i] == -1)
+                return VLC_EGENERIC;
+        }
+    }
+
+    renderer->uloc.FillColor = vt->GetUniformLocation(program, "FillColor");
+    if (renderer->uloc.FillColor == -1)
+        return VLC_EGENERIC;
+
+#ifdef HAVE_LIBPLACEBO
+    const struct pl_shader_res *res = renderer->pl_sh_res;
+    for (int i = 0; res && i < res->num_variables; i++) {
+        struct pl_shader_var sv = res->variables[i];
+        renderer->uloc.pl_vars[i] = vt->GetUniformLocation(program, sv.var.name);
+    }
+#endif
+
+    return VLC_SUCCESS;
+}
+
+static void
+renderer_base_prepare_shader(const struct vlc_gl_renderer *renderer,
+                             const GLsizei *tex_width,
+                             const GLsizei *tex_height, float alpha)
+{
+    (void) tex_width; (void) tex_height;
+    const struct vlc_gl_interop *interop = renderer->interop;
+    const opengl_vtable_t *vt = renderer->vt;
+
+    if (renderer->yuv_color)
+        vt->UniformMatrix4fv(renderer->uloc.ConvMatrix, 1, GL_FALSE,
+                             renderer->conv_matrix);
+
+    for (unsigned i = 0; i < interop->tex_count; ++i)
+        vt->Uniform1i(renderer->uloc.Texture[i], i);
+
+    vt->Uniform4f(renderer->uloc.FillColor, 1.0f, 1.0f, 1.0f, alpha);
+
+    if (interop->tex_target == GL_TEXTURE_RECTANGLE)
+    {
+        for (unsigned i = 0; i < interop->tex_count; ++i)
+            vt->Uniform2f(renderer->uloc.TexSize[i], tex_width[i],
+                          tex_height[i]);
+    }
+
+#ifdef HAVE_LIBPLACEBO
+    const struct pl_shader_res *res = renderer->pl_sh_res;
+    for (int i = 0; res && i < res->num_variables; i++) {
+        GLint loc = renderer->uloc.pl_vars[i];
+        if (loc == -1) // uniform optimized out
+            continue;
+
+        struct pl_shader_var sv = res->variables[i];
+        struct pl_var var = sv.var;
+        // libplacebo doesn't need anything else anyway
+        if (var.type != PL_VAR_FLOAT)
+            continue;
+        if (var.dim_m > 1 && var.dim_m != var.dim_v)
+            continue;
+
+        const float *f = sv.data;
+        switch (var.dim_m) {
+        case 4: vt->UniformMatrix4fv(loc, 1, GL_FALSE, f); break;
+        case 3: vt->UniformMatrix3fv(loc, 1, GL_FALSE, f); break;
+        case 2: vt->UniformMatrix2fv(loc, 1, GL_FALSE, f); break;
+
+        case 1:
+            switch (var.dim_v) {
+            case 1: vt->Uniform1f(loc, f[0]); break;
+            case 2: vt->Uniform2f(loc, f[0], f[1]); break;
+            case 3: vt->Uniform3f(loc, f[0], f[1], f[2]); break;
+            case 4: vt->Uniform4f(loc, f[0], f[1], f[2], f[3]); break;
+            }
+            break;
+        }
+    }
+#endif
+}
+
+static int
+renderer_xyz12_fetch_locations(struct vlc_gl_renderer *renderer, GLuint program)
+{
+    const opengl_vtable_t *vt = renderer->vt;
+    renderer->uloc.Texture[0] = vt->GetUniformLocation(program, "Texture0");
+    return renderer->uloc.Texture[0] != -1 ? VLC_SUCCESS : VLC_EGENERIC;
+}
+
+static void
+renderer_xyz12_prepare_shader(const struct vlc_gl_renderer *renderer,
+                              const GLsizei *tex_width,
+                              const GLsizei *tex_height, float alpha)
+{
+    (void) tex_width; (void) tex_height; (void) alpha;
+    const opengl_vtable_t *vt = renderer->vt;
+    vt->Uniform1i(renderer->uloc.Texture[0], 0);
+}
+
+static char *
+xyz12_shader_init(struct vlc_gl_renderer *renderer)
+{
+    renderer->pf_fetch_locations = renderer_xyz12_fetch_locations;
+    renderer->pf_prepare_shader = renderer_xyz12_prepare_shader;
+
+    /* Shader for XYZ to RGB correction
+     * 3 steps :
+     *  - XYZ gamma correction
+     *  - XYZ to RGB matrix conversion
+     *  - reverse RGB gamma correction
+     */
+    static const char *template =
+        "uniform sampler2D Texture0;"
+        "uniform vec4 xyz_gamma = vec4(2.6);"
+        "uniform vec4 rgb_gamma = vec4(1.0/2.2);"
+        /* WARN: matrix Is filled column by column (not row !) */
+        "uniform mat4 matrix_xyz_rgb = mat4("
+        "    3.240454 , -0.9692660, 0.0556434, 0.0,"
+        "   -1.5371385,  1.8760108, -0.2040259, 0.0,"
+        "    -0.4985314, 0.0415560, 1.0572252,  0.0,"
+        "    0.0,      0.0,         0.0,        1.0 "
+        " );"
+
+        "uniform mat4 TransformMatrix;\n"
+        "uniform mat4 OrientationMatrix;\n"
+        "uniform mat3 TexCoordsMap0;\n"
+        "vec4 vlc_texture(vec2 pic_coords)\n"
+        "{ "
+        " vec4 v_in, v_out;"
+        /* Homogeneous (oriented) coordinates */
+        " vec3 pic_hcoords = vec3((TransformMatrix * OrientationMatrix * vec4(pic_coords, 0.0, 1.0)).st, 1.0);\n"
+        " vec2 tex_coords = (TexCoordsMap0 * pic_hcoords).st;\n"
+        " v_in  = texture2D(Texture0, tex_coords);\n"
+        " v_in = pow(v_in, xyz_gamma);"
+        " v_out = matrix_xyz_rgb * v_in ;"
+        " v_out = pow(v_out, rgb_gamma) ;"
+        " v_out = clamp(v_out, 0.0, 1.0) ;"
+        " return v_out;"
+        "}\n";
+
+    return strdup(template);
+}
+
+static int
+opengl_init_swizzle(const struct vlc_gl_interop *interop,
+                    const char *swizzle_per_tex[],
+                    vlc_fourcc_t chroma,
+                    const vlc_chroma_description_t *desc)
+{
+    GLint oneplane_texfmt;
+    if (vlc_gl_StrHasToken(interop->api->extensions, "GL_ARB_texture_rg"))
+        oneplane_texfmt = GL_RED;
+    else
+        oneplane_texfmt = GL_LUMINANCE;
 
     if (desc->plane_count == 3)
-    {
-        GLint internal = 0;
-        GLenum type = 0;
-
-        if (desc->pixel_size == 1)
-        {
-            internal = oneplane_texfmt;
-            type = GL_UNSIGNED_BYTE;
-        }
-        else if (desc->pixel_size == 2)
-        {
-            internal = oneplane16_texfmt;
-            type = GL_UNSIGNED_SHORT;
-        }
-        else
-            return VLC_EGENERIC;
-
-        assert(internal != 0 && type != 0);
-
-        tc->tex_count = 3;
-        for (unsigned i = 0; i < tc->tex_count; ++i )
-        {
-            tc->texs[i] = (struct opengl_tex_cfg) {
-                { desc->p[i].w.num, desc->p[i].w.den },
-                { desc->p[i].h.num, desc->p[i].h.den },
-                internal, oneplane_texfmt, type
-            };
-        }
-
-        if (oneplane_texfmt == GL_RED)
-            swizzle_per_tex[0] = swizzle_per_tex[1] = swizzle_per_tex[2] = "r";
-    }
+        swizzle_per_tex[0] = swizzle_per_tex[1] = swizzle_per_tex[2] = "r";
     else if (desc->plane_count == 2)
     {
-        tc->tex_count = 2;
-
-        if (desc->pixel_size == 1)
-        {
-            tc->texs[0] = (struct opengl_tex_cfg) {
-                { 1, 1 }, { 1, 1 }, oneplane_texfmt, oneplane_texfmt,
-                GL_UNSIGNED_BYTE
-            };
-            tc->texs[1] = (struct opengl_tex_cfg) {
-                { 1, 2 }, { 1, 2 }, twoplanes_texfmt, twoplanes_texfmt,
-                GL_UNSIGNED_BYTE
-            };
-        }
-        else if (desc->pixel_size == 2)
-        {
-            if (twoplanes16_texfmt == 0
-             || GetTexFormatSize(tc, tex_target, twoplanes_texfmt,
-                                 twoplanes16_texfmt, GL_UNSIGNED_SHORT) != 16)
-                return VLC_EGENERIC;
-            tc->texs[0] = (struct opengl_tex_cfg) {
-                { 1, 1 }, { 1, 1 }, oneplane16_texfmt, oneplane_texfmt,
-                GL_UNSIGNED_SHORT
-            };
-            tc->texs[1] = (struct opengl_tex_cfg) {
-                { 1, 2 }, { 1, 2 }, twoplanes16_texfmt, twoplanes_texfmt,
-                GL_UNSIGNED_SHORT
-            };
-        }
-        else
-            return VLC_EGENERIC;
-
         if (oneplane_texfmt == GL_RED)
         {
             swizzle_per_tex[0] = "r";
@@ -205,18 +390,12 @@ tc_yuv_base_init(opengl_tex_converter_t *tc, GLenum tex_target,
         }
         else
         {
-            swizzle_per_tex[0] = NULL;
+            swizzle_per_tex[0] = "x";
             swizzle_per_tex[1] = "xa";
         }
     }
     else if (desc->plane_count == 1)
     {
-        /* Y1 U Y2 V fits in R G B A */
-        tc->tex_count = 1;
-        tc->texs[0] = (struct opengl_tex_cfg) {
-            { 1, 2 }, { 1, 1 }, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE
-        };
-
         /*
          * Set swizzling in Y1 U V order
          * R  G  B  A
@@ -244,353 +423,50 @@ tc_yuv_base_init(opengl_tex_converter_t *tc, GLenum tex_target,
                 return VLC_EGENERIC;
         }
     }
-    else
-        return VLC_EGENERIC;
-
-    /* [R/G/B][Y U V O] from TV range to full range
-     * XXX we could also do hue/brightness/constrast/gamma
-     * by simply changing the coefficients
-     */
-    static const float matrix_bt601_tv2full[12] = {
-        1.164383561643836,  0.0000,             1.596026785714286, -0.874202217873451 ,
-        1.164383561643836, -0.391762290094914, -0.812967647237771,  0.531667823499146 ,
-        1.164383561643836,  2.017232142857142,  0.0000,            -1.085630789302022 ,
-    };
-    static const float matrix_bt709_tv2full[12] = {
-        1.164383561643836,  0.0000,             1.792741071428571, -0.972945075016308 ,
-        1.164383561643836, -0.21324861427373,  -0.532909328559444,  0.301482665475862 ,
-        1.164383561643836,  2.112401785714286,  0.0000,            -1.133402217873451 ,
-    };
-    static const float matrix_bt2020_tv2full[12] = {
-        1.164383530616760,  0.0000,             1.678674221038818, -0.915687978267670 ,
-        1.164383530616760, -0.187326118350029, -0.650424420833588,  0.347458571195602 ,
-        1.164383530616760,  2.141772270202637,  0.0000,            -1.148145079612732 ,
-    };
-
-    const float *matrix;
-    switch (yuv_space)
-    {
-        case COLOR_SPACE_BT601:
-            matrix = matrix_bt601_tv2full;
-            break;
-        case COLOR_SPACE_BT2020:
-            matrix = matrix_bt2020_tv2full;
-            break;
-        default:
-            matrix = matrix_bt709_tv2full;
-    };
-
-    for (int i = 0; i < 4; i++) {
-        float correction = i < 3 ? yuv_range_correction : 1.f;
-        /* We place coefficient values for coefficient[4] in one array from
-         * matrix values. Notice that we fill values from top down instead
-         * of left to right.*/
-        for (int j = 0; j < 4; j++)
-            tc->yuv_coefficients[i*4+j] = j < 3 ? correction * matrix[j*4+i] : 0.f;
-    }
-
-    tc->yuv_color = true;
-
-    *swap_uv = chroma == VLC_CODEC_YV12 || chroma == VLC_CODEC_YV9 ||
-               chroma == VLC_CODEC_NV21;
     return VLC_SUCCESS;
 }
 
-static int
-tc_rgb_base_init(opengl_tex_converter_t *tc, GLenum tex_target,
-                 vlc_fourcc_t chroma)
+char *
+opengl_fragment_shader_init(struct vlc_gl_renderer *renderer, GLenum tex_target,
+                            vlc_fourcc_t chroma, video_color_space_t yuv_space)
 {
-    (void) tex_target;
+    struct vlc_gl_interop *interop = renderer->interop;
 
-    switch (chroma)
-    {
-        case VLC_CODEC_RGB32:
-        case VLC_CODEC_RGBA:
-            tc->texs[0] = (struct opengl_tex_cfg) {
-                { 1, 1 }, { 1, 1 }, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE
-            };
-            break;
-        case VLC_CODEC_BGRA: {
-            if (GetTexFormatSize(tc, tex_target, GL_BGRA, GL_RGBA,
-                                 GL_UNSIGNED_BYTE) != 32)
-                return VLC_EGENERIC;
-            tc->texs[0] = (struct opengl_tex_cfg) {
-                { 1, 1 }, { 1, 1 }, GL_RGBA, GL_BGRA, GL_UNSIGNED_BYTE
-            };
-            break;
-        }
-        default:
-            return VLC_EGENERIC;
-    }
-    tc->tex_count = 1;
-    return VLC_SUCCESS;
-}
-
-static int
-tc_base_fetch_locations(opengl_tex_converter_t *tc, GLuint program)
-{
-    if (tc->yuv_color)
-    {
-        tc->uloc.Coefficients = tc->vt->GetUniformLocation(program,
-                                                            "Coefficients");
-        if (tc->uloc.Coefficients == -1)
-            return VLC_EGENERIC;
-    }
-
-    for (unsigned int i = 0; i < tc->tex_count; ++i)
-    {
-        char name[sizeof("TextureX")];
-        snprintf(name, sizeof(name), "Texture%1u", i);
-        tc->uloc.Texture[i] = tc->vt->GetUniformLocation(program, name);
-        if (tc->uloc.Texture[i] == -1)
-            return VLC_EGENERIC;
-        if (tc->tex_target == GL_TEXTURE_RECTANGLE)
-        {
-            snprintf(name, sizeof(name), "TexSize%1u", i);
-            tc->uloc.TexSize[i] = tc->vt->GetUniformLocation(program, name);
-            if (tc->uloc.TexSize[i] == -1)
-                return VLC_EGENERIC;
-        }
-    }
-
-    tc->uloc.FillColor = tc->vt->GetUniformLocation(program, "FillColor");
-    if (tc->uloc.FillColor == -1)
-        return VLC_EGENERIC;
-
-#ifdef HAVE_LIBPLACEBO
-    const struct pl_shader_res *res = tc->pl_sh_res;
-    for (int i = 0; res && i < res->num_variables; i++) {
-        struct pl_shader_var sv = res->variables[i];
-        tc->uloc.pl_vars[i] = tc->vt->GetUniformLocation(program, sv.var.name);
-    }
-#endif
-
-    return VLC_SUCCESS;
-}
-
-static void
-tc_base_prepare_shader(const opengl_tex_converter_t *tc,
-                       const GLsizei *tex_width, const GLsizei *tex_height,
-                       float alpha)
-{
-    (void) tex_width; (void) tex_height;
-
-    if (tc->yuv_color)
-        tc->vt->Uniform4fv(tc->uloc.Coefficients, 4, tc->yuv_coefficients);
-
-    for (unsigned i = 0; i < tc->tex_count; ++i)
-        tc->vt->Uniform1i(tc->uloc.Texture[i], i);
-
-    tc->vt->Uniform4f(tc->uloc.FillColor, 1.0f, 1.0f, 1.0f, alpha);
-
-    if (tc->tex_target == GL_TEXTURE_RECTANGLE)
-    {
-        for (unsigned i = 0; i < tc->tex_count; ++i)
-            tc->vt->Uniform2f(tc->uloc.TexSize[i], tex_width[i],
-                               tex_height[i]);
-    }
-
-#ifdef HAVE_LIBPLACEBO
-    const struct pl_shader_res *res = tc->pl_sh_res;
-    for (int i = 0; res && i < res->num_variables; i++) {
-        GLint loc = tc->uloc.pl_vars[i];
-        if (loc == -1) // uniform optimized out
-            continue;
-
-        struct pl_shader_var sv = res->variables[i];
-#if PL_API_VER >= 4
-        struct pl_var var = sv.var;
-        // libplacebo doesn't need anything else anyway
-        if (var.type != PL_VAR_FLOAT)
-            continue;
-#else
-        struct ra_var var = sv.var;
-        // libplacebo doesn't need anything else anyway
-        if (var.type != RA_VAR_FLOAT)
-            continue;
-#endif
-
-        if (var.dim_m > 1 && var.dim_m != var.dim_v)
-            continue;
-
-        const float *f = sv.data;
-        switch (var.dim_m) {
-        case 4: tc->vt->UniformMatrix4fv(loc, 1, GL_FALSE, f); break;
-        case 3: tc->vt->UniformMatrix3fv(loc, 1, GL_FALSE, f); break;
-        case 2: tc->vt->UniformMatrix2fv(loc, 1, GL_FALSE, f); break;
-
-        case 1:
-            switch (var.dim_v) {
-            case 1: tc->vt->Uniform1f(loc, f[0]); break;
-            case 2: tc->vt->Uniform2f(loc, f[0], f[1]); break;
-            case 3: tc->vt->Uniform3f(loc, f[0], f[1], f[2]); break;
-            case 4: tc->vt->Uniform4f(loc, f[0], f[1], f[2], f[3]); break;
-            }
-            break;
-        }
-    }
-#endif
-}
-
-static int
-tc_xyz12_fetch_locations(opengl_tex_converter_t *tc, GLuint program)
-{
-    tc->uloc.Texture[0] = tc->vt->GetUniformLocation(program, "Texture0");
-    return tc->uloc.Texture[0] != -1 ? VLC_SUCCESS : VLC_EGENERIC;
-}
-
-static void
-tc_xyz12_prepare_shader(const opengl_tex_converter_t *tc,
-                        const GLsizei *tex_width, const GLsizei *tex_height,
-                        float alpha)
-{
-    (void) tex_width; (void) tex_height; (void) alpha;
-    tc->vt->Uniform1i(tc->uloc.Texture[0], 0);
-}
-
-static GLuint
-xyz12_shader_init(opengl_tex_converter_t *tc)
-{
-    tc->tex_count = 1;
-    tc->tex_target = GL_TEXTURE_2D;
-    tc->texs[0] = (struct opengl_tex_cfg) {
-        { 1, 1 }, { 1, 1 }, GL_RGB, GL_RGB, GL_UNSIGNED_SHORT
-    };
-
-    tc->pf_fetch_locations = tc_xyz12_fetch_locations;
-    tc->pf_prepare_shader = tc_xyz12_prepare_shader;
-
-    /* Shader for XYZ to RGB correction
-     * 3 steps :
-     *  - XYZ gamma correction
-     *  - XYZ to RGB matrix conversion
-     *  - reverse RGB gamma correction
-     */
-    static const char *template =
-        "#version %u\n"
-        "%s"
-        "uniform sampler2D Texture0;"
-        "uniform vec4 xyz_gamma = vec4(2.6);"
-        "uniform vec4 rgb_gamma = vec4(1.0/2.2);"
-        /* WARN: matrix Is filled column by column (not row !) */
-        "uniform mat4 matrix_xyz_rgb = mat4("
-        "    3.240454 , -0.9692660, 0.0556434, 0.0,"
-        "   -1.5371385,  1.8760108, -0.2040259, 0.0,"
-        "    -0.4985314, 0.0415560, 1.0572252,  0.0,"
-        "    0.0,      0.0,         0.0,        1.0 "
-        " );"
-
-        "varying vec2 TexCoord0;"
-        "void main()"
-        "{ "
-        " vec4 v_in, v_out;"
-        " v_in  = texture2D(Texture0, TexCoord0);"
-        " v_in = pow(v_in, xyz_gamma);"
-        " v_out = matrix_xyz_rgb * v_in ;"
-        " v_out = pow(v_out, rgb_gamma) ;"
-        " v_out = clamp(v_out, 0.0, 1.0) ;"
-        " gl_FragColor = v_out;"
-        "}";
-
-    char *code;
-    if (asprintf(&code, template, tc->glsl_version, tc->glsl_precision_header) < 0)
-        return 0;
-
-    GLuint fragment_shader = tc->vt->CreateShader(GL_FRAGMENT_SHADER);
-    tc->vt->ShaderSource(fragment_shader, 1, (const char **) &code, NULL);
-    tc->vt->CompileShader(fragment_shader);
-    free(code);
-    return fragment_shader;
-}
-
-#ifdef HAVE_LIBPLACEBO
-static struct pl_color_space pl_color_space_from_video_format(const video_format_t *fmt)
-{
-    static enum pl_color_primaries primaries[COLOR_PRIMARIES_MAX+1] = {
-        [COLOR_PRIMARIES_UNDEF]     = PL_COLOR_PRIM_UNKNOWN,
-        [COLOR_PRIMARIES_BT601_525] = PL_COLOR_PRIM_BT_601_525,
-        [COLOR_PRIMARIES_BT601_625] = PL_COLOR_PRIM_BT_601_625,
-        [COLOR_PRIMARIES_BT709]     = PL_COLOR_PRIM_BT_709,
-        [COLOR_PRIMARIES_BT2020]    = PL_COLOR_PRIM_BT_2020,
-        [COLOR_PRIMARIES_DCI_P3]    = PL_COLOR_PRIM_DCI_P3,
-        [COLOR_PRIMARIES_BT470_M]   = PL_COLOR_PRIM_BT_470M,
-    };
-
-    static enum pl_color_transfer transfers[TRANSFER_FUNC_MAX+1] = {
-        [TRANSFER_FUNC_UNDEF]        = PL_COLOR_TRC_UNKNOWN,
-        [TRANSFER_FUNC_LINEAR]       = PL_COLOR_TRC_LINEAR,
-        [TRANSFER_FUNC_SRGB]         = PL_COLOR_TRC_SRGB,
-        [TRANSFER_FUNC_SMPTE_ST2084] = PL_COLOR_TRC_PQ,
-        [TRANSFER_FUNC_HLG]          = PL_COLOR_TRC_HLG,
-        // these are all designed to be displayed on BT.1886 displays, so this
-        // is the correct way to handle them in libplacebo
-        [TRANSFER_FUNC_BT470_BG]    = PL_COLOR_TRC_BT_1886,
-        [TRANSFER_FUNC_BT470_M]     = PL_COLOR_TRC_BT_1886,
-        [TRANSFER_FUNC_BT709]       = PL_COLOR_TRC_BT_1886,
-        [TRANSFER_FUNC_SMPTE_240]   = PL_COLOR_TRC_BT_1886,
-    };
-
-    // Derive the signal peak/avg from the color light level metadata
-    float sig_peak = fmt->lighting.MaxCLL / PL_COLOR_REF_WHITE;
-    float sig_avg = fmt->lighting.MaxFALL / PL_COLOR_REF_WHITE;
-
-    // As a fallback value for the signal peak, we can also use the mastering
-    // metadata's luminance information
-    if (!sig_peak)
-        sig_peak = fmt->mastering.max_luminance / (10000.0 * PL_COLOR_REF_WHITE);
-
-    // Sanitize the sig_peak/sig_avg, because of buggy or low quality tagging
-    // that's sadly common in lots of typical sources
-    sig_peak = (sig_peak > 1.0 && sig_peak <= 100.0) ? sig_peak : 0.0;
-    sig_avg  = (sig_avg >= 0.0 && sig_avg <= 1.0) ? sig_avg : 0.0;
-
-    return (struct pl_color_space) {
-        .primaries = primaries[fmt->primaries],
-        .transfer  = transfers[fmt->transfer],
-        .light     = PL_COLOR_LIGHT_UNKNOWN,
-        .sig_peak  = sig_peak,
-        .sig_avg   = sig_avg,
-    };
-}
-#endif
-
-GLuint
-opengl_fragment_shader_init_impl(opengl_tex_converter_t *tc, GLenum tex_target,
-                                 vlc_fourcc_t chroma, video_color_space_t yuv_space)
-{
     const char *swizzle_per_tex[PICTURE_PLANE_MAX] = { NULL, };
     const bool is_yuv = vlc_fourcc_IsYUV(chroma);
-    bool yuv_swap_uv = false;
     int ret;
 
     const vlc_chroma_description_t *desc = vlc_fourcc_GetChromaDescription(chroma);
     if (desc == NULL)
-        return VLC_EGENERIC;
+        return NULL;
 
     if (chroma == VLC_CODEC_XYZ12)
-        return xyz12_shader_init(tc);
+        return xyz12_shader_init(renderer);
 
     if (is_yuv)
-        ret = tc_yuv_base_init(tc, tex_target, chroma, desc, yuv_space,
-                               &yuv_swap_uv, swizzle_per_tex);
-    else
-        ret = tc_rgb_base_init(tc, tex_target, chroma);
+    {
+        ret = renderer_yuv_base_init(renderer, chroma, desc, yuv_space);
+        if (ret != VLC_SUCCESS)
+            return NULL;
+        ret = opengl_init_swizzle(renderer->interop, swizzle_per_tex, chroma, desc);
+        if (ret != VLC_SUCCESS)
+            return NULL;
+    }
 
-    if (ret != VLC_SUCCESS)
-        return 0;
-
-    const char *sampler, *lookup, *coord_name;
+    const char *sampler, *lookup;
     switch (tex_target)
     {
+        case GL_TEXTURE_EXTERNAL_OES:
+            sampler = "samplerExternalOES";
+            lookup = "texture2D";
+            break;
         case GL_TEXTURE_2D:
             sampler = "sampler2D";
             lookup  = "texture2D";
-            coord_name = "TexCoord";
             break;
         case GL_TEXTURE_RECTANGLE:
             sampler = "sampler2DRect";
             lookup  = "texture2DRect";
-            coord_name = "TexCoordRect";
             break;
         default:
             vlc_assert_unreachable();
@@ -598,52 +474,59 @@ opengl_fragment_shader_init_impl(opengl_tex_converter_t *tc, GLenum tex_target,
 
     struct vlc_memstream ms;
     if (vlc_memstream_open(&ms) != 0)
-        return 0;
+        return NULL;
 
 #define ADD(x) vlc_memstream_puts(&ms, x)
 #define ADDF(x, ...) vlc_memstream_printf(&ms, x, ##__VA_ARGS__)
 
-    ADDF("#version %u\n%s", tc->glsl_version, tc->glsl_precision_header);
-
-    for (unsigned i = 0; i < tc->tex_count; ++i)
+    ADD("uniform mat4 TransformMatrix;\n"
+        "uniform mat4 OrientationMatrix;\n");
+    for (unsigned i = 0; i < interop->tex_count; ++i)
         ADDF("uniform %s Texture%u;\n"
-             "varying vec2 TexCoord%u;\n", sampler, i, i);
+             "uniform mat3 TexCoordsMap%u;\n", sampler, i, i);
 
 #ifdef HAVE_LIBPLACEBO
-    if (tc->pl_sh) {
-        struct pl_shader *sh = tc->pl_sh;
+    if (renderer->pl_sh) {
+        struct pl_shader *sh = renderer->pl_sh;
         struct pl_color_map_params color_params = pl_color_map_default_params;
-        color_params.intent = var_InheritInteger(tc->gl, "rendering-intent");
-        color_params.tone_mapping_algo = var_InheritInteger(tc->gl, "tone-mapping");
-        color_params.tone_mapping_param = var_InheritFloat(tc->gl, "tone-mapping-param");
-        color_params.tone_mapping_desaturate = var_InheritFloat(tc->gl, "tone-mapping-desat");
-        color_params.gamut_warning = var_InheritBool(tc->gl, "tone-mapping-warn");
+        color_params.intent = var_InheritInteger(renderer->gl, "rendering-intent");
+        color_params.tone_mapping_algo = var_InheritInteger(renderer->gl, "tone-mapping");
+        color_params.tone_mapping_param = var_InheritFloat(renderer->gl, "tone-mapping-param");
+#    if PL_API_VER >= 10
+        color_params.desaturation_strength = var_InheritFloat(renderer->gl, "desat-strength");
+        color_params.desaturation_exponent = var_InheritFloat(renderer->gl, "desat-exponent");
+        color_params.desaturation_base = var_InheritFloat(renderer->gl, "desat-base");
+#    else
+        color_params.tone_mapping_desaturate = var_InheritFloat(renderer->gl, "tone-mapping-desat");
+#    endif
+        color_params.gamut_warning = var_InheritBool(renderer->gl, "tone-mapping-warn");
 
         struct pl_color_space dst_space = pl_color_space_unknown;
-        dst_space.primaries = var_InheritInteger(tc->gl, "target-prim");
-        dst_space.transfer = var_InheritInteger(tc->gl, "target-trc");
+        dst_space.primaries = var_InheritInteger(renderer->gl, "target-prim");
+        dst_space.transfer = var_InheritInteger(renderer->gl, "target-trc");
 
         pl_shader_color_map(sh, &color_params,
-                pl_color_space_from_video_format(&tc->fmt),
+                vlc_placebo_ColorSpace(&interop->fmt),
                 dst_space, NULL, false);
 
         struct pl_shader_obj *dither_state = NULL;
-        int method = var_InheritInteger(tc->gl, "dither-algo");
+        int method = var_InheritInteger(renderer->gl, "dither-algo");
         if (method >= 0) {
 
             unsigned out_bits = 0;
-            int override = var_InheritInteger(tc->gl, "dither-depth");
+            int override = var_InheritInteger(renderer->gl, "dither-depth");
             if (override > 0)
                 out_bits = override;
             else
             {
                 GLint fb_depth = 0;
 #if !defined(USE_OPENGL_ES2)
+                const opengl_vtable_t *vt = renderer->vt;
                 /* fetch framebuffer depth (we are already bound to the default one). */
-                if (tc->vt->GetFramebufferAttachmentParameteriv != NULL)
-                    tc->vt->GetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT,
-                                                                GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE,
-                                                                &fb_depth);
+                if (vt->GetFramebufferAttachmentParameteriv != NULL)
+                    vt->GetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT,
+                                                            GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE,
+                                                            &fb_depth);
 #endif
                 if (fb_depth <= 0)
                     fb_depth = 8;
@@ -656,18 +539,14 @@ opengl_fragment_shader_init_impl(opengl_tex_converter_t *tc, GLenum tex_target,
             });
         }
 
-        const struct pl_shader_res *res = tc->pl_sh_res = pl_shader_finalize(sh);
+        const struct pl_shader_res *res = renderer->pl_sh_res = pl_shader_finalize(sh);
         pl_shader_obj_destroy(&dither_state);
 
-        FREENULL(tc->uloc.pl_vars);
-        tc->uloc.pl_vars = calloc(res->num_variables, sizeof(GLint));
+        FREENULL(renderer->uloc.pl_vars);
+        renderer->uloc.pl_vars = calloc(res->num_variables, sizeof(GLint));
         for (int i = 0; i < res->num_variables; i++) {
             struct pl_shader_var sv = res->variables[i];
-#if PL_API_VER >= 4
             const char *glsl_type_name = pl_var_glsl_type_name(sv.var);
-#else
-            const char *glsl_type_name = ra_var_glsl_type_name(sv.var);
-#endif
             ADDF("uniform %s %s;\n", glsl_type_name, sv.var.name);
         }
 
@@ -678,121 +557,86 @@ opengl_fragment_shader_init_impl(opengl_tex_converter_t *tc, GLenum tex_target,
         ADD(res->glsl);
     }
 #else
-    if (tc->fmt.transfer == TRANSFER_FUNC_SMPTE_ST2084 ||
-        tc->fmt.primaries == COLOR_PRIMARIES_BT2020)
+    if (interop->fmt.transfer == TRANSFER_FUNC_SMPTE_ST2084 ||
+        interop->fmt.primaries == COLOR_PRIMARIES_BT2020)
     {
         // no warning for HLG because it's more or less backwards-compatible
-        msg_Warn(tc->gl, "VLC needs to be built with support for libplacebo "
+        msg_Warn(renderer->gl, "VLC needs to be built with support for libplacebo "
                  "in order to display wide gamut or HDR signals correctly.");
     }
 #endif
 
     if (tex_target == GL_TEXTURE_RECTANGLE)
     {
-        for (unsigned i = 0; i < tc->tex_count; ++i)
+        for (unsigned i = 0; i < interop->tex_count; ++i)
             ADDF("uniform vec2 TexSize%u;\n", i);
     }
 
     if (is_yuv)
-        ADD("uniform vec4 Coefficients[4];\n");
+        ADD("uniform mat4 ConvMatrix;\n");
 
     ADD("uniform vec4 FillColor;\n"
-        "void main(void) {\n"
-        " float val;vec4 colors;\n");
+        "vec4 vlc_texture(vec2 pic_coords) {\n"
+        /* Homogeneous (oriented) coordinates */
+        " vec3 pic_hcoords = vec3((TransformMatrix * OrientationMatrix * vec4(pic_coords, 0.0, 1.0)).st, 1.0);\n"
+        " vec2 tex_coords;\n");
 
-    if (tex_target == GL_TEXTURE_RECTANGLE)
-    {
-        for (unsigned i = 0; i < tc->tex_count; ++i)
-            ADDF(" vec2 TexCoordRect%u = vec2(TexCoord%u.x * TexSize%u.x, "
-                 "TexCoord%u.y * TexSize%u.y);\n", i, i, i, i, i);
-    }
-
-    unsigned color_idx = 0;
-    for (unsigned i = 0; i < tc->tex_count; ++i)
-    {
-        const char *swizzle = swizzle_per_tex[i];
-        if (swizzle)
+    unsigned color_count;
+    if (is_yuv) {
+        ADD(" vec4 texel;\n"
+            " vec4 pixel = vec4(0.0, 0.0, 0.0, 1.0);\n");
+        unsigned color_idx = 0;
+        for (unsigned i = 0; i < interop->tex_count; ++i)
         {
+            const char *swizzle = swizzle_per_tex[i];
+            assert(swizzle);
             size_t swizzle_count = strlen(swizzle);
-            ADDF(" colors = %s(Texture%u, %s%u);\n", lookup, i, coord_name, i);
+            ADDF(" tex_coords = (TexCoordsMap%u * pic_hcoords).st;\n", i);
+            if (tex_target == GL_TEXTURE_RECTANGLE)
+            {
+                /* The coordinates are in texels values, not normalized */
+                ADDF(" tex_coords = vec2(tex_coords.x * TexSize%u.x,\n"
+                     "                   tex_coords.y * TexSize%u.y);\n", i, i);
+            }
+            ADDF(" texel = %s(Texture%u, tex_coords);\n", lookup, i);
             for (unsigned j = 0; j < swizzle_count; ++j)
             {
-                ADDF(" val = colors.%c;\n"
-                     " vec4 color%u = vec4(val, val, val, 1);\n",
-                     swizzle[j], color_idx);
+                ADDF(" pixel[%u] = texel.%c;\n", color_idx, swizzle[j]);
                 color_idx++;
                 assert(color_idx <= PICTURE_PLANE_MAX);
             }
         }
-        else
-        {
-            ADDF(" vec4 color%u = %s(Texture%u, %s%u);\n",
-                 color_idx, lookup, i, coord_name, i);
-            color_idx++;
-            assert(color_idx <= PICTURE_PLANE_MAX);
-        }
+        ADD(" vec4 result = ConvMatrix * pixel;\n");
+        color_count = color_idx;
     }
-    unsigned color_count = color_idx;
+    else
+    {
+        ADD(" tex_coords = (TexCoordsMap0 * pic_hcoords).st;\n");
+        ADDF(" vec4 result = %s(Texture0, tex_coords);\n", lookup);
+        color_count = 1;
+    }
     assert(yuv_space == COLOR_SPACE_UNDEF || color_count == 3);
 
-    if (is_yuv)
-        ADD(" vec4 result = (color0 * Coefficients[0]) + Coefficients[3];\n");
-    else
-        ADD(" vec4 result = color0;\n");
-
-    for (unsigned i = 1; i < color_count; ++i)
-    {
-        if (yuv_swap_uv)
-        {
-            assert(color_count == 3);
-            color_idx = (i % 2) + 1;
-        }
-        else
-            color_idx = i;
-
-        if (is_yuv)
-            ADDF(" result = (color%u * Coefficients[%u]) + result;\n",
-                 color_idx, i);
-        else
-            ADDF(" result = color%u + result;\n", color_idx);
-    }
-
 #ifdef HAVE_LIBPLACEBO
-    if (tc->pl_sh_res) {
-        const struct pl_shader_res *res = tc->pl_sh_res;
+    if (renderer->pl_sh_res) {
+        const struct pl_shader_res *res = renderer->pl_sh_res;
         assert(res->input  == PL_SHADER_SIG_COLOR);
         assert(res->output == PL_SHADER_SIG_COLOR);
         ADDF(" result = %s(result);\n", res->name);
     }
 #endif
 
-    ADD(" gl_FragColor = result * FillColor;\n"
-        "}");
+    ADD(" return result * FillColor;\n"
+        "}\n");
 
 #undef ADD
 #undef ADDF
 
     if (vlc_memstream_close(&ms) != 0)
-        return 0;
+        return NULL;
 
-    GLuint fragment_shader = tc->vt->CreateShader(GL_FRAGMENT_SHADER);
-    if (fragment_shader == 0)
-    {
-        free(ms.ptr);
-        return 0;
-    }
-    GLint length = ms.length;
-    tc->vt->ShaderSource(fragment_shader, 1, (const char **)&ms.ptr, &length);
-    tc->vt->CompileShader(fragment_shader);
-    if (tc->b_dump_shaders)
-        msg_Dbg(tc->gl, "\n=== Fragment shader for fourcc: %4.4s, colorspace: %d ===\n%s\n",
-                (const char *)&chroma, yuv_space, ms.ptr);
-    free(ms.ptr);
+    renderer->pf_fetch_locations = renderer_base_fetch_locations;
+    renderer->pf_prepare_shader = renderer_base_prepare_shader;
 
-    tc->tex_target = tex_target;
-
-    tc->pf_fetch_locations = tc_base_fetch_locations;
-    tc->pf_prepare_shader = tc_base_prepare_shader;
-
-    return fragment_shader;
+    return ms.ptr;
 }

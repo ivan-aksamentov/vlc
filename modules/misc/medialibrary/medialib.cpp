@@ -26,7 +26,9 @@
 #include <vlc_plugin.h>
 #include <vlc_url.h>
 #include <vlc_media_library.h>
+#include <vlc_dialog.h>
 #include "medialibrary.h"
+#include "fs/fs.h"
 
 #include <medialibrary/IMedia.h>
 #include <medialibrary/IAlbumTrack.h>
@@ -62,6 +64,10 @@ private:
     {
         msg_Dbg( m_obj, "%s", msg.c_str() );
     }
+    virtual void Verbose( const std::string& msg ) override
+    {
+        msg_Dbg( m_obj, "%s", msg.c_str() );
+    }
 
 private:
     vlc_object_t* m_obj;
@@ -70,27 +76,41 @@ private:
 namespace
 {
 
-void assignToEvent( vlc_ml_event_t* ev, vlc_ml_media_t* m )    { ev->modification.p_media    = m; }
-void assignToEvent( vlc_ml_event_t* ev, vlc_ml_artist_t* a )   { ev->modification.p_artist   = a; }
-void assignToEvent( vlc_ml_event_t* ev, vlc_ml_album_t* a )    { ev->modification.p_album    = a; }
-void assignToEvent( vlc_ml_event_t* ev, vlc_ml_genre_t* g )    { ev->modification.p_genre    = g; }
-void assignToEvent( vlc_ml_event_t* ev, vlc_ml_playlist_t* p ) { ev->modification.p_playlist = p; }
+void assignToEvent( vlc_ml_event_t* ev, vlc_ml_media_t* m )    { ev->creation.p_media    = m; }
+void assignToEvent( vlc_ml_event_t* ev, vlc_ml_artist_t* a )   { ev->creation.p_artist   = a; }
+void assignToEvent( vlc_ml_event_t* ev, vlc_ml_album_t* a )    { ev->creation.p_album    = a; }
+void assignToEvent( vlc_ml_event_t* ev, vlc_ml_genre_t* g )    { ev->creation.p_genre    = g; }
+void assignToEvent( vlc_ml_event_t* ev, vlc_ml_playlist_t* p ) { ev->creation.p_playlist = p; }
 
 template <typename To, typename From>
-void wrapEntityEventCallback( vlc_medialibrary_module_t* ml,
-                              const std::vector<From>& entities, vlc_ml_event_type evType )
+void wrapEntityCreatedEventCallback( vlc_medialibrary_module_t* ml,
+                                     const std::vector<From>& entities,
+                                     vlc_ml_event_type evType )
 {
     vlc_ml_event_t ev;
     ev.i_type = evType;
     for ( const auto& e : entities )
     {
-        auto val = vlc::wrap_cptr<To>( static_cast<To*>( malloc( sizeof( To ) ) ),
+        auto val = vlc::wrap_cptr<To>( static_cast<To*>( calloc( 1, sizeof( To ) ) ),
                                        static_cast<void(*)(To*)>( vlc_ml_release ) );
         if ( unlikely( val == nullptr ) )
             return;
         if ( Convert( e.get(), *val ) == false )
             return;
         assignToEvent( &ev, val.get() );
+        ml->cbs->pf_send_event( ml, &ev );
+    }
+}
+
+void wrapEntityModifiedEventCallback( vlc_medialibrary_module_t* ml,
+                                      const std::vector<int64_t>& ids,
+                                      vlc_ml_event_type evType )
+{
+    vlc_ml_event_t ev;
+    ev.i_type = evType;
+    for ( const auto& id : ids )
+    {
+        ev.modification.i_entity_id = id;
         ml->cbs->pf_send_event( ml, &ev );
     }
 }
@@ -111,12 +131,12 @@ void wrapEntityDeletedEventCallback( vlc_medialibrary_module_t* ml,
 
 void MediaLibrary::onMediaAdded( std::vector<medialibrary::MediaPtr> media )
 {
-    wrapEntityEventCallback<vlc_ml_media_t>( m_vlc_ml, media, VLC_ML_EVENT_MEDIA_ADDED );
+    wrapEntityCreatedEventCallback<vlc_ml_media_t>( m_vlc_ml, media, VLC_ML_EVENT_MEDIA_ADDED );
 }
 
-void MediaLibrary::onMediaModified( std::vector<medialibrary::MediaPtr> media )
+void MediaLibrary::onMediaModified( std::vector<int64_t> mediaIds )
 {
-    wrapEntityEventCallback<vlc_ml_media_t>( m_vlc_ml, media, VLC_ML_EVENT_MEDIA_UPDATED );
+    wrapEntityModifiedEventCallback( m_vlc_ml, mediaIds, VLC_ML_EVENT_MEDIA_UPDATED );
 }
 
 void MediaLibrary::onMediaDeleted( std::vector<int64_t> mediaIds )
@@ -126,12 +146,12 @@ void MediaLibrary::onMediaDeleted( std::vector<int64_t> mediaIds )
 
 void MediaLibrary::onArtistsAdded( std::vector<medialibrary::ArtistPtr> artists )
 {
-    wrapEntityEventCallback<vlc_ml_artist_t>( m_vlc_ml, artists, VLC_ML_EVENT_ARTIST_ADDED );
+    wrapEntityCreatedEventCallback<vlc_ml_artist_t>( m_vlc_ml, artists, VLC_ML_EVENT_ARTIST_ADDED );
 }
 
-void MediaLibrary::onArtistsModified( std::vector<medialibrary::ArtistPtr> artists )
+void MediaLibrary::onArtistsModified( std::vector<int64_t> artistIds )
 {
-    wrapEntityEventCallback<vlc_ml_artist_t>( m_vlc_ml, artists, VLC_ML_EVENT_ARTIST_UPDATED );
+    wrapEntityModifiedEventCallback( m_vlc_ml, artistIds, VLC_ML_EVENT_ARTIST_UPDATED );
 }
 
 void MediaLibrary::onArtistsDeleted( std::vector<int64_t> artistIds )
@@ -141,12 +161,12 @@ void MediaLibrary::onArtistsDeleted( std::vector<int64_t> artistIds )
 
 void MediaLibrary::onAlbumsAdded( std::vector<medialibrary::AlbumPtr> albums )
 {
-    wrapEntityEventCallback<vlc_ml_album_t>( m_vlc_ml, albums, VLC_ML_EVENT_ALBUM_ADDED );
+    wrapEntityCreatedEventCallback<vlc_ml_album_t>( m_vlc_ml, albums, VLC_ML_EVENT_ALBUM_ADDED );
 }
 
-void MediaLibrary::onAlbumsModified( std::vector<medialibrary::AlbumPtr> albums )
+void MediaLibrary::onAlbumsModified( std::vector<int64_t> albumIds )
 {
-    wrapEntityEventCallback<vlc_ml_album_t>( m_vlc_ml, albums, VLC_ML_EVENT_ALBUM_UPDATED );
+    wrapEntityModifiedEventCallback( m_vlc_ml, albumIds, VLC_ML_EVENT_ALBUM_UPDATED );
 }
 
 void MediaLibrary::onAlbumsDeleted( std::vector<int64_t> albumIds )
@@ -156,12 +176,12 @@ void MediaLibrary::onAlbumsDeleted( std::vector<int64_t> albumIds )
 
 void MediaLibrary::onPlaylistsAdded( std::vector<medialibrary::PlaylistPtr> playlists )
 {
-    wrapEntityEventCallback<vlc_ml_playlist_t>( m_vlc_ml, playlists, VLC_ML_EVENT_PLAYLIST_ADDED );
+    wrapEntityCreatedEventCallback<vlc_ml_playlist_t>( m_vlc_ml, playlists, VLC_ML_EVENT_PLAYLIST_ADDED );
 }
 
-void MediaLibrary::onPlaylistsModified( std::vector<medialibrary::PlaylistPtr> playlists )
+void MediaLibrary::onPlaylistsModified( std::vector<int64_t> playlistIds )
 {
-    wrapEntityEventCallback<vlc_ml_playlist_t>( m_vlc_ml, playlists, VLC_ML_EVENT_PLAYLIST_UPDATED );
+    wrapEntityModifiedEventCallback( m_vlc_ml, playlistIds, VLC_ML_EVENT_PLAYLIST_UPDATED );
 }
 
 void MediaLibrary::onPlaylistsDeleted( std::vector<int64_t> playlistIds )
@@ -171,17 +191,29 @@ void MediaLibrary::onPlaylistsDeleted( std::vector<int64_t> playlistIds )
 
 void MediaLibrary::onGenresAdded( std::vector<medialibrary::GenrePtr> genres )
 {
-    wrapEntityEventCallback<vlc_ml_genre_t>( m_vlc_ml, genres, VLC_ML_EVENT_GENRE_ADDED );
+    wrapEntityCreatedEventCallback<vlc_ml_genre_t>( m_vlc_ml, genres, VLC_ML_EVENT_GENRE_ADDED );
 }
 
-void MediaLibrary::onGenresModified( std::vector<medialibrary::GenrePtr> genres )
+void MediaLibrary::onGenresModified( std::vector<int64_t> genreIds )
 {
-    wrapEntityEventCallback<vlc_ml_genre_t>( m_vlc_ml, genres, VLC_ML_EVENT_GENRE_UPDATED );
+    wrapEntityModifiedEventCallback( m_vlc_ml, genreIds, VLC_ML_EVENT_GENRE_UPDATED );
 }
 
 void MediaLibrary::onGenresDeleted( std::vector<int64_t> genreIds )
 {
     wrapEntityDeletedEventCallback( m_vlc_ml, genreIds, VLC_ML_EVENT_GENRE_DELETED );
+}
+
+void MediaLibrary::onMediaGroupAdded( std::vector<medialibrary::MediaGroupPtr> )
+{
+}
+
+void MediaLibrary::onMediaGroupModified( std::vector<int64_t> )
+{
+}
+
+void MediaLibrary::onMediaGroupDeleted( std::vector<int64_t> )
+{
 }
 
 void MediaLibrary::onDiscoveryStarted( const std::string& entryPoint )
@@ -223,6 +255,15 @@ void MediaLibrary::onReloadCompleted( const std::string& entryPoint, bool succes
     ev.i_type = VLC_ML_EVENT_RELOAD_COMPLETED;
     ev.reload_completed.psz_entry_point = entryPoint.c_str();
     ev.reload_completed.b_success = success;
+    m_vlc_ml->cbs->pf_send_event( m_vlc_ml, &ev );
+}
+
+void MediaLibrary::onEntryPointAdded( const std::string& entryPoint, bool success )
+{
+    vlc_ml_event_t ev;
+    ev.i_type = VLC_ML_EVENT_ENTRY_POINT_ADDED;
+    ev.entry_point_added.psz_entry_point = entryPoint.c_str();
+    ev.entry_point_added.b_success = success;
     m_vlc_ml->cbs->pf_send_event( m_vlc_ml, &ev );
 }
 
@@ -269,34 +310,72 @@ void MediaLibrary::onBackgroundTasksIdleChanged( bool idle )
     m_vlc_ml->cbs->pf_send_event( m_vlc_ml, &ev );
 }
 
-void MediaLibrary::onMediaThumbnailReady( medialibrary::MediaPtr, bool )
+void MediaLibrary::onMediaThumbnailReady( medialibrary::MediaPtr media,
+                                          medialibrary::ThumbnailSizeType sizeType,
+                                          bool success )
 {
+    vlc_ml_event_t ev;
+    ev.i_type = VLC_ML_EVENT_MEDIA_THUMBNAIL_GENERATED;
+    ev.media_thumbnail_generated.b_success = success;
+    ev.media_thumbnail_generated.i_size = static_cast<vlc_ml_thumbnail_size_t>( sizeType );
+    auto mPtr = vlc::wrap_cptr<vlc_ml_media_t>(
+                static_cast<vlc_ml_media_t*>( calloc( 1, sizeof( vlc_ml_media_t ) ) ),
+                vlc_ml_media_release );
+    if ( unlikely( mPtr == nullptr ) )
+        return;
+    ev.media_thumbnail_generated.p_media = mPtr.get();
+    if ( Convert( media.get(), *mPtr ) == false )
+        return;
+    m_vlc_ml->cbs->pf_send_event( m_vlc_ml, &ev );
+}
+
+void MediaLibrary::onHistoryChanged( medialibrary::HistoryType historyType )
+{
+    vlc_ml_event_t ev;
+    ev.i_type = VLC_ML_EVENT_HISTORY_CHANGED;
+    switch ( historyType )
+    {
+        case medialibrary::HistoryType::Media:
+            ev.history_changed.history_type = VLC_ML_HISTORY_TYPE_MEDIA;
+            break;
+        case medialibrary::HistoryType::Network:
+            ev.history_changed.history_type = VLC_ML_HISTORY_TYPE_NETWORK;
+            break;
+        default:
+            vlc_assert_unreachable();
+    }
+    m_vlc_ml->cbs->pf_send_event( m_vlc_ml, &ev );
+}
+
+void MediaLibrary::onRescanStarted()
+{
+    vlc_ml_event_t ev;
+    ev.i_type = VLC_ML_EVENT_RESCAN_STARTED;
+    m_vlc_ml->cbs->pf_send_event( m_vlc_ml, &ev );
 }
 
 MediaLibrary::MediaLibrary( vlc_medialibrary_module_t* ml )
     : m_vlc_ml( ml )
 {
-}
-
-bool MediaLibrary::Start()
-{
-    if ( m_ml != nullptr )
-        return true;
-
-    std::unique_ptr<medialibrary::IMediaLibrary> ml( NewMediaLibrary() );
+    m_ml.reset( NewMediaLibrary() );
 
     m_logger.reset( new Logger( VLC_OBJECT( m_vlc_ml ) ) );
-    ml->setVerbosity( medialibrary::LogLevel::Info );
-    ml->setLogger( m_logger.get() );
+    m_ml->setVerbosity( var_InheritInteger( VLC_OBJECT( m_vlc_ml ), "verbose" ) >= 4 ?
+                          medialibrary::LogLevel::Debug : medialibrary::LogLevel::Info );
+    m_ml->setLogger( m_logger.get() );
+}
 
+bool MediaLibrary::Init()
+{
+    if ( m_ml->isInitialized() == true )
+        return true;
     auto userDir = vlc::wrap_cptr( config_GetUserDir( VLC_USERDATA_DIR ) );
     std::string mlDir = std::string{ userDir.get() } + "/ml/";
 
-    auto initStatus = ml->initialize( mlDir + "ml.db", mlDir + "thumbnails/", this );
+    auto initStatus = m_ml->initialize( mlDir + "ml.db", mlDir + "/mlstorage/", this );
     switch ( initStatus )
     {
         case medialibrary::InitializeResult::AlreadyInitialized:
-            msg_Info( m_vlc_ml, "MediaLibrary was already initialized" );
             return true;
         case medialibrary::InitializeResult::Failed:
             msg_Err( m_vlc_ml, "Medialibrary failed to initialize" );
@@ -307,19 +386,69 @@ bool MediaLibrary::Start()
         case medialibrary::InitializeResult::Success:
             msg_Dbg( m_vlc_ml, "MediaLibrary successfully initialized" );
             break;
+        case medialibrary::InitializeResult::DbCorrupted:
+        {
+            auto res = vlc_dialog_wait_question(VLC_OBJECT( m_vlc_ml ),
+                VLC_DIALOG_QUESTION_NORMAL, _( "Ignore" ), _( "Recover" ),
+                _( "Recreate" ), _( "Media database corrupted" ),
+                "Your media database appears to be corrupted. You can try to "
+                "recover it, recreate it entirely, or ignore this error (the "
+                "mediacenter will be disabled)." );
+            switch ( res )
+            {
+                case 1:
+                    m_ml->clearDatabase( true );
+                    break;
+                case 2:
+                    m_ml->clearDatabase( false );
+                    break;
+                default:
+                    return false;
+            }
+            break;
+        }
     }
 
-    ml->addParserService( std::make_shared<MetadataExtractor>( VLC_OBJECT( m_vlc_ml ) ) );
-    if ( ml->start() == false )
+    m_ml->addParserService( std::make_shared<MetadataExtractor>( VLC_OBJECT( m_vlc_ml ) ) );
+    try
     {
-        msg_Err( m_vlc_ml, "Failed to start the MediaLibrary" );
+        m_ml->addThumbnailer( std::make_shared<Thumbnailer>( m_vlc_ml ) );
+    }
+    catch ( const std::runtime_error& ex )
+    {
+        msg_Err( m_vlc_ml, "Failed to provide a thumbnailer module to the "
+                 "medialib: %s", ex.what() );
         return false;
+    }
+
+    auto networkFs = std::make_shared<vlc::medialibrary::SDFileSystemFactory>( VLC_OBJECT( m_vlc_ml ), "smb://");
+    m_ml->addNetworkFileSystemFactory( networkFs );
+    m_ml->setDiscoverNetworkEnabled( true );
+
+    return true;
+}
+
+bool MediaLibrary::Start()
+{
+    if ( Init() == false )
+        return false;
+
+    auto startRes = m_ml->start();
+    switch ( startRes )
+    {
+        case medialibrary::StartResult::Failed:
+            msg_Err( m_vlc_ml, "Failed to start the MediaLibrary" );
+            return false;
+        case medialibrary::StartResult::AlreadyStarted:
+            return true;
+        case medialibrary::StartResult::Success:
+            break;
     }
 
     // Reload entry points we already know about, and then add potential new ones.
     // Doing it the other way around would cause the initial scan to be performed
     // twice, as we start discovering the new folders, then reload them.
-    ml->reload();
+    m_ml->reload();
 
     auto folders = vlc::wrap_cptr( var_InheritString( m_vlc_ml, "ml-folders" ) );
     if ( folders != nullptr && strlen( folders.get() ) > 0 )
@@ -327,7 +456,7 @@ bool MediaLibrary::Start()
         std::istringstream ss( folders.get() );
         std::string folder;
         while ( std::getline( ss, folder, ';' ) )
-            ml->discover( folder );
+            m_ml->discover( folder );
     }
     else
     {
@@ -338,20 +467,36 @@ bool MediaLibrary::Start()
             if( folder == nullptr )
                 continue;
             auto folderMrl = vlc::wrap_cptr( vlc_path2uri( folder.get(), nullptr ) );
-            ml->discover( folderMrl.get() );
+            m_ml->discover( folderMrl.get() );
             varValue += std::string{ ";" } + folderMrl.get();
         }
         if ( varValue.empty() == false )
             config_PutPsz( "ml-folders", varValue.c_str()+1 ); /* skip initial ';' */
     }
-    m_ml = std::move( ml );
     return true;
 }
 
 int MediaLibrary::Control( int query, va_list args )
 {
-    if ( Start() == false )
-        return VLC_EGENERIC;
+    switch ( query )
+    {
+        case VLC_ML_ADD_FOLDER:
+        case VLC_ML_REMOVE_FOLDER:
+        case VLC_ML_BAN_FOLDER:
+        case VLC_ML_UNBAN_FOLDER:
+        case VLC_ML_RELOAD_FOLDER:
+        case VLC_ML_RESUME_BACKGROUND:
+        case VLC_ML_MEDIA_GENERATE_THUMBNAIL:
+        {
+            /* These operations require the media library to be started
+             * ie. that the background threads are started */
+            if ( Start() == false )
+                return VLC_EGENERIC;
+            break;
+        }
+        default:
+            break;
+    }
 
     switch ( query )
     {
@@ -384,6 +529,13 @@ int MediaLibrary::Control( int query, va_list args )
             auto res = ml_convert_list<vlc_ml_entry_point_list_t,
                                          vlc_ml_entry_point_t>( entryPoints );
             *(va_arg( args, vlc_ml_entry_point_list_t**) ) = res;
+            break;
+        }
+        case VLC_ML_IS_INDEXED:
+        {
+            auto mrl = va_arg( args, const char* );
+            auto res = va_arg( args, bool* );
+            *res = m_ml->isIndexed( mrl );
             break;
         }
         case VLC_ML_RELOAD_FOLDER:
@@ -423,9 +575,14 @@ int MediaLibrary::Control( int query, va_list args )
             return VLC_SUCCESS;
         }
         case VLC_ML_MEDIA_INCREASE_PLAY_COUNT:
-        case VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_PREF:
-        case VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_PREF:
+        case VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_STATE:
+        case VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_STATE:
+        case VLC_ML_MEDIA_GET_ALL_MEDIA_PLAYBACK_STATES:
+        case VLC_ML_MEDIA_SET_ALL_MEDIA_PLAYBACK_STATES:
         case VLC_ML_MEDIA_SET_THUMBNAIL:
+        case VLC_ML_MEDIA_GENERATE_THUMBNAIL:
+        case VLC_ML_MEDIA_ADD_EXTERNAL_MRL:
+        case VLC_ML_MEDIA_SET_TYPE:
             return controlMedia( query, args );
         default:
             return VLC_EGENERIC;
@@ -435,7 +592,7 @@ int MediaLibrary::Control( int query, va_list args )
 
 int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_list args )
 {
-    if ( Start() == false )
+    if ( Init() == false )
         return VLC_EGENERIC;
 
     medialibrary::QueryParameters p{};
@@ -488,6 +645,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchVideo( psz_pattern, paramsPtr );
             else
                 query = m_ml->videoFiles( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             auto res = ml_convert_list<vlc_ml_media_list_t, vlc_ml_media_t>(
                         query->items( nbItems, offset ) );
             *va_arg( args, vlc_ml_media_list_t**) = res;
@@ -500,6 +659,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchVideo( psz_pattern, paramsPtr );
             else
                 query = m_ml->videoFiles( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, size_t* ) = query->count();
             break;
         }
@@ -510,6 +671,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchAudio( psz_pattern, paramsPtr );
             else
                 query = m_ml->audioFiles( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             auto res = ml_convert_list<vlc_ml_media_list_t, vlc_ml_media_t>(
                         query->items( nbItems, offset ) );
             *va_arg( args, vlc_ml_media_list_t**) = res;
@@ -522,6 +685,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchAudio( psz_pattern, paramsPtr );
             else
                 query = m_ml->audioFiles( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, size_t* ) = query->count();
             break;
         }
@@ -532,6 +697,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchAlbums( psz_pattern, paramsPtr );
             else
                 query = m_ml->albums( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             auto res = ml_convert_list<vlc_ml_album_list_t, vlc_ml_album_t>(
                         query->items( nbItems, offset ) );
             *va_arg( args, vlc_ml_album_list_t**) = res;
@@ -544,6 +711,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchAlbums( psz_pattern, paramsPtr );
             else
                 query = m_ml->albums( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, size_t* ) = query->count();
             break;
         }
@@ -554,6 +723,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchGenre( psz_pattern, paramsPtr );
             else
                 query = m_ml->genres( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             auto res = ml_convert_list<vlc_ml_genre_list_t,vlc_ml_genre_t>(
                         query->items( nbItems, offset ) );
             *va_arg( args, vlc_ml_genre_list_t**) = res;
@@ -566,6 +737,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchGenre( psz_pattern, paramsPtr );
             else
                 query = m_ml->genres( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, size_t* ) = query->count();
             break;
         }
@@ -573,12 +746,14 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
         {
             medialibrary::Query<medialibrary::IArtist> query;
             bool includeAll = va_arg( args, int ) != 0;
+            auto artistsIncluded = includeAll ? medialibrary::ArtistIncluded::All :
+                                                medialibrary::ArtistIncluded::AlbumArtistOnly;
             if ( psz_pattern != nullptr )
-                query = m_ml->searchArtists( psz_pattern, paramsPtr );
+                query = m_ml->searchArtists( psz_pattern, artistsIncluded, paramsPtr );
             else
-            {
-                query = m_ml->artists( includeAll, paramsPtr );
-            }
+                query = m_ml->artists( artistsIncluded, paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             auto res = ml_convert_list<vlc_ml_artist_list_t, vlc_ml_artist_t>(
                         query->items( nbItems, offset ) );
             *va_arg( args, vlc_ml_artist_list_t**) = res;
@@ -588,10 +763,14 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
         {
             medialibrary::Query<medialibrary::IArtist> query;
             bool includeAll = va_arg( args, int ) != 0;
+            auto artistsIncluded = includeAll ? medialibrary::ArtistIncluded::All :
+                                                medialibrary::ArtistIncluded::AlbumArtistOnly;
             if ( psz_pattern != nullptr )
-                query = m_ml->searchArtists( psz_pattern, paramsPtr );
+                query = m_ml->searchArtists( psz_pattern, artistsIncluded, paramsPtr );
             else
-                query = m_ml->artists( includeAll, paramsPtr );
+                query = m_ml->artists( artistsIncluded, paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, size_t* ) = query->count();
             break;
         }
@@ -610,6 +789,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
             if ( media == nullptr )
                 return VLC_EGENERIC;
             auto query = media->labels();
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_MEDIA_LABELS:
@@ -631,6 +812,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = m_ml->searchShows( psz_pattern, paramsPtr );
             else
                 query = m_ml->shows( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, vlc_ml_show_list_t** ) =
                     ml_convert_list<vlc_ml_show_list_t, vlc_ml_show_t>(
                         query->items( nbItems, offset ) );
@@ -639,6 +822,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
         case VLC_ML_COUNT_SHOWS:
         {
             auto query = m_ml->shows( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, int64_t* ) = query->count();
             return VLC_SUCCESS;
         }
@@ -653,6 +838,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
                 query = show->searchEpisodes( psz_pattern, paramsPtr );
             else
                 query = show->episodes( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_SHOW_EPISODES:
@@ -675,6 +862,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
         case VLC_ML_LIST_HISTORY:
         {
             auto query = m_ml->history();
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, vlc_ml_media_list_t**) =
                     ml_convert_list<vlc_ml_media_list_t, vlc_ml_media_t>(
                         query->items( nbItems, offset ) );
@@ -683,6 +872,8 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
         case VLC_ML_LIST_STREAM_HISTORY:
         {
             auto query = m_ml->streamHistory();
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             *va_arg( args, vlc_ml_media_list_t**) =
                     ml_convert_list<vlc_ml_media_list_t, vlc_ml_media_t>(
                         query->items( nbItems, offset ) );
@@ -692,42 +883,68 @@ int MediaLibrary::List( int listQuery, const vlc_ml_query_params_t* params, va_l
     return VLC_SUCCESS;
 }
 
-void* MediaLibrary::Get( int query, int64_t id )
+void* MediaLibrary::Get( int query, va_list args )
 {
-    if ( Start() == false )
+    if ( Init() == false )
         return nullptr;
 
     switch ( query )
     {
         case VLC_ML_GET_MEDIA:
         {
+            auto id = va_arg( args, int64_t );
             auto media = m_ml->media( id );
             return CreateAndConvert<vlc_ml_media_t>( media.get() );
         }
+        case VLC_ML_GET_INPUT_ITEM:
+        {
+            auto id = va_arg( args, int64_t );
+            auto media = m_ml->media( id );
+            return MediaToInputItem( media.get() );
+        }
         case VLC_ML_GET_ALBUM:
         {
+            auto id = va_arg( args, int64_t );
             auto album = m_ml->album( id );
             return CreateAndConvert<vlc_ml_album_t>( album.get() );
         }
         case VLC_ML_GET_ARTIST:
         {
+            auto id = va_arg( args, int64_t );
             auto artist = m_ml->artist( id );
             return CreateAndConvert<vlc_ml_artist_t>( artist.get() );
         }
         case VLC_ML_GET_GENRE:
         {
+            auto id = va_arg( args, int64_t );
             auto genre = m_ml->genre( id );
             return CreateAndConvert<vlc_ml_genre_t>( genre.get() );
         }
         case VLC_ML_GET_SHOW:
         {
+            auto id = va_arg( args, int64_t );
             auto show = m_ml->show( id );
             return CreateAndConvert<vlc_ml_show_t>( show.get() );
         }
         case VLC_ML_GET_PLAYLIST:
         {
+            auto id = va_arg( args, int64_t );
             auto playlist = m_ml->playlist( id );
             return CreateAndConvert<vlc_ml_playlist_t>( playlist.get() );
+        }
+        case VLC_ML_GET_MEDIA_BY_MRL:
+        {
+            auto mrl = va_arg( args, const char* );
+            auto media = m_ml->media( mrl );
+            return CreateAndConvert<vlc_ml_media_t>( media.get() );
+        }
+        case VLC_ML_GET_INPUT_ITEM_BY_MRL:
+        {
+            auto mrl = va_arg( args, const char* );
+            auto media = m_ml->media( mrl );
+            if ( media == nullptr )
+                return nullptr;
+            return MediaToInputItem( media.get() );
         }
         default:
             vlc_assert_unreachable();
@@ -740,43 +957,43 @@ medialibrary::IMedia::MetadataType MediaLibrary::metadataType( int meta )
 {
     switch ( meta )
     {
-        case VLC_ML_PLAYBACK_PREF_RATING:
+        case VLC_ML_PLAYBACK_STATE_RATING:
             return medialibrary::IMedia::MetadataType::Rating;
-        case VLC_ML_PLAYBACK_PREF_PROGRESS:
+        case VLC_ML_PLAYBACK_STATE_PROGRESS:
             return medialibrary::IMedia::MetadataType::Progress;
-        case VLC_ML_PLAYBACK_PREF_SPEED:
+        case VLC_ML_PLAYBACK_STATE_SPEED:
             return medialibrary::IMedia::MetadataType::Speed;
-        case VLC_ML_PLAYBACK_PREF_TITLE:
+        case VLC_ML_PLAYBACK_STATE_TITLE:
             return medialibrary::IMedia::MetadataType::Title;
-        case VLC_ML_PLAYBACK_PREF_CHAPTER:
+        case VLC_ML_PLAYBACK_STATE_CHAPTER:
             return medialibrary::IMedia::MetadataType::Chapter;
-        case VLC_ML_PLAYBACK_PREF_PROGRAM:
+        case VLC_ML_PLAYBACK_STATE_PROGRAM:
             return medialibrary::IMedia::MetadataType::Program;
-        case VLC_ML_PLAYBACK_PREF_SEEN:
+        case VLC_ML_PLAYBACK_STATE_SEEN:
             return medialibrary::IMedia::MetadataType::Seen;
-        case VLC_ML_PLAYBACK_PREF_VIDEO_TRACK:
+        case VLC_ML_PLAYBACK_STATE_VIDEO_TRACK:
             return medialibrary::IMedia::MetadataType::VideoTrack;
-        case VLC_ML_PLAYBACK_PREF_ASPECT_RATIO:
+        case VLC_ML_PLAYBACK_STATE_ASPECT_RATIO:
             return medialibrary::IMedia::MetadataType::AspectRatio;
-        case VLC_ML_PLAYBACK_PREF_ZOOM:
+        case VLC_ML_PLAYBACK_STATE_ZOOM:
             return medialibrary::IMedia::MetadataType::Zoom;
-        case VLC_ML_PLAYBACK_PREF_CROP:
+        case VLC_ML_PLAYBACK_STATE_CROP:
             return medialibrary::IMedia::MetadataType::Crop;
-        case VLC_ML_PLAYBACK_PREF_DEINTERLACE:
+        case VLC_ML_PLAYBACK_STATE_DEINTERLACE:
             return medialibrary::IMedia::MetadataType::Deinterlace;
-        case VLC_ML_PLAYBACK_PREF_VIDEO_FILTER:
+        case VLC_ML_PLAYBACK_STATE_VIDEO_FILTER:
             return medialibrary::IMedia::MetadataType::VideoFilter;
-        case VLC_ML_PLAYBACK_PREF_AUDIO_TRACK:
+        case VLC_ML_PLAYBACK_STATE_AUDIO_TRACK:
             return medialibrary::IMedia::MetadataType::AudioTrack;
-        case VLC_ML_PLAYBACK_PREF_GAIN:
+        case VLC_ML_PLAYBACK_STATE_GAIN:
             return medialibrary::IMedia::MetadataType::Gain;
-        case VLC_ML_PLAYBACK_PREF_AUDIO_DELAY:
+        case VLC_ML_PLAYBACK_STATE_AUDIO_DELAY:
             return medialibrary::IMedia::MetadataType::AudioDelay;
-        case VLC_ML_PLAYBACK_PREF_SUBTITLE_TRACK:
+        case VLC_ML_PLAYBACK_STATE_SUBTITLE_TRACK:
             return medialibrary::IMedia::MetadataType::SubtitleTrack;
-        case VLC_ML_PLAYBACK_PREF_SUBTITLE_DELAY:
+        case VLC_ML_PLAYBACK_STATE_SUBTITLE_DELAY:
             return medialibrary::IMedia::MetadataType::SubtitleDelay;
-        case VLC_ML_PLAYBACK_PREF_APP_SPECIFIC:
+        case VLC_ML_PLAYBACK_STATE_APP_SPECIFIC:
             return medialibrary::IMedia::MetadataType::ApplicationSpecific;
         default:
             vlc_assert_unreachable();
@@ -824,9 +1041,70 @@ int MediaLibrary::getMeta( const medialibrary::IMedia& media, int meta, char** r
         *result = nullptr;
         return VLC_SUCCESS;
     }
-    *result = strdup( md.str().c_str() );
+    *result = strdup( md.asStr().c_str() );
     if ( *result == nullptr )
         return VLC_ENOMEM;
+    return VLC_SUCCESS;
+}
+
+int MediaLibrary::getMeta( const medialibrary::IMedia& media,
+                           vlc_ml_playback_states_all* res )
+{
+    auto metas = media.metadata();
+    res->progress = -1.f;
+    res->rate = .0f;
+    res->zoom = -1.f;
+    res->current_title = -1;
+    // For tracks, -1 means disabled, so we can't use it for "unset"
+    res->current_video_track = res->current_audio_track =
+        res->current_subtitle_track = nullptr;
+    res->aspect_ratio = res->crop = res->deinterlace =
+        res->video_filter = nullptr;
+    for ( const auto& meta : metas )
+    {
+#define COPY_META( field ) res->field = strdup( meta.second.c_str() ); \
+    if ( res->field == nullptr ) return VLC_ENOMEM;
+
+        switch ( meta.first )
+        {
+            case medialibrary::IMedia::MetadataType::Progress:
+                res->progress = atof( meta.second.c_str() );
+                break;
+            case medialibrary::IMedia::MetadataType::Speed:
+                res->rate = atof( meta.second.c_str() );
+                break;
+            case medialibrary::IMedia::MetadataType::Title:
+                res->current_title = atoi( meta.second.c_str() );
+                break;
+            case medialibrary::IMedia::MetadataType::VideoTrack:
+                COPY_META( current_video_track );
+                break;
+            case medialibrary::IMedia::MetadataType::AspectRatio:
+                COPY_META( aspect_ratio );
+                break;
+            case medialibrary::IMedia::MetadataType::Zoom:
+                res->zoom = atof( meta.second.c_str() );
+                break;
+            case medialibrary::IMedia::MetadataType::Crop:
+                COPY_META( crop );
+                break;
+            case medialibrary::IMedia::MetadataType::Deinterlace:
+                COPY_META( deinterlace );
+                break;
+            case medialibrary::IMedia::MetadataType::VideoFilter:
+                COPY_META( video_filter );
+                break;
+            case medialibrary::IMedia::MetadataType::AudioTrack:
+                COPY_META( current_audio_track );
+                break;
+            case medialibrary::IMedia::MetadataType::SubtitleTrack:
+                COPY_META( current_subtitle_track );
+                break;
+            default:
+                break;
+        }
+#undef COPY_META
+    }
     return VLC_SUCCESS;
 }
 
@@ -838,6 +1116,39 @@ int MediaLibrary::setMeta( medialibrary::IMedia& media, int meta, const char* va
     else
         res = media.setMetadata( metadataType( meta ), value );
     if ( res == false )
+        return VLC_EGENERIC;
+    return VLC_SUCCESS;
+}
+
+int MediaLibrary::setMeta( medialibrary::IMedia& media,
+                           const vlc_ml_playback_states_all* values )
+{
+    using MT = medialibrary::IMedia::MetadataType;
+    std::unordered_map<MT, std::string> metas;
+    if ( values->progress >= .0f )
+        metas[MT::Progress] = std::to_string( values->progress );
+    if ( values->rate != .0f )
+        metas[MT::Speed] = std::to_string( values->rate );
+    if ( values->zoom != .0f )
+        metas[MT::Zoom] = std::to_string( values->zoom );
+    if ( values->current_title >= 0 )
+        metas[MT::Title] = std::to_string( values->current_title );
+    if ( values->aspect_ratio != nullptr )
+        metas[MT::AspectRatio] = values->aspect_ratio;
+    if ( values->crop != nullptr )
+        metas[MT::Crop] = values->crop;
+    if ( values->deinterlace != nullptr )
+        metas[MT::Deinterlace] = values->deinterlace;
+    if ( values->video_filter != nullptr )
+        metas[MT::VideoFilter] = values->video_filter;
+    if ( values->current_video_track != nullptr )
+        metas[MT::VideoTrack] = values->current_video_track;
+    if ( values->current_audio_track != nullptr )
+        metas[MT::AudioTrack] = values->current_audio_track;
+    if ( values->current_subtitle_track != nullptr )
+        metas[MT::SubtitleTrack] = values->current_subtitle_track;
+
+    if ( media.setMetadata( std::move( metas ) ) == false )
         return VLC_EGENERIC;
     return VLC_SUCCESS;
 }
@@ -854,23 +1165,44 @@ int MediaLibrary::controlMedia( int query, va_list args )
             if ( m->increasePlayCount() == false )
                 return VLC_EGENERIC;
             return VLC_SUCCESS;
-        case VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_PREF:
+        case VLC_ML_MEDIA_GET_MEDIA_PLAYBACK_STATE:
         {
             auto meta = va_arg( args, int );
             auto res = va_arg( args, char** );
             return getMeta( *m, meta, res );
         }
-        case VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_PREF:
+        case VLC_ML_MEDIA_SET_MEDIA_PLAYBACK_STATE:
         {
             auto meta = va_arg( args, int );
             auto value = va_arg( args, const char* );
             return setMeta( *m, meta, value );
         }
+        case VLC_ML_MEDIA_GET_ALL_MEDIA_PLAYBACK_STATES:
+        {
+            auto res = va_arg( args, vlc_ml_playback_states_all* );
+            return getMeta( *m, res );
+        }
+        case VLC_ML_MEDIA_SET_ALL_MEDIA_PLAYBACK_STATES:
+        {
+            auto res = va_arg( args, const vlc_ml_playback_states_all* );
+            return setMeta( *m, res );
+        }
         case VLC_ML_MEDIA_SET_THUMBNAIL:
         {
             auto mrl = va_arg( args, const char* );
-            m->setThumbnail( mrl );
+            auto sizeType = va_arg( args, int );
+            m->setThumbnail( mrl, static_cast<medialibrary::ThumbnailSizeType>( sizeType ) );
             return VLC_SUCCESS;
+        }
+        case VLC_ML_MEDIA_GENERATE_THUMBNAIL:
+        {
+            auto sizeType = va_arg( args, int );
+            auto width = va_arg( args, uint32_t );
+            auto height = va_arg( args, uint32_t );
+            auto position = va_arg( args, double );
+            auto res = m->requestThumbnail( static_cast<medialibrary::ThumbnailSizeType>( sizeType ),
+                                            width, height, position );
+            return res == true ? VLC_SUCCESS : VLC_EGENERIC;
         }
         case VLC_ML_MEDIA_ADD_EXTERNAL_MRL:
         {
@@ -901,6 +1233,13 @@ int MediaLibrary::controlMedia( int query, va_list args )
                 return VLC_EGENERIC;
             return VLC_SUCCESS;
         }
+        case VLC_ML_MEDIA_SET_TYPE:
+        {
+            auto type = va_arg( args, int );
+            if ( m->setType( static_cast<medialibrary::IMedia::Type>( type ) ) == false )
+                return VLC_EGENERIC;
+            return VLC_SUCCESS;
+        }
         default:
             vlc_assert_unreachable();
     }
@@ -916,7 +1255,7 @@ int MediaLibrary::filterListChildrenQuery( int query, int parentType )
                 case VLC_ML_PARENT_ALBUM:
                     return VLC_ML_LIST_ALBUM_TRACKS;
                 case VLC_ML_PARENT_ARTIST:
-                    return VLC_ML_LIST_ALBUM_TRACKS;
+                    return VLC_ML_LIST_ARTIST_TRACKS;
                 case VLC_ML_PARENT_SHOW:
                     return VLC_ML_LIST_SHOW_EPISODES;
                 case VLC_ML_PARENT_GENRE:
@@ -932,7 +1271,7 @@ int MediaLibrary::filterListChildrenQuery( int query, int parentType )
                 case VLC_ML_PARENT_ALBUM:
                     return VLC_ML_COUNT_ALBUM_TRACKS;
                 case VLC_ML_PARENT_ARTIST:
-                    return VLC_ML_COUNT_ALBUM_TRACKS;
+                    return VLC_ML_COUNT_ARTIST_TRACKS;
                 case VLC_ML_PARENT_SHOW:
                     return VLC_ML_COUNT_SHOW_EPISODES;
                 case VLC_ML_PARENT_GENRE:
@@ -1003,6 +1342,8 @@ int MediaLibrary::listAlbums( int listQuery, const medialibrary::QueryParameters
                 query = album->searchTracks( pattern, paramsPtr );
             else
                 query = album->tracks( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_ALBUM_TRACKS:
@@ -1021,6 +1362,8 @@ int MediaLibrary::listAlbums( int listQuery, const medialibrary::QueryParameters
         case VLC_ML_COUNT_ALBUM_ARTISTS:
         {
             auto query = album->artists( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_ALBUM_ARTISTS:
@@ -1057,6 +1400,8 @@ int MediaLibrary::listArtists( int listQuery, const medialibrary::QueryParameter
                 query = artist->searchAlbums( pattern, paramsPtr );
             else
                 query = artist->albums( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_ARTIST_ALBUMS:
@@ -1079,6 +1424,8 @@ int MediaLibrary::listArtists( int listQuery, const medialibrary::QueryParameter
                 query = artist->searchTracks( pattern, paramsPtr );
             else
                 query = artist->tracks( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_ARTIST_TRACKS:
@@ -1114,6 +1461,8 @@ int MediaLibrary::listGenre( int listQuery, const medialibrary::QueryParameters*
                 query = genre->searchArtists( pattern, paramsPtr );
             else
                 query = genre->artists( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_GENRE_ARTISTS:
@@ -1135,7 +1484,10 @@ int MediaLibrary::listGenre( int listQuery, const medialibrary::QueryParameters*
             if ( pattern != nullptr )
                 query = genre->searchTracks( pattern, paramsPtr );
             else
-                query = genre->tracks( paramsPtr );
+                query = genre->tracks( medialibrary::IGenre::TracksIncluded::All,
+                                       paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_GENRE_TRACKS:
@@ -1158,6 +1510,8 @@ int MediaLibrary::listGenre( int listQuery, const medialibrary::QueryParameters*
                 query = genre->searchAlbums( pattern, paramsPtr );
             else
                 query = genre->albums( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_GENRE_ALBUMS:
@@ -1190,6 +1544,8 @@ int MediaLibrary::listPlaylist( int listQuery, const medialibrary::QueryParamete
                 query = m_ml->searchPlaylists( pattern, paramsPtr );
             else
                 query = m_ml->playlists( paramsPtr );
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_PLAYLISTS:
@@ -1215,6 +1571,8 @@ int MediaLibrary::listPlaylist( int listQuery, const medialibrary::QueryParamete
                 query = playlist->searchMedia( pattern, paramsPtr );
             else
                 query = playlist->media();
+            if ( query == nullptr )
+                return VLC_EGENERIC;
             switch ( listQuery )
             {
                 case VLC_ML_LIST_PLAYLIST_MEDIA:
@@ -1234,10 +1592,10 @@ int MediaLibrary::listPlaylist( int listQuery, const medialibrary::QueryParamete
     }
 }
 
-static void* Get( vlc_medialibrary_module_t* module, int query, int64_t id )
+static void* Get( vlc_medialibrary_module_t* module, int query, va_list args )
 {
     auto ml = static_cast<MediaLibrary*>( module->p_sys );
-    return ml->Get( query, id );
+    return ml->Get( query, args );
 }
 
 static int List( vlc_medialibrary_module_t* module, int query,
@@ -1272,8 +1630,9 @@ static int Open( vlc_object_t* obj )
     return VLC_SUCCESS;
 }
 
-static void Close( vlc_medialibrary_module_t* module )
+static void Close( vlc_object_t* obj )
 {
+    vlc_medialibrary_module_t *module = reinterpret_cast<vlc_medialibrary_module_t*>( obj );
     MediaLibrary* p_ml = static_cast<MediaLibrary*>( module->p_sys );
     delete p_ml;
 }

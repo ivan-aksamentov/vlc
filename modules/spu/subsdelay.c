@@ -2,7 +2,6 @@
  * subsdelay.c : Subsdelay plugin for vlc
  *****************************************************************************
  * Copyright © 2011 VideoLAN
- * $Id$
  *
  * Authors: Yuval Tze <yuvaltze@gmail.com>
  *
@@ -483,8 +482,7 @@ static int SubsdelayCallback( vlc_object_t *p_this, char const *psz_var, vlc_val
     }
     else
     {
-        SubsdelayHeapUnlock( &p_sys->heap );
-        return VLC_ENOVAR;
+        vlc_assert_unreachable();
     }
 
     SubsdelayRecalculateDelays( (filter_t *) p_this );
@@ -520,8 +518,6 @@ static void SubsdelayHeapDestroy( subsdelay_heap_t *p_heap )
     }
 
     SubsdelayHeapUnlock( p_heap );
-
-    vlc_mutex_destroy( &p_heap->lock );
 }
 
 /*****************************************************************************

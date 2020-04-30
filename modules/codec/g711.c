@@ -2,7 +2,6 @@
  * g711.c: G.711 µ-law and A-law codec
  *****************************************************************************
  * Copyright (C) 2001, 2003 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -53,7 +52,7 @@ vlc_module_begin ()
     add_submodule ()
     set_description( N_("G.711 encoder") )
     set_capability( "encoder", 150 )
-    set_callbacks( EncoderOpen, NULL )
+    set_callback( EncoderOpen )
 #endif
 vlc_module_end ()
 

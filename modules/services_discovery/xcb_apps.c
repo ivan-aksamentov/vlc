@@ -35,7 +35,12 @@ typedef xcb_atom_t Atom;
 #ifdef HAVE_SEARCH_H
 # include <search.h>
 #endif
-#include <poll.h>
+#ifdef HAVE_POLL
+# include <poll.h>
+#endif
+#ifdef _WIN32
+# include <winsock2.h>
+#endif
 
 static int  Open (vlc_object_t *);
 static void Close (vlc_object_t *);
@@ -330,7 +335,7 @@ static void UpdateApps (services_discovery_t *sd)
         xcb_window_t id = *(ent++);
         struct app *app;
 
-        struct app **pa = tfind (&id, &oldnodes, cmpapp);
+        void **pa = tfind (&id, &oldnodes, cmpapp);
         if (pa != NULL) /* existing entry */
         {
             app = *pa;

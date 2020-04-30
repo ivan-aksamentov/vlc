@@ -159,7 +159,7 @@ static const staticentry_t p_list_video[] = {
         E("PLV1", "Pelco DVR MPEG-4"),
         E("QMP4", "QNAP Systems MPEG-4"),
         E("qMP4", "QNAP Systems MPEG-4"),
-        A("wMP4"), /* Seems QNAP too */
+        E("wMP4", "QNAP Systems MPEG-4"),
         /* 3ivx delta 3.5 Unsupported
          * putting it here gives extreme distorted images */
         //E("3IV1", "3ivx delta 3.5 MPEG-4 Video"),
@@ -271,6 +271,7 @@ static const staticentry_t p_list_video[] = {
         E("GAVC", "GeoVision MPEG-4 AVC"),
         E("Q264", "QNAP H.264/MPEG-4 AVC"),
         E("q264", "QNAP H.264/MPEG-4 AVC"),
+        E("w264", "QNAP H.264/MPEG-4 AVC"),
         A("UMSV"),
         A("SMV2"),
         A("tshd"),
@@ -288,6 +289,7 @@ static const staticentry_t p_list_video[] = {
         A("S263"),
         A("u263"),
         A("lsvm"),
+        E("T263", "March H263"),
         E("D263", "DEC H263"),
         E("d263", "DEC H263"),
         E("L263", "LEAD H263"),
@@ -337,9 +339,9 @@ static const staticentry_t p_list_video[] = {
         A("FLJP"),
         A("FMJP"),
         A("SJPG"),
-        A("QIVG"), /* Probably QNAP */
-        A("qIVG"), /* Probably QNAP */
-        A("wIVG"), /* Probably QNAP */
+        E("QIVG", "QNAP Motion JPEG"),
+        E("qIVG", "QNAP Motion JPEG"),
+        E("wIVG", "QNAP Motion JPEG"),
         E("AVRn", "Avid Motion JPEG"),
         E("AVDJ", "Avid Motion JPEG"),
         E("ADJV", "Avid Motion JPEG"),
@@ -483,6 +485,10 @@ static const staticentry_t p_list_video[] = {
         A("vp30"),
         A("VP31"),
         A("vp31"),
+
+    /* On2 VP4 Video Codec */
+    B(VLC_CODEC_VP4, "On2's VP4 Video"),
+        A("VP40"),
 
     /* On2  VP5, VP6 codecs */
     B(VLC_CODEC_VP5, "On2's VP5 Video"),
@@ -810,10 +816,22 @@ static const staticentry_t p_list_video[] = {
         A("Y800"),
         A("Y8  "),
 
-    B(VLC_CODEC_GREY_16L, "16 bits greyscale"),
+    B(VLC_CODEC_GREY_10L, "10 bits greyscale LE"),
+        A("G0FL"),
+
+    B(VLC_CODEC_GREY_10B, "10 bits greyscale BE"),
+        A("G0FB"),
+
+    B(VLC_CODEC_GREY_12L, "12 bits greyscale LE"),
+        A("G2FL"),
+
+    B(VLC_CODEC_GREY_12B, "12 bits greyscale BE"),
+        A("G2FB"),
+
+    B(VLC_CODEC_GREY_16L, "16 bits greyscale LE"),
         A("GRFL"),
 
-    B(VLC_CODEC_GREY_16B, "16 bits greyscale"),
+    B(VLC_CODEC_GREY_16B, "16 bits greyscale BE"),
         A("GRFB"),
 
     B(VLC_CODEC_UYVY, "Packed YUV 4:2:2, U:Y:V:Y"),
@@ -834,6 +852,11 @@ static const staticentry_t p_list_video[] = {
         A("YUYV"),
         A("YUNV"),
         A("V422"),
+
+    B(VLC_CODEC_YUV2, "Packed YUV 4:2:2, Y:U:Y:V signed"),
+        A("yuv2"),
+        A("yuvu"),
+
     B(VLC_CODEC_YVYU, "Packed YUV 4:2:2, Y:V:Y:U"),
         A("YVYU"),
 
@@ -846,8 +869,12 @@ static const staticentry_t p_list_video[] = {
     B(VLC_CODEC_V210, "10-bit 4:2:2 Component YCbCr"),
         A("v210"),
 
+    B(VLC_CODEC_Y210, "Packed 10-bit YUV 4:2:2"),
+        A("Y210"),
     B(VLC_CODEC_VUYA, "Packed YUV 4:4:4, V:U:Y:A"),
         A("VUYA"),
+    B(VLC_CODEC_Y410, "Packed 10-bit YUV 4:4:4"),
+        A("Y410"),
 
     B(VLC_CODEC_NV12, "Biplanar 4:2:0 Y/UV"),
         A("NV12"),
@@ -1030,8 +1057,13 @@ static const staticentry_t p_list_video[] = {
         A("ULRG"),
         A("ULY0"),
         A("ULY2"),
+        A("ULY4"),
         A("ULH0"),
         A("ULH2"),
+        A("ULH4"),
+        A("UQY2"),
+        A("UQRA"),
+        A("UQRG"),
 
     B(VLC_CODEC_VBLE, "VBLE Lossless"),
         A("VBLE"),
@@ -1155,6 +1187,9 @@ static const staticentry_t p_list_video[] = {
     B(VLC_CODEC_IMM4, "Infinity IMM4"),
         A("IMM4"),
 
+    B(VLC_CODEC_IMM5, "Infinity IMM5"),
+        A("IMM5"),
+
     B(VLC_CODEC_VDPAU_VIDEO_420, "4:2:0 VDPAU opaque"),
         A("VDV0"),
 
@@ -1196,6 +1231,31 @@ static const staticentry_t p_list_video[] = {
 
     B(VLC_CODEC_D3D11_OPAQUE_BGRA, "BGRA D3D11 opaque"),
         A("DAGR"),
+
+    B(VLC_CODEC_NVDEC_OPAQUE, "4:2:0 NVDEC opaque"),
+        A("NVD8"),
+
+    B(VLC_CODEC_NVDEC_OPAQUE_10B, "4:2:0 10bits NVDEC opaque"),
+        A("NVD0"),
+
+    B(VLC_CODEC_NVDEC_OPAQUE_16B, "4:2:0 16bits NVDEC opaque"),
+        A("NVD6"),
+
+    B(VLC_CODEC_NVDEC_OPAQUE_444, "4:4:4 NVDEC opaque"),
+        A("NV48"),
+
+    B(VLC_CODEC_NVDEC_OPAQUE_444_16B, "4:4:4 16bits NVDEC opaque"),
+        A("NV46"),
+
+    B(VLC_CODEC_AGM, "AmuseGraphics Movie"),
+        A("AGM0"),
+        A("AGM1"),
+        A("AGM2"),
+        A("AGM3"),
+        A("AGM4"),
+        A("AGM5"),
+        A("AGM6"),
+        A("AGM7"),
 };
 
 static const staticentry_t p_list_audio[] = {
@@ -1682,6 +1742,10 @@ static const staticentry_t p_list_spu[] = {
         A("SC27"),
 
     B(VLC_CODEC_CEA608,  "EIA-608 subtitles"),
+        A("cc1 "), /* acquisition devices */
+        A("cc2 "),
+        A("cc3 "),
+        A("cc4 "),
 
     B(VLC_CODEC_TTML, "TTML subtitles"),
         A("ttml"),

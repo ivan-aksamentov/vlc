@@ -2,7 +2,6 @@
  * mjpeg.c : demuxes mjpeg webcam http streams
  *****************************************************************************
  * Copyright (C) 2004 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Henry Jen (slowhog) <henryjen@ztune.net>
  *          Derk-Jan Hartman (thedj)
@@ -51,7 +50,7 @@ vlc_module_begin ()
     set_shortname( "MJPEG")
     set_description( N_("M-JPEG camera demuxer") )
     set_capability( "demux", 5 )
-    set_callbacks( Open, NULL )
+    set_callback( Open )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_DEMUX )
     add_float( "mjpeg-fps", 0.0, FPS_TEXT, FPS_LONGTEXT, false )
@@ -382,6 +381,7 @@ static int Open( vlc_object_t * p_this )
 
     es_format_Init( &p_sys->fmt, VIDEO_ES, VLC_CODEC_MJPG );
 
+    p_sys->fmt.i_id = 0;
     p_sys->p_es = es_out_Add( p_demux->out, &p_sys->fmt );
     if( unlikely(p_sys->p_es == NULL) )
         return VLC_ENOMEM;

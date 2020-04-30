@@ -2,7 +2,6 @@
  * lpcm.c: lpcm decoder/packetizer module
  *****************************************************************************
  * Copyright (C) 1999-2008 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Samuel Hocevar <sam@zoy.org>
  *          Henri Fallon <henri@videolan.org>
@@ -1040,7 +1039,7 @@ static int BdHeader( decoder_sys_t *p_sys,
     default:
         return -1;
     }
-    switch( (h >> 8) & 0x0f ) 
+    switch( (h >> 8) & 0x0f )
     {
     case 1:
         *pi_rate = 48000;

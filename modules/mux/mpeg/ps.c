@@ -3,7 +3,6 @@
  *       multiplexer module for vlc
  *****************************************************************************
  * Copyright (C) 2001, 2002 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Eric Petit <titer@videolan.org>
@@ -245,11 +244,6 @@ static int Control( sout_mux_t *p_mux, int i_query, va_list args )
             *pb_bool = true;
             return VLC_SUCCESS;
 
-        case MUX_GET_ADD_STREAM_WAIT:
-            pb_bool = va_arg( args, bool * );
-            *pb_bool = false;
-            return VLC_SUCCESS;
-
         case MUX_GET_MIME:
             ppsz = va_arg( args, char ** );
             *ppsz = strdup( "video/mpeg" );
@@ -481,7 +475,7 @@ static int Mux( sout_mux_t *p_mux )
         if( p_sys->i_pes_count % 30 == 0)
         {
             vlc_tick_t i_mindts = INT64_MAX;
-            for( size_t i=0; i<p_mux->i_nb_inputs; i++ )
+            for( int i=0; i < p_mux->i_nb_inputs; i++ )
             {
                 ps_stream_t *p_s = (ps_stream_t*)p_input->p_sys;
                 if( p_input->p_fmt->i_cat == SPU_ES && p_mux->i_nb_inputs > 1 )

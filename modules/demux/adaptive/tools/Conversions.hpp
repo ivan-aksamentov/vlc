@@ -38,7 +38,6 @@ class UTCTime
 {
     public:
         UTCTime(const std::string&);
-        time_t  time() const;
         vlc_tick_t mtime() const;
 
     private:
@@ -55,7 +54,9 @@ template<typename T> class Integer
                 std::istringstream in(str);
                 in.imbue(std::locale("C"));
                 in >> value;
-            } catch (int) {
+                if (in.fail() || in.bad())
+                    value = 0;
+            } catch (...) {
                 value = 0;
             }
         }

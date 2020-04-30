@@ -87,6 +87,14 @@ void vlc_ml_event_unregister_callback( vlc_medialibrary_t* p_ml,
     free( p_cb );
 }
 
+void vlc_ml_event_unregister_from_callback( vlc_medialibrary_t* p_ml,
+                                            vlc_ml_event_callback_t* p_cb )
+{
+    vlc_mutex_assert( &p_ml->lock );
+    vlc_list_remove( &p_cb->node );
+    free( p_cb );
+}
+
 static const vlc_medialibrary_callbacks_t callbacks = {
     .pf_send_event = &vlc_ml_event_send
 };
@@ -103,8 +111,7 @@ vlc_medialibrary_t* libvlc_MlCreate( libvlc_int_t* p_libvlc  )
     p_ml->m.p_module = module_need( &p_ml->m, "medialibrary", NULL, false );
     if ( p_ml->m.p_module == NULL )
     {
-        vlc_mutex_destroy( &p_ml->lock );
-        vlc_object_release( &p_ml->m );
+        vlc_object_delete(&p_ml->m);
         return NULL;
     }
     return p_ml;
@@ -115,15 +122,20 @@ void libvlc_MlRelease( vlc_medialibrary_t* p_ml )
     assert( p_ml != NULL );
     module_unneed( &p_ml->m, p_ml->m.p_module );
     assert( vlc_list_is_empty( &p_ml->cbs ) );
-    vlc_mutex_destroy( &p_ml->lock );
-    vlc_object_release( &p_ml->m );
+    vlc_object_delete(&p_ml->m);
 }
 
 #undef vlc_ml_instance_get
 vlc_medialibrary_t* vlc_ml_instance_get( vlc_object_t* p_obj )
 {
-    libvlc_priv_t* p_priv = libvlc_priv( p_obj->obj.libvlc );
+    libvlc_priv_t* p_priv = libvlc_priv( vlc_object_instance(p_obj) );
     return p_priv->p_media_library;
+}
+
+static void vlc_ml_thumbnails_release( vlc_ml_thumbnail_t *p_thumbnails )
+{
+    for ( int i = 0; i < VLC_ML_THUMBNAIL_SIZE_COUNT; ++i )
+        free( p_thumbnails[i].psz_mrl );
 }
 
 static void vlc_ml_show_release_inner( vlc_ml_show_t* p_show )
@@ -161,7 +173,7 @@ static void vlc_ml_media_release_inner( vlc_ml_media_t* p_media )
     vlc_ml_file_list_release( p_media->p_files );
     vlc_ml_media_release_tracks_inner( p_media->p_tracks );
     free( p_media->psz_title );
-    free( p_media->psz_artwork_mrl );
+    vlc_ml_thumbnails_release( p_media->thumbnails );
     switch( p_media->i_subtype )
     {
         case VLC_ML_MEDIA_SUBTYPE_ALBUMTRACK:
@@ -181,7 +193,7 @@ static void vlc_ml_media_release_inner( vlc_ml_media_t* p_media )
 
 static void vlc_ml_artist_release_inner( vlc_ml_artist_t* p_artist )
 {
-    free( p_artist->psz_artwork_mrl );
+    vlc_ml_thumbnails_release( p_artist->thumbnails );
     free( p_artist->psz_name );
     free( p_artist->psz_shortbio );
     free( p_artist->psz_mb_id );
@@ -197,8 +209,8 @@ void vlc_ml_artist_release( vlc_ml_artist_t* p_artist )
 
 static void vlc_ml_album_release_inner( vlc_ml_album_t* p_album )
 {
+    vlc_ml_thumbnails_release( p_album->thumbnails );
     free( p_album->psz_artist );
-    free( p_album->psz_artwork_mrl );
     free( p_album->psz_summary );
     free( p_album->psz_title );
 }
@@ -325,10 +337,25 @@ void vlc_ml_entry_point_list_release( vlc_ml_entry_point_list_t* p_list )
     free( p_list );
 }
 
-void* vlc_ml_get( vlc_medialibrary_t* p_ml, int i_query, int64_t i_id )
+void vlc_ml_playback_states_all_release( vlc_ml_playback_states_all* prefs )
+{
+    free( prefs->current_video_track );
+    free( prefs->current_audio_track );
+    free( prefs->current_subtitle_track );
+    free( prefs->aspect_ratio );
+    free( prefs->crop );
+    free( prefs->deinterlace );
+    free( prefs->video_filter );
+}
+
+void* vlc_ml_get( vlc_medialibrary_t* p_ml, int i_query, ... )
 {
     assert( p_ml != NULL );
-    return p_ml->m.pf_get( &p_ml->m, i_query, i_id );
+    va_list args;
+    va_start( args, i_query );
+    void* res = p_ml->m.pf_get( &p_ml->m, i_query, args );
+    va_end( args );
+    return res;
 }
 
 int vlc_ml_control( vlc_medialibrary_t* p_ml, int i_query, ... )

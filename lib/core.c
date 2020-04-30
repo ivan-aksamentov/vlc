@@ -2,7 +2,6 @@
  * core.c: Core libvlc new API functions : initialization
  *****************************************************************************
  * Copyright (C) 2005 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Clément Stenac <zorglub@videolan.org>
  *
@@ -35,7 +34,6 @@
 #include <limits.h>
 #include <assert.h>
 
-#include "../src/revision.c"
 
 libvlc_instance_t * libvlc_new( int argc, const char *const *argv )
 {
@@ -95,7 +93,6 @@ void libvlc_release( libvlc_instance_t *p_instance )
 
     if( refs == 0 )
     {
-        vlc_mutex_destroy( lock );
         libvlc_Quit( p_instance->p_libvlc_int );
         libvlc_InternalCleanup( p_instance->p_libvlc_int );
         libvlc_InternalDestroy( p_instance->p_libvlc_int );

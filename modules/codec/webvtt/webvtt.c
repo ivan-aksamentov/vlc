@@ -45,7 +45,7 @@ vlc_module_begin ()
     add_submodule()
         set_shortname( "WEBVTT" )
         set_description( N_("WEBVTT subtitles parser") )
-        set_capability( "demux", 3 )
+        set_capability( "demux", 11 )
         set_category( CAT_INPUT )
         set_subcategory( SUBCAT_INPUT_DEMUX )
         set_callbacks( webvtt_OpenDemux, webvtt_CloseDemux )
@@ -152,7 +152,8 @@ void webvtt_text_parser_Delete( webvtt_text_parser_t *p )
 static void forward_line( webvtt_text_parser_t *p, const char *psz_line, bool b_new )
 {
     if( p->pf_header )
-        p->pf_header( p->priv, p->section, b_new, psz_line );
+        p->pf_header( p->priv, (enum webvtt_header_line_e)p->section,
+                      b_new, psz_line );
 }
 
 void webvtt_text_parser_Feed( webvtt_text_parser_t *p, char *psz_line )
@@ -247,7 +248,7 @@ void webvtt_text_parser_Feed( webvtt_text_parser_t *p, char *psz_line )
             if( webvtt_scan_time( p->reads[1], &i_start ) &&
                 webvtt_scan_time( psz_split + 5,  &i_stop ) && i_start <= i_stop )
             {
-                const char *psz_attrs = strchr( psz_split + 5 + 9, ' ' );
+                const char *psz_attrs = strchr( psz_split + 5 + 5, ' ' );
                 p->p_cue = ( p->pf_get_cue ) ? p->pf_get_cue( p->priv ) : NULL;
                 if( p->p_cue )
                 {

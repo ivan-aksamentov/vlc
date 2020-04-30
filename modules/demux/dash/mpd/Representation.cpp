@@ -30,8 +30,8 @@
 #include "Representation.h"
 #include "AdaptationSet.h"
 #include "MPD.h"
-#include "../adaptive/playlist/SegmentTemplate.h"
-#include "../adaptive/playlist/SegmentTimeline.h"
+#include "../../adaptive/playlist/SegmentTemplate.h"
+#include "../../adaptive/playlist/SegmentTimeline.h"
 #include "TemplatedUri.hpp"
 
 using namespace dash::mpd;
@@ -57,6 +57,8 @@ std::string Representation::contextualize(size_t number, const std::string &comp
                                           const BaseSegmentTemplate *basetempl) const
 {
     std::string str(component);
+    if(!basetempl)
+        return str;
 
     const MediaSegmentTemplate *templ = dynamic_cast<const MediaSegmentTemplate *>(basetempl);
 
@@ -104,9 +106,10 @@ std::string Representation::contextualize(size_t number, const std::string &comp
 stime_t Representation::getScaledTimeBySegmentNumber(uint64_t index, const MediaSegmentTemplate *templ) const
 {
     stime_t time = 0;
-    if(templ->segmentTimeline.Get())
+    const SegmentTimeline *tl = templ->inheritSegmentTimeline();
+    if(tl)
     {
-        time = templ->segmentTimeline.Get()->getScaledPlaybackTimeByElementNumber(index);
+        time = tl->getScaledPlaybackTimeByElementNumber(index);
     }
     else if(templ->duration.Get())
     {

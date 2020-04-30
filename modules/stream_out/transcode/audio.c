@@ -2,7 +2,6 @@
  * audio.c: transcoding stream output module (audio)
  *****************************************************************************
  * Copyright (C) 2003-2009 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Gildas Bazin <gbazin@videolan.org>
@@ -33,7 +32,6 @@
 
 #include <vlc_common.h>
 #include <vlc_aout.h>
-#include <vlc_input.h>
 #include <vlc_meta.h>
 #include <vlc_modules.h>
 #include <vlc_sout.h>
@@ -45,11 +43,11 @@ static int audio_update_format( decoder_t *p_dec )
     struct decoder_owner *p_owner = dec_get_owner( p_dec );
     sout_stream_id_sys_t *id = p_owner->id;
 
-    if( !AOUT_FMT_LINEAR(&p_dec->fmt_out.audio) )
-        return VLC_EGENERIC;
-
     p_dec->fmt_out.audio.i_format = p_dec->fmt_out.i_codec;
     aout_FormatPrepare( &p_dec->fmt_out.audio );
+
+    if( !AOUT_FMT_LINEAR(&p_dec->fmt_out.audio) )
+        return VLC_EGENERIC;
 
     vlc_mutex_lock(&id->fifo.lock);
     es_format_Clean( &id->decoder_out );
@@ -71,7 +69,7 @@ static int transcode_audio_filters_init( sout_stream_t *p_stream,
     var_Create( p_stream, "audio-filter", VLC_VAR_STRING );
     if( p_cfg->psz_filters )
         var_SetString( p_stream, "audio-filter", p_cfg->psz_filters );
-    *pp_chain = aout_FiltersNew( p_stream, p_dec_out, p_enc_in, NULL, NULL );
+    *pp_chain = aout_FiltersNew( p_stream, p_dec_out, p_enc_in, NULL );
     var_Destroy( p_stream, "audio-filter" );
     var_Destroy( p_stream, "audio-time-stretch" );
     return ( *pp_chain != NULL ) ? VLC_SUCCESS : VLC_EGENERIC;
@@ -167,7 +165,7 @@ int transcode_audio_init( sout_stream_t *p_stream, const es_format_t *p_fmt,
      * This should be enough to initialize the encoder for the first time (it
      * will be reloaded when all informations from the decoder are available).
      * */
-    if( transcode_encoder_test( VLC_OBJECT(p_stream),
+    if( transcode_encoder_test( sout_EncoderCreate(p_stream, sizeof(encoder_t)),
                                 id->p_enccfg,
                                 &id->decoder_out,
                                 id->p_decoder->fmt_out.i_codec,
@@ -185,7 +183,7 @@ int transcode_audio_init( sout_stream_t *p_stream, const es_format_t *p_fmt,
 
     vlc_mutex_unlock(&id->fifo.lock);
 
-    id->encoder = transcode_encoder_new( VLC_OBJECT(p_stream), &encoder_tested_fmt_in );
+    id->encoder = transcode_encoder_new( sout_EncoderCreate(p_stream, sizeof(encoder_t)), &encoder_tested_fmt_in );
     if( !id->encoder )
     {
         module_unneed( id->p_decoder, id->p_decoder->p_module );
@@ -200,17 +198,8 @@ int transcode_audio_init( sout_stream_t *p_stream, const es_format_t *p_fmt,
     return VLC_SUCCESS;
 }
 
-void transcode_audio_clean( sout_stream_id_sys_t *id )
+void transcode_audio_clean( sout_stream_t *p_stream, sout_stream_id_sys_t *id )
 {
-    /* Close decoder */
-    if( id->p_decoder->p_module )
-        module_unneed( id->p_decoder, id->p_decoder->p_module );
-    id->p_decoder->p_module = NULL;
-
-    if( id->p_decoder->p_description )
-        vlc_meta_Delete( id->p_decoder->p_description );
-    id->p_decoder->p_description = NULL;
-
     /* Close encoder */
     transcode_encoder_close( id->encoder );
     transcode_encoder_delete( id->encoder );
@@ -219,7 +208,7 @@ void transcode_audio_clean( sout_stream_id_sys_t *id )
 
     /* Close filters */
     if( id->p_af_chain != NULL )
-        aout_FiltersDelete( (vlc_object_t *)NULL, id->p_af_chain );
+        aout_FiltersDelete( p_stream, id->p_af_chain );
 }
 
 static bool transcode_audio_format_IsSimilar( const audio_format_t *a,
@@ -263,8 +252,8 @@ int transcode_audio_process( sout_stream_t *p_stream,
         {
             if( !transcode_encoder_opened( id->encoder ) )
             {
-                transcode_encoder_audio_configure( VLC_OBJECT(p_stream), id->p_enccfg,
-                                                   &id->decoder_out.audio, id->encoder );
+                transcode_encoder_audio_configure( id->p_enccfg,
+                                                   &id->decoder_out.audio, id->encoder, true );
                 id->fmt_input_audio = id->decoder_out.audio;
             }
             else
@@ -276,6 +265,7 @@ int transcode_audio_process( sout_stream_t *p_stream,
                     aout_FiltersDelete( p_stream, id->p_af_chain );
                     id->p_af_chain = NULL;
                 }
+                id->fmt_input_audio = id->decoder_out.audio;
             }
 
             if( !id->p_af_chain &&
@@ -338,14 +328,14 @@ int transcode_audio_process( sout_stream_t *p_stream,
 
         /* Run filter chain */
         p_audio_buf = aout_FiltersPlay( id->p_af_chain, p_audio_buf, 1.f );
-        if( !p_audio_buf )
-            goto error;
+        if( p_audio_buf  )
+        {
+            p_audio_buf->i_dts = p_audio_buf->i_pts;
 
-        p_audio_buf->i_dts = p_audio_buf->i_pts;
-
-        block_t *p_block = transcode_encoder_encode( id->encoder, p_audio_buf );
-        block_ChainAppend( out, p_block );
-        block_Release( p_audio_buf );
+            block_t *p_block = transcode_encoder_encode( id->encoder, p_audio_buf );
+            block_ChainAppend( out, p_block );
+            block_Release( p_audio_buf );
+        }
         continue;
 error:
         if( p_audio_buf )

@@ -95,7 +95,8 @@ namespace adaptive
                 ssize_t         readChunk   (void *p_buffer, size_t len);
                 enum RequestStatus parseReply();
                 std::string readLine();
-                char * psz_useragent;
+                std::string useragent;
+                std::string referer;
 
                 AuthStorage        *authStorage;
                 ConnectionParams    locationparams;

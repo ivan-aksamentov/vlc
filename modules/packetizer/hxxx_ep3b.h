@@ -35,7 +35,7 @@ static inline uint8_t *hxxx_ep3b_to_rbsp( uint8_t *p, uint8_t *end, unsigned *pi
             if( (*pi_prev & 0x06) == 0x06 )
             {
                 ++p;
-                *pi_prev = ((*pi_prev >> 1) << 1) | (!*p);
+                *pi_prev = !*p;
             }
         }
     }
@@ -126,7 +126,7 @@ static size_t hxxx_bsfw_byte_remain_ep3b( const bs_t *s )
     struct hxxx_bsfw_ep3b_ctx_s *ctx = (struct hxxx_bsfw_ep3b_ctx_s *) s->p_priv;
     if( ctx->i_bytesize == 0 && s->p_start != s->p_end )
         ctx->i_bytesize = hxxx_ep3b_total_size( s->p_start, s->p_end );
-    return ctx->i_bytesize - ctx->i_bytepos;
+    return (ctx->i_bytesize > ctx->i_bytepos) ? ctx->i_bytesize - ctx->i_bytepos : 0;
 }
 
 static const bs_byte_callbacks_t hxxx_bsfw_ep3b_callbacks =

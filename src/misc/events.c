@@ -4,7 +4,6 @@
  * It is more lightweight than variable based callback.
  *****************************************************************************
  * Copyright (C) 1998-2005 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Pierre d'Herbemont <pdherbemont # videolan.org >
  *
@@ -80,8 +79,6 @@ void vlc_event_manager_init( vlc_event_manager_t * p_em, void * p_obj )
 void vlc_event_manager_fini( vlc_event_manager_t * p_em )
 {
     struct vlc_event_listener_t * listener;
-
-    vlc_mutex_destroy( &p_em->lock );
 
     for( size_t i = 0; i < ARRAY_SIZE(p_em->events); i++ )
     {

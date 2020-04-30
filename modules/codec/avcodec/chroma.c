@@ -2,7 +2,6 @@
  * chroma.c: libavutil <-> libvlc conversion routines
  *****************************************************************************
  * Copyright (C) 1999-2008 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Gildas Bazin <gbazin@videolan.org>
@@ -95,6 +94,9 @@ static const struct
 #ifdef AV_PIX_FMT_P010
     {VLC_CODEC_P010, AV_PIX_FMT_P010, 0, 0, 0 },
 #endif
+#ifdef AV_PIX_FMT_P016
+    {VLC_CODEC_P016, AV_PIX_FMT_P016, 0, 0, 0 },
+#endif
 
     {VLC_CODEC_I422_9L, AV_PIX_FMT_YUV422P9LE, 0, 0, 0 },
     {VLC_CODEC_I422_9B, AV_PIX_FMT_YUV422P9BE, 0, 0, 0 },
@@ -157,6 +159,14 @@ static const struct
     {VLC_CODEC_ARGB, AV_PIX_FMT_ARGB, 0, 0, 0 },
     {VLC_CODEC_BGRA, AV_PIX_FMT_BGRA, 0, 0, 0 },
     {VLC_CODEC_GREY, AV_PIX_FMT_GRAY8, 0, 0, 0},
+#ifdef AV_PIX_FMT_GRAY10
+    {VLC_CODEC_GREY_10L, AV_PIX_FMT_GRAY10LE, 0, 0, 0},
+    {VLC_CODEC_GREY_10B, AV_PIX_FMT_GRAY10BE, 0, 0, 0},
+#endif
+#ifdef AV_PIX_FMT_GRAY12
+    {VLC_CODEC_GREY_12L, AV_PIX_FMT_GRAY12LE, 0, 0, 0},
+    {VLC_CODEC_GREY_12B, AV_PIX_FMT_GRAY12BE, 0, 0, 0},
+#endif
     {VLC_CODEC_GREY_16L, AV_PIX_FMT_GRAY16LE, 0, 0, 0},
     {VLC_CODEC_GREY_16B, AV_PIX_FMT_GRAY16BE, 0, 0, 0},
 
@@ -178,6 +188,7 @@ static const struct
 #endif
     {VLC_CODEC_GBR_PLANAR_16L, AV_PIX_FMT_GBRP16LE, 0, 0, 0 },
     {VLC_CODEC_GBR_PLANAR_16B, AV_PIX_FMT_GBRP16BE, 0, 0, 0 },
+    {VLC_CODEC_GBRA_PLANAR, AV_PIX_FMT_GBRAP, 0, 0, 0 },
 #ifdef AV_PIX_FMT_GBRAP10 /* 56, 1, 0 / 55, 25, 100 */
     {VLC_CODEC_GBRA_PLANAR_10L, AV_PIX_FMT_GBRAP10LE, 0, 0, 0 },
     {VLC_CODEC_GBRA_PLANAR_10B, AV_PIX_FMT_GBRAP10BE, 0, 0, 0 },

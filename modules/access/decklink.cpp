@@ -34,8 +34,13 @@
 #include <arpa/inet.h>
 #endif
 
-#include <DeckLinkAPI.h>
+#include "vlc_decklink.h"
 #include <DeckLinkAPIDispatch.cpp>
+#include <DeckLinkAPIVersion.h>
+#if BLACKMAGIC_DECKLINK_API_VERSION < 0x0b010000
+ #define IID_IDeckLinkProfileAttributes IID_IDeckLinkAttributes
+ #define IDeckLinkProfileAttributes IDeckLinkAttributes
+#endif
 
 #include "sdi.h"
 
@@ -140,7 +145,7 @@ struct demux_sys_t
     /* We need to hold onto the IDeckLinkConfiguration object, or our settings will not apply.
        See section 2.4.15 of the Blackmagic DeckLink SDK documentation. */
     IDeckLinkConfiguration *config;
-    IDeckLinkAttributes *attributes;
+    IDeckLinkProfileAttributes *attributes;
 
     bool autodetect;
 
@@ -261,11 +266,16 @@ public:
         if( !(events & bmdVideoInputDisplayModeChanged ))
             return S_OK;
 
-        const char *mode_name;
-        if (mode->GetName(&mode_name) != S_OK)
-            mode_name = "unknown";
+        decklink_str_t tmp_name;
+        char *mode_name = NULL;
+        if (mode->GetName(&tmp_name) == S_OK) {
+            mode_name = DECKLINK_STRDUP(tmp_name);
+            DECKLINK_FREE(tmp_name);
+        }
 
-        msg_Dbg(demux_, "Video input format changed to %s", mode_name);
+        msg_Dbg(demux_, "Video input format changed to %s",
+            (mode_name) ? mode_name : "unknown");
+        free(mode_name);
         if (!sys->autodetect) {
             msg_Err(demux_, "Video format detection disabled");
             return S_OK;
@@ -311,8 +321,8 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(IDeckLinkVideoInputFrame
 
     if (videoFrame) {
         if (videoFrame->GetFlags() & bmdFrameHasNoInputSource) {
-            msg_Warn(demux_, "No input signal detected (%dx%d)",
-			    videoFrame->GetWidth(), videoFrame->GetHeight());
+            msg_Warn(demux_, "No input signal detected (%ldx%ld)",
+                     videoFrame->GetWidth(), videoFrame->GetHeight());
             return S_OK;
         }
 
@@ -555,11 +565,17 @@ static int Open(vlc_object_t *p_this)
         }
     }
 
-    const char *model_name;
-    if (sys->card->GetModelName(&model_name) != S_OK)
-        model_name = "unknown";
+    decklink_str_t tmp_name;
+    char *model_name;
+    if (sys->card->GetModelName(&tmp_name) != S_OK) {
+        model_name = strdup("unknown");
+    } else {
+        model_name = DECKLINK_STRDUP(tmp_name);
+        DECKLINK_FREE(tmp_name);
+    }
 
     msg_Dbg(demux, "Opened DeckLink PCI card %d (%s)", card_index, model_name);
+    free(model_name);
 
     if (sys->card->QueryInterface(IID_IDeckLinkInput, (void**)&sys->input) != S_OK) {
         msg_Err(demux, "Card has no inputs");
@@ -572,7 +588,7 @@ static int Open(vlc_object_t *p_this)
         goto finish;
     }
 
-    if (sys->card->QueryInterface(IID_IDeckLinkAttributes, (void**)&sys->attributes) != S_OK) {
+    if (sys->card->QueryInterface(IID_IDeckLinkProfileAttributes, (void**)&sys->attributes) != S_OK) {
         msg_Err(demux, "Failed to get attributes interface");
         goto finish;
     }
@@ -636,9 +652,14 @@ static int Open(vlc_object_t *p_this)
         uint32_t field_flags;
         const char *field = GetFieldDominance(m->GetFieldDominance(), &field_flags);
         BMDDisplayMode id = ntohl(m->GetDisplayMode());
+        decklink_str_t tmp_name;
 
-        if (m->GetName(&mode_name) != S_OK)
+        if (m->GetName(&tmp_name) != S_OK) {
             mode_name = "unknown";
+        } else {
+            mode_name = DECKLINK_STRDUP(tmp_name);
+            DECKLINK_FREE(tmp_name);
+        }
         if (m->GetFrameRate(&frame_duration, &time_scale) != S_OK) {
             time_scale = 0;
             frame_duration = 1;
@@ -761,7 +782,6 @@ static void Close(vlc_object_t *p_this)
     if (sys->delegate)
         sys->delegate->Release();
 
-    vlc_mutex_destroy(&sys->pts_lock);
     free(sys);
 }
 

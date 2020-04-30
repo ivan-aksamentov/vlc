@@ -58,6 +58,9 @@ enum h264_level_numbers_e
     H264_LEVEL_NUMBER_5   = 50,
     H264_LEVEL_NUMBER_5_1 = 51,
     H264_LEVEL_NUMBER_5_2 = 52,
+    H264_LEVEL_NUMBER_6   = 60,
+    H264_LEVEL_NUMBER_6_1 = 61,
+    H264_LEVEL_NUMBER_6_2 = 62,
 };
 
 const struct
@@ -82,6 +85,9 @@ const struct
     { H264_LEVEL_NUMBER_5,   { 110400 } },
     { H264_LEVEL_NUMBER_5_1, { 184320 } },
     { H264_LEVEL_NUMBER_5_2, { 184320 } },
+    { H264_LEVEL_NUMBER_6,   { 696320 } },
+    { H264_LEVEL_NUMBER_6_1, { 696320 } },
+    { H264_LEVEL_NUMBER_6_2, { 696320 } },
 };
 
 /*
@@ -734,6 +740,9 @@ bool h264_get_dpb_values( const h264_sequence_parameter_set_t *p_sps,
     {
         switch( p_sps->i_profile ) /* E-2.1 */
         {
+            case PROFILE_H264_BASELINE:
+                i_max_num_reorder_frames = 0; /* only I & P */
+                break;
             case PROFILE_H264_CAVLC_INTRA:
             case PROFILE_H264_SVC_HIGH:
             case PROFILE_H264_HIGH:
@@ -802,7 +811,7 @@ bool h264_get_colorimetry( const h264_sequence_parameter_set_t *p_sps,
                            video_color_primaries_t *p_primaries,
                            video_transfer_func_t *p_transfer,
                            video_color_space_t *p_colorspace,
-                           bool *p_full_range )
+                           video_color_range_t *p_full_range )
 {
     if( !p_sps->vui.b_valid )
         return false;
@@ -812,7 +821,7 @@ bool h264_get_colorimetry( const h264_sequence_parameter_set_t *p_sps,
         iso_23001_8_tc_to_vlc_xfer( p_sps->vui.colour.i_transfer_characteristics );
     *p_colorspace =
         iso_23001_8_mc_to_vlc_coeffs( p_sps->vui.colour.i_matrix_coefficients );
-    *p_full_range = p_sps->vui.colour.b_full_range;
+    *p_full_range = p_sps->vui.colour.b_full_range ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
     return true;
 }
 

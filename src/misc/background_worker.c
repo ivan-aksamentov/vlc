@@ -22,7 +22,6 @@
 
 #include <assert.h>
 #include <vlc_common.h>
-#include <vlc_atomic.h>
 #include <vlc_list.h>
 #include <vlc_threads.h>
 
@@ -86,7 +85,7 @@ static void task_Destroy(struct background_worker *worker, struct task *task)
 
 static struct task *QueueTake(struct background_worker *worker, int timeout_ms)
 {
-    vlc_assert_locked(&worker->lock);
+    vlc_mutex_assert(&worker->lock);
 
     vlc_tick_t deadline = vlc_tick_now() + VLC_TICK_FROM_MS(timeout_ms);
     bool timeout = false;
@@ -107,14 +106,14 @@ static struct task *QueueTake(struct background_worker *worker, int timeout_ms)
 
 static void QueuePush(struct background_worker *worker, struct task *task)
 {
-    vlc_assert_locked(&worker->lock);
+    vlc_mutex_assert(&worker->lock);
     vlc_list_append(&task->node, &worker->queue);
     vlc_cond_signal(&worker->queue_wait);
 }
 
 static void QueueRemoveAll(struct background_worker *worker, void *id)
 {
-    vlc_assert_locked(&worker->lock);
+    vlc_mutex_assert(&worker->lock);
     struct task *task;
     vlc_list_foreach(task, &worker->queue, node)
     {
@@ -143,7 +142,6 @@ background_thread_Create(struct background_worker *owner)
 
 static void background_thread_Destroy(struct background_thread *thread)
 {
-    vlc_cond_destroy(&thread->probe_cancel_wait);
     free(thread);
 }
 
@@ -170,21 +168,20 @@ static struct background_worker *background_worker_Create(void *owner,
 
 static void background_worker_Destroy(struct background_worker *worker)
 {
-    vlc_cond_destroy(&worker->queue_wait);
-    vlc_mutex_destroy(&worker->lock);
     free(worker);
 }
 
 static void TerminateTask(struct background_thread *thread, struct task *task)
 {
     struct background_worker *worker = thread->owner;
-    task_Destroy(worker, task);
 
     vlc_mutex_lock(&worker->lock);
     thread->task = NULL;
     worker->uncompleted--;
     assert(worker->uncompleted >= 0);
     vlc_mutex_unlock(&worker->lock);
+
+    task_Destroy(worker, task);
 }
 
 static void RemoveThread(struct background_thread *thread)
@@ -268,7 +265,7 @@ static void* Thread( void* data )
 
 static bool SpawnThread(struct background_worker *worker)
 {
-    vlc_assert_locked(&worker->lock);
+    vlc_mutex_assert(&worker->lock);
 
     struct background_thread *thread = background_thread_Create(worker);
     if (!thread)
@@ -311,7 +308,7 @@ int background_worker_Push( struct background_worker* worker, void* entity,
 static void BackgroundWorkerCancelLocked(struct background_worker *worker,
                                          void *id)
 {
-    vlc_assert_locked(&worker->lock);
+    vlc_mutex_assert(&worker->lock);
 
     QueueRemoveAll(worker, id);
 

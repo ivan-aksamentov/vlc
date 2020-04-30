@@ -2,7 +2,6 @@
  * flac.c : FLAC demux module for vlc
  *****************************************************************************
  * Copyright (C) 2001-2008 VLC authors and VideoLAN
- * $Id$
  *
  * Authors: Gildas Bazin <gbazin@netcourrier.com>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -38,6 +37,7 @@
 #include <vlc_charset.h>              /* EnsureUTF8 */
 
 #include <assert.h>
+#include <limits.h>
 #include "xiph_metadata.h"            /* vorbis comments */
 #include "../packetizer/flac.h"
 
@@ -175,6 +175,7 @@ static int Open( vlc_object_t * p_this )
         vlc_meta_Set( p_sys->p_meta, vlc_meta_ArtworkURL, psz_url );
     }
 
+    p_sys->p_packetizer->fmt_in.i_id = 0;
     p_sys->p_es = es_out_Add( p_demux->out, &p_sys->p_packetizer->fmt_in );
     if( !p_sys->p_es )
         goto error;
@@ -224,10 +225,11 @@ static block_t *GetPacketizedBlock( decoder_t *p_packetizer,
     block_t *p_block = p_packetizer->pf_packetize( p_packetizer, pp_current_block );
     if( p_block )
     {
-        if( p_block->i_buffer >= FLAC_HEADER_SIZE_MAX )
+        if( p_block->i_buffer >= FLAC_HEADER_SIZE_MIN && p_block->i_buffer < INT_MAX )
         {
-            struct flac_header_info headerinfo;
-            int i_ret = FLAC_ParseSyncInfo( p_block->p_buffer, streaminfo, NULL, &headerinfo );
+            struct flac_header_info headerinfo = { .i_pts = VLC_TICK_INVALID };
+            int i_ret = FLAC_ParseSyncInfo( p_block->p_buffer, p_block->i_buffer,
+                                            streaminfo, NULL, &headerinfo );
             assert( i_ret != 0 ); /* Same as packetizer */
             /* Use Frame PTS, not the interpolated one */
             p_block->i_dts = p_block->i_pts = headerinfo.i_pts;
@@ -271,7 +273,7 @@ static int RefineSeek( demux_t *p_demux, vlc_tick_t i_time, double i_bytemicrora
     unsigned i_frame_size = FLAC_FRAME_SIZE_MIN;
 
     bool b_canfastseek = false;
-    (int) vlc_stream_Control( p_demux->s, STREAM_CAN_FASTSEEK, &b_canfastseek );
+    vlc_stream_Control( p_demux->s, STREAM_CAN_FASTSEEK, &b_canfastseek );
 
     uint64_t i_start_pos = vlc_stream_Tell( p_demux->s );
 
@@ -391,7 +393,8 @@ static int Demux( demux_t *p_demux )
             if( unlikely(p_sys->i_pts == VLC_TICK_INVALID) )
                 es_out_SetPCR( p_demux->out, __MAX(p_block_out->i_dts - 1, VLC_TICK_0) );
 
-            p_sys->i_pts = p_block_out->i_dts;
+            if(p_block_out->i_dts != VLC_TICK_INVALID)
+                p_sys->i_pts = p_block_out->i_dts;
 
             es_out_Send( p_demux->out, p_sys->p_es, p_block_out );
 
@@ -832,4 +835,3 @@ static void ParsePicture( demux_t *p_demux, const uint8_t *p_data, size_t i_data
 
     TAB_APPEND( p_sys->i_attachments, p_sys->attachments, p_attachment );
 }
-
